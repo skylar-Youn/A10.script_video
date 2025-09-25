@@ -63,17 +63,6 @@ class ShortsScriptGenerator(BaseGenerator):
                     scene_tag=f"이미지 {scene_tag}",
                 )
             )
-        if not subtitles:
-            for i in range(6):
-                subtitles.append(
-                    SubtitleSegment(
-                        index=i + 1,
-                        start=i * 10,
-                        end=(i + 1) * 10,
-                        text=f"Mock subtitle {i + 1} for {raw[:30]}",
-                        scene_tag=f"이미지 {i + 1}",
-                    )
-                )
         return subtitles
 
     def _parse_images(self, raw: str, subtitles: list[SubtitleSegment]) -> list[ImagePrompt]:
@@ -96,17 +85,6 @@ class ShortsScriptGenerator(BaseGenerator):
                     end=end,
                 )
             )
-        if not prompts:
-            for i in range(max(len(subtitles), 1)):
-                start, end = self._subtitle_window(subtitles, i)
-                prompts.append(
-                    ImagePrompt(
-                        tag=f"이미지 {i+1}",
-                        description="Mock image description",
-                        start=start,
-                        end=end,
-                    )
-                )
         return prompts
 
     def _subtitle_window(self, subtitles: list[SubtitleSegment], index: int) -> Tuple[float, float]:

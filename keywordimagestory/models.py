@@ -28,6 +28,13 @@ class TitleItem(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ImageStoryItem(BaseModel):
+    index: int
+    title: str
+    description: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class SubtitleSegment(BaseModel):
     index: int
     start: float
@@ -134,3 +141,29 @@ class TimelineSelection:
     subtitle_indices: list[int]
     audio_range: tuple[float, float] | None = None
     scene_indices: list[int] | None = None
+
+
+class ToolType(str, Enum):
+    story_keywords = "story_keywords"
+    image_story = "image_story"
+    shorts_script = "shorts_script"
+    shorts_scenes = "shorts_scenes"
+
+    @classmethod
+    def _missing_(cls, value: object):  # type: ignore[override]
+        if isinstance(value, str) and value == "video_titles":
+            return cls.image_story
+        return super()._missing_(value)
+
+
+class ToolRecord(BaseModel):
+    id: str
+    tool: ToolType
+    title: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    payload: dict[str, Any]
+
+
+class ToolRecordCreate(BaseModel):
+    title: str
+    payload: dict[str, Any]

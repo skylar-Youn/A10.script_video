@@ -19,14 +19,63 @@ const state = {
     { id: "glitch", name: "글리치" },
     { id: "fade-blur", name: "페이드+블러" }
   ],
-  textEffects: ["normal", "outline", "shadow", "glow", "gradient", "typewriter", "wave", "pulse", "shake", "fade"]
+  textEffects: ["normal", "outline", "shadow", "glow", "gradient", "typewriter", "wave", "pulse", "shake", "fade"],
+  latestResults: {
+    story_keywords: null,
+    image_story: null,
+    shorts_script: null,
+    shorts_scenes: null
+  },
+  savedRecords: {
+    story_keywords: [],
+    image_story: [],
+    shorts_script: [],
+    shorts_scenes: []
+  },
+  activeRecords: {
+    story_keywords: null,
+    image_story: null,
+    shorts_script: null,
+    shorts_scenes: null
+  },
+  checkedRecords: {
+    story_keywords: new Set(),
+    image_story: new Set(),
+    shorts_script: new Set(),
+    shorts_scenes: new Set()
+  },
+  lastRequests: {
+    story_keywords: null,
+    image_story: null,
+    shorts_script: null,
+    shorts_scenes: null
+  }
+};
+
+const TOOL_KEYS = {
+  STORY: "story_keywords",
+  IMAGE_STORY: "image_story",
+  SCRIPT: "shorts_script",
+  SCENES: "shorts_scenes"
+};
+
+const GENERATION_ENDPOINTS = {
+  [TOOL_KEYS.SCRIPT]: { url: "/api/generate/shorts-script", type: "json" },
+  [TOOL_KEYS.SCENES]: { url: "/api/generate/shorts-scenes", type: "json" }
 };
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options
-  });
+  const init = { ...options };
+  const headers = new Headers(init.headers || {});
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (headers.size) {
+    init.headers = headers;
+  } else {
+    delete init.headers;
+  }
+  const response = await fetch(path, init);
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
     throw new Error(detail.detail || response.statusText);
@@ -68,6 +117,16 @@ function formatTimecode(value) {
     .toString()
     .padStart(3, "0");
   return `${hours}:${minutes}:${seconds},${millis}`;
+}
+
+function formatTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
 }
 
 function toOptionalNumber(value) {
@@ -112,33 +171,50 @@ function renderStoryKeywordResults(result) {
   `;
 }
 
-function renderImageTitleResults(result) {
-  const container = document.getElementById("image-title-results");
+function renderImageStoryResults(result) {
+  const container = document.getElementById("image-story-results");
   if (!container) return;
 
   const items = Array.isArray(result?.items) ? result.items : [];
   if (!items.length) {
-    container.innerHTML = '<div class="placeholder"><p>생성된 제목이 없습니다. 다른 설명을 입력해 보세요.</p></div>';
+    container.innerHTML = '<div class="placeholder"><p>생성된 결과가 없습니다. 다른 이미지를 시도해 보세요.</p></div>';
     return;
   }
 
   const listMarkup = items
     .map((item, index) => {
       const label = typeof item.index === "number" ? item.index : index + 1;
-      const text = escapeHtml(item.text ?? "");
-      return `<li><strong>${label}.</strong> ${text}</li>`;
+      const title = escapeHtml(item.title ?? "");
+      const description = escapeHtml(item.description ?? "");
+      return `
+        <li>
+          <header><strong>${label}. ${title}</strong></header>
+          <p>${description}</p>
+        </li>
+      `;
     })
     .join("");
+
+  const infoRows = [];
+  const source = result?.source ?? {};
+  if (source.image_filename) {
+    const sizeLabel = source.image_size ? ` (${escapeHtml(String(source.image_size))} bytes)` : "";
+    infoRows.push(`<li><strong>이미지 파일</strong> ${escapeHtml(source.image_filename)}${sizeLabel}</li>`);
+  }
+  if (source.description) {
+    infoRows.push(`<li><strong>사용자 설명</strong> ${escapeHtml(source.description)}</li>`);
+  }
 
   container.innerHTML = `
     <article>
       <header>
         <div>
-          <h3>생성된 스토리 제목</h3>
-          <p class="status">설명 원문: <strong>${escapeHtml(result.description ?? "")}</strong></p>
+          <h3>생성된 이미지 스토리</h3>
+          <p class="status">총 ${items.length}개 · 키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong></p>
         </div>
-        <small class="status">키워드: ${escapeHtml(result.keyword ?? "")} · 언어: ${escapeHtml(result.language ?? "ko")}</small>
+        <small class="status">언어: ${escapeHtml(result.language ?? "ko")}</small>
       </header>
+      ${infoRows.length ? `<ul class="context-info">${infoRows.join("")}</ul>` : ""}
       <ol>
         ${listMarkup}
       </ol>
@@ -185,6 +261,9 @@ function renderShortsScriptResults(result) {
         <li>
           <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
           <p>${description}</p>
+          <div class="item-actions">
+            <button type="button" class="outline" data-regenerate-single="shorts_script" data-index="${idx}">이 프롬프트 다시 생성</button>
+          </div>
         </li>
       `;
     })
@@ -252,6 +331,9 @@ function renderShortsSceneResults(result) {
           <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
           <p>${action}</p>
           <small>카메라: ${camera} · 분위기: ${mood}</small>
+          <div class="item-actions">
+            <button type="button" class="outline" data-regenerate-single="shorts_scenes" data-index="${idx}">이 씬 다시 생성</button>
+          </div>
         </li>
       `;
     })
@@ -275,6 +357,364 @@ function renderShortsSceneResults(result) {
       </div>
     </article>
   `;
+}
+
+const TOOL_CONFIG = {
+  [TOOL_KEYS.STORY]: {
+    savedContainer: "story-keyword-saved",
+    resultsContainer: "story-keyword-results",
+    renderer: renderStoryKeywordResults,
+    defaultTitle: (payload) => {
+      const keyword = payload?.keyword || "스토리 키워드";
+      const total = payload?.count || (Array.isArray(payload?.items) ? payload.items.length : 0);
+      return `${keyword} (${total}개)`;
+    }
+  },
+  [TOOL_KEYS.IMAGE_STORY]: {
+    savedContainer: "image-story-saved",
+    resultsContainer: "image-story-results",
+    renderer: renderImageStoryResults,
+    defaultTitle: (payload) => {
+      if (payload?.keyword) return `${payload.keyword} 이미지 스토리`;
+      const first = Array.isArray(payload?.items) && payload.items.length ? payload.items[0] : null;
+      if (first?.title) return first.title;
+      return "이미지 스토리";
+    }
+  },
+  [TOOL_KEYS.SCRIPT]: {
+    savedContainer: "shorts-script-saved",
+    resultsContainer: "shorts-script-results",
+    renderer: renderShortsScriptResults,
+    defaultTitle: (payload) => `${payload?.keyword || "쇼츠 대본"} 자막`
+  },
+  [TOOL_KEYS.SCENES]: {
+    savedContainer: "shorts-scenes-saved",
+    resultsContainer: "shorts-scenes-results",
+    renderer: renderShortsSceneResults,
+    defaultTitle: (payload) => `${payload?.keyword || "쇼츠 장면"} 씬`
+  }
+};
+
+function renderSavedRecords(tool, records = state.savedRecords[tool] || []) {
+  const config = TOOL_CONFIG[tool];
+  if (!config) return;
+  const container = document.querySelector(`#${config.savedContainer} .saved-body`);
+  if (!container) return;
+
+  if (!records.length) {
+    container.innerHTML = '<div class="placeholder"><p>저장된 결과가 없습니다.</p></div>';
+    return;
+  }
+
+  const checkedSet = state.checkedRecords[tool] || new Set();
+
+  const items = records
+    .map((record) => {
+      const created = formatTimestamp(record.created_at);
+      const isActive = state.activeRecords[tool] === record.id;
+      const isChecked = checkedSet.has(record.id);
+      return `
+        <li class="saved-item${isActive ? " active" : ""}" data-record-id="${record.id}" data-tool="${tool}">
+          <label class="saved-check">
+            <input type="checkbox" data-check ${isChecked ? "checked" : ""}>
+            <span>선택</span>
+          </label>
+          <div class="saved-meta">
+            <strong>${escapeHtml(record.title)}</strong>
+            <small>${escapeHtml(created)}</small>
+          </div>
+          <div class="saved-actions">
+            <button type="button" data-select>불러오기</button>
+            <button type="button" data-delete class="outline danger">삭제</button>
+          </div>
+        </li>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `<ul class="saved-list">${items}</ul>`;
+}
+
+async function loadSavedRecords(tool) {
+  try {
+    const records = await api(`/api/tools/${tool}/records`);
+    state.savedRecords[tool] = Array.isArray(records) ? records : [];
+    const previous = state.checkedRecords[tool] || new Set();
+    const next = new Set();
+    state.savedRecords[tool].forEach((record) => {
+      if (previous.has(record.id)) {
+        next.add(record.id);
+      }
+    });
+    state.checkedRecords[tool] = next;
+    renderSavedRecords(tool);
+  } catch (error) {
+    console.error(`Failed to load records for ${tool}:`, error);
+  }
+}
+
+async function saveLatestResult(tool) {
+  const payload = state.latestResults[tool];
+  if (!payload) {
+    alert("먼저 결과를 생성하세요.");
+    return;
+  }
+  const config = TOOL_CONFIG[tool];
+  if (!config) return;
+  const suggested = config.defaultTitle(payload) || "새로운 결과";
+  const title = window.prompt("저장할 이름을 입력하세요.", suggested);
+  if (title === null) return;
+  if (!title.trim()) {
+    alert("이름을 입력해야 합니다.");
+    return;
+  }
+  try {
+    await api(`/api/tools/${tool}/records`, {
+      method: "POST",
+      body: JSON.stringify({ title: title.trim(), payload })
+    });
+    state.activeRecords[tool] = null;
+    await loadSavedRecords(tool);
+    alert("저장되었습니다.");
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function deleteSavedRecord(tool, recordId) {
+  if (!recordId) return;
+  const confirmed = window.confirm("저장된 결과를 삭제할까요?");
+  if (!confirmed) return;
+  try {
+    await api(`/api/tools/${tool}/records/${recordId}`, { method: "DELETE" });
+    if (state.activeRecords[tool] === recordId) {
+      state.activeRecords[tool] = null;
+    }
+    await loadSavedRecords(tool);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+function selectSavedRecord(tool, recordId) {
+  if (!recordId) return;
+  const records = state.savedRecords[tool] || [];
+  const record = records.find((item) => item.id === recordId);
+  if (!record) {
+    alert("저장된 데이터를 찾을 수 없습니다.");
+    return;
+  }
+  const config = TOOL_CONFIG[tool];
+  if (!config) return;
+  state.latestResults[tool] = record.payload;
+  state.activeRecords[tool] = recordId;
+  config.renderer(record.payload);
+  if (tool === TOOL_KEYS.SCRIPT) {
+    const keyword = record.payload?.keyword;
+    const language = record.payload?.language || "ko";
+    if (keyword) {
+      state.lastRequests[tool] = { keyword, language };
+    }
+  }
+  if (tool === TOOL_KEYS.SCENES) {
+    const keyword = record.payload?.keyword;
+    const language = record.payload?.language || "ko";
+    if (keyword) {
+      state.lastRequests[tool] = { keyword, language };
+    }
+  }
+  renderSavedRecords(tool);
+  const target = document.getElementById(config.resultsContainer);
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function handleSavedSectionClick(event) {
+  const selectButton = event.target.closest("button[data-select]");
+  if (selectButton) {
+    const item = selectButton.closest("li[data-record-id]");
+    if (!item) return;
+    const tool = item.dataset.tool;
+    const recordId = item.dataset.recordId;
+    selectSavedRecord(tool, recordId);
+    return;
+  }
+
+  const deleteButton = event.target.closest("button[data-delete]");
+  if (deleteButton) {
+    const item = deleteButton.closest("li[data-record-id]");
+    if (!item) return;
+    const tool = item.dataset.tool;
+    const recordId = item.dataset.recordId;
+    deleteSavedRecord(tool, recordId);
+  }
+
+  const checkBox = event.target.closest("input[data-check]");
+  if (checkBox) {
+    const item = checkBox.closest("li[data-record-id]");
+    if (!item) return;
+    const tool = item.dataset.tool;
+    const recordId = item.dataset.recordId;
+    if (!state.checkedRecords[tool]) {
+      state.checkedRecords[tool] = new Set();
+    }
+    const bucket = state.checkedRecords[tool];
+    if (checkBox.checked) {
+      bucket.add(recordId);
+    } else {
+      bucket.delete(recordId);
+    }
+  }
+}
+
+async function continueGeneration(tool) {
+  const endpoint = GENERATION_ENDPOINTS[tool];
+  if (!endpoint) {
+    alert("이 기능은 지원되지 않습니다.");
+    return;
+  }
+  const request = state.lastRequests[tool];
+  if (!request) {
+    alert("먼저 초기 결과를 생성하세요.");
+    return;
+  }
+  try {
+    const options = { method: "POST" };
+    if (endpoint.type === "json") {
+      options.body = JSON.stringify(request);
+    } else {
+      const formData = new FormData();
+      Object.entries(request).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          formData.append(key, value);
+        }
+      });
+      options.body = formData;
+    }
+    const fresh = await api(endpoint.url, options);
+    const current = state.latestResults[tool] || {};
+
+    if (tool === TOOL_KEYS.SCRIPT) {
+      current.subtitles = [...(current.subtitles || []), ...(fresh.subtitles || [])];
+      current.images = [...(current.images || []), ...(fresh.images || [])];
+      current.keyword = fresh.keyword || current.keyword;
+      current.language = fresh.language || current.language;
+      state.latestResults[tool] = current;
+      renderShortsScriptResults(current);
+    } else if (tool === TOOL_KEYS.SCENES) {
+      current.subtitles = [...(current.subtitles || []), ...(fresh.subtitles || [])];
+      current.scenes = [...(current.scenes || []), ...(fresh.scenes || [])];
+      current.keyword = fresh.keyword || current.keyword;
+      current.language = fresh.language || current.language;
+      state.latestResults[tool] = current;
+      renderShortsSceneResults(current);
+    }
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function regenerateAll(tool) {
+  const request = state.lastRequests[tool];
+  const config = TOOL_CONFIG[tool];
+  const endpoint = GENERATION_ENDPOINTS[tool];
+  if (!endpoint || !config) {
+    alert("이 기능은 지원되지 않습니다.");
+    return;
+  }
+  if (!request) {
+    alert("먼저 결과를 생성하세요.");
+    return;
+  }
+  try {
+    const options = { method: "POST" };
+    if (endpoint.type === "json") {
+      options.body = JSON.stringify(request);
+    } else {
+      const formData = new FormData();
+      Object.entries(request).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.forEach((item) => formData.append(`${key}[]`, item));
+        } else if (value !== undefined && value !== null) {
+          formData.append(key, value);
+        }
+      });
+      options.body = formData;
+    }
+    const data = await api(endpoint.url, options);
+    state.latestResults[tool] = data;
+    state.activeRecords[tool] = null;
+    const renderer = config.renderer;
+    if (renderer) {
+      renderer(data);
+    }
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function regenerateSingle(tool, index) {
+  const idx = Number(index);
+  if (Number.isNaN(idx)) {
+    alert("선택한 항목을 확인할 수 없습니다.");
+    return;
+  }
+  const request = state.lastRequests[tool];
+  const endpoint = GENERATION_ENDPOINTS[tool];
+  if (!endpoint) {
+    alert("이 기능은 지원되지 않습니다.");
+    return;
+  }
+  if (!state.latestResults[tool]) {
+    alert("먼저 결과를 생성하세요.");
+    return;
+  }
+  if (request == null) {
+    alert("최근 요청 정보를 찾을 수 없습니다. 전체 재생성을 먼저 실행하세요.");
+    return;
+  }
+  try {
+    const options = { method: "POST" };
+    if (endpoint.type === "json") {
+      options.body = JSON.stringify(request);
+    } else {
+      const formData = new FormData();
+      Object.entries(request).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          formData.append(key, value);
+        }
+      });
+      options.body = formData;
+    }
+    const fresh = await api(endpoint.url, options);
+    const current = state.latestResults[tool];
+    if (!current) return;
+
+    if (tool === TOOL_KEYS.SCRIPT && Array.isArray(fresh.images)) {
+      if (!Array.isArray(current.images)) {
+        current.images = [];
+      }
+      if (fresh.images[idx]) {
+        current.images[idx] = fresh.images[idx];
+        renderShortsScriptResults(current);
+      } else {
+        alert("새 프롬프트를 찾을 수 없습니다.");
+      }
+    } else if (tool === TOOL_KEYS.SCENES && Array.isArray(fresh.scenes)) {
+      if (!Array.isArray(current.scenes)) {
+        current.scenes = [];
+      }
+      if (fresh.scenes[idx]) {
+        current.scenes[idx] = fresh.scenes[idx];
+        renderShortsSceneResults(current);
+      } else {
+        alert("새 장면 프롬프트를 찾을 수 없습니다.");
+      }
+    }
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 function initStoryKeywordPage() {
@@ -309,7 +749,10 @@ function initStoryKeywordPage() {
         method: "POST",
         body: JSON.stringify(payload)
       });
+      state.latestResults[TOOL_KEYS.STORY] = data;
+      state.activeRecords[TOOL_KEYS.STORY] = null;
       renderStoryKeywordResults(data);
+      renderSavedRecords(TOOL_KEYS.STORY);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
     } finally {
@@ -321,38 +764,44 @@ function initStoryKeywordPage() {
   });
 }
 
-function initImageTitlePage() {
-  const form = document.getElementById("image-title-form");
-  const resultsContainer = document.getElementById("image-title-results");
+function initImageStoryPage() {
+  const form = document.getElementById("image-story-form");
+  const resultsContainer = document.getElementById("image-story-results");
   if (!form || !resultsContainer) return;
 
   const submitButton = form.querySelector("button[type='submit']");
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
-    const description = String(formData.get("description") || "").trim();
-    if (!description) {
-      alert("이미지 설명을 입력하세요.");
+    const keyword = String(formData.get("keyword") || "").trim();
+    const description = String(formData.get("image_description") || "").trim();
+    const imageFile = formData.get("image");
+    const hasImage = imageFile instanceof File && imageFile.size > 0;
+    if (!hasImage && !description && !keyword) {
+      alert("이미지 또는 키워드/설명 중 하나는 입력해야 합니다.");
       return;
     }
-    const keyword = String(formData.get("keyword") || "").trim();
-    let count = Number(formData.get("count") || 30);
+    let count = Number(formData.get("count") || 8);
     if (!Number.isFinite(count)) {
-      count = 30;
+      count = 8;
     }
-
-    const payload = { description, keyword, count };
+    formData.set("keyword", keyword);
+    formData.set("image_description", description);
+    formData.set("count", String(count));
     if (submitButton) {
       submitButton.disabled = true;
       submitButton.setAttribute("aria-busy", "true");
     }
     resultsContainer.innerHTML = '<div class="placeholder"><p>생성 중입니다...</p></div>';
     try {
-      const data = await api("/api/generate/image-titles", {
+      const data = await api("/api/generate/image-story", {
         method: "POST",
-        body: JSON.stringify(payload)
+        body: formData
       });
-      renderImageTitleResults(data);
+      state.latestResults[TOOL_KEYS.IMAGE_STORY] = data;
+      state.activeRecords[TOOL_KEYS.IMAGE_STORY] = null;
+      renderImageStoryResults(data);
+      renderSavedRecords(TOOL_KEYS.IMAGE_STORY);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
     } finally {
@@ -381,6 +830,7 @@ function initShortsScriptPage() {
     const language = String(formData.get("language") || "ko") || "ko";
 
     const payload = { keyword, language };
+    state.lastRequests[TOOL_KEYS.SCRIPT] = { ...payload };
     if (submitButton) {
       submitButton.disabled = true;
       submitButton.setAttribute("aria-busy", "true");
@@ -391,7 +841,10 @@ function initShortsScriptPage() {
         method: "POST",
         body: JSON.stringify(payload)
       });
+      state.latestResults[TOOL_KEYS.SCRIPT] = data;
+      state.activeRecords[TOOL_KEYS.SCRIPT] = null;
       renderShortsScriptResults(data);
+      renderSavedRecords(TOOL_KEYS.SCRIPT);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
     } finally {
@@ -420,6 +873,7 @@ function initShortsScenesPage() {
     const language = String(formData.get("language") || "ko") || "ko";
 
     const payload = { keyword, language };
+    state.lastRequests[TOOL_KEYS.SCENES] = { ...payload };
     if (submitButton) {
       submitButton.disabled = true;
       submitButton.setAttribute("aria-busy", "true");
@@ -430,7 +884,10 @@ function initShortsScenesPage() {
         method: "POST",
         body: JSON.stringify(payload)
       });
+      state.latestResults[TOOL_KEYS.SCENES] = data;
+      state.activeRecords[TOOL_KEYS.SCENES] = null;
       renderShortsSceneResults(data);
+      renderSavedRecords(TOOL_KEYS.SCENES);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
     } finally {
@@ -1125,9 +1582,71 @@ async function loadProject(projectId, { scrollIntoView = true } = {}) {
 
 document.addEventListener("DOMContentLoaded", () => {
   initStoryKeywordPage();
-  initImageTitlePage();
+  initImageStoryPage();
   initShortsScriptPage();
   initShortsScenesPage();
+
+  document.querySelectorAll("[data-save]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tool = button.getAttribute("data-save");
+      if (!tool) return;
+      saveLatestResult(tool);
+    });
+  });
+
+  document.querySelectorAll("[data-refresh]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tool = button.getAttribute("data-refresh");
+      if (!tool) return;
+      loadSavedRecords(tool);
+    });
+  });
+
+  document.querySelectorAll("[data-continue]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tool = button.getAttribute("data-continue");
+      if (!tool) return;
+      continueGeneration(tool);
+    });
+  });
+
+  document.querySelectorAll("[data-regenerate-all]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tool = button.getAttribute("data-regenerate-all");
+      if (!tool) return;
+      regenerateAll(tool);
+    });
+  });
+
+  const scriptResults = document.getElementById("shorts-script-results");
+  if (scriptResults) {
+    scriptResults.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-regenerate-single='shorts_script']");
+      if (!button) return;
+      const index = Number(button.dataset.index || 0);
+      if (Number.isNaN(index)) return;
+      regenerateSingle(TOOL_KEYS.SCRIPT, index);
+    });
+  }
+
+  const sceneResults = document.getElementById("shorts-scenes-results");
+  if (sceneResults) {
+    sceneResults.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-regenerate-single='shorts_scenes']");
+      if (!button) return;
+      const index = Number(button.dataset.index || 0);
+      if (Number.isNaN(index)) return;
+      regenerateSingle(TOOL_KEYS.SCENES, index);
+    });
+  }
+
+  Object.keys(TOOL_CONFIG).forEach((tool) => {
+    const section = document.getElementById(TOOL_CONFIG[tool].savedContainer);
+    if (section) {
+      section.addEventListener("click", handleSavedSectionClick);
+    }
+    loadSavedRecords(tool);
+  });
 
   const form = document.getElementById("project-form");
   if (form) {

@@ -1,5 +1,6 @@
 """Generators package."""
 from .base import BaseGenerator, GenerationContext
+from .image_story import ImageStoryGenerator
 from .image_titles import ImageTitleGenerator
 from .keyword_titles import KeywordTitleGenerator
 from .shorts_scene import ShortsSceneGenerator
@@ -10,6 +11,7 @@ __all__ = [
     "BaseGenerator",
     "GenerationContext",
     "ImageTitleGenerator",
+    "ImageStoryGenerator",
     "KeywordTitleGenerator",
     "ShortsSceneGenerator",
     "ShortsScriptGenerator",

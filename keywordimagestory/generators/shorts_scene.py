@@ -20,8 +20,8 @@ class ShortsSceneGenerator(BaseGenerator):
         self._ensure_keyword(context)
         prompt = SHORTS_SCENE_TEMPLATE.format(keyword=context.keyword)
         raw = self.client.generate_structured(prompt, context.keyword)
-        subtitles = []
-        video_prompts = []
+        subtitles: list[SubtitleSegment] = []
+        video_prompts: list[VideoPrompt] = []
         for idx, match in enumerate(_SCENE_DESC_RE.finditer(raw), start=1):
             scene_tag = match.group("tag").replace("#", "")
             description = match.group("desc").strip()
@@ -46,27 +46,4 @@ class ShortsSceneGenerator(BaseGenerator):
                     end=end_time,
                 )
             )
-        if not subtitles:
-            for i in range(6):
-                start_time = i * 6.0
-                end_time = (i + 1) * 6.0
-                subtitles.append(
-                    SubtitleSegment(
-                        index=i + 1,
-                        start=start_time,
-                        end=end_time,
-                        text=f"Mock scene subtitle {i+1}",
-                        scene_tag=f"씬 {i+1}",
-                    )
-                )
-                video_prompts.append(
-                    VideoPrompt(
-                        scene_tag=f"씬 {i+1}",
-                        camera="Wide",
-                        action=f"Mock action {i+1}",
-                        mood="Neutral",
-                        start=start_time,
-                        end=end_time,
-                    )
-                )
         return subtitles, video_prompts

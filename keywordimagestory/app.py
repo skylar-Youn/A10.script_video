@@ -4,21 +4,22 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from keywordimagestory.config import settings
 from keywordimagestory.generators import (
     GenerationContext,
+    ImageStoryGenerator,
     ImageTitleGenerator,
     KeywordTitleGenerator,
     ShortsSceneGenerator,
     ShortsScriptGenerator,
 )
-from keywordimagestory.models import ImagePrompt, MediaEffect, StoryProject, TemplateSetting, VideoPrompt
-from keywordimagestory.services import editor_service, history_service
+from keywordimagestory.models import ImagePrompt, MediaEffect, StoryProject, TemplateSetting, ToolRecord, ToolRecordCreate, ToolType, VideoPrompt
+from keywordimagestory.services import editor_service, history_service, tool_store
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +59,8 @@ async def root(request: Request) -> HTMLResponse:
 
 @app.get("/keywords", response_class=HTMLResponse, name="keywords_ui")
 async def keywords_ui(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        "keywords.html",
-        {
-            "request": request,
-            "settings": settings.dump(),
-        },
-    )
+    redirect_target = request.url_for("tools_ui")
+    return RedirectResponse(url=redirect_target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @app.get("/tools", response_class=HTMLResponse, name="tools_ui")
@@ -166,29 +162,65 @@ async def api_generate_story_keywords(payload: dict[str, Any] = Body(...)) -> di
     }
 
 
-@app.post("/api/generate/image-titles")
-async def api_generate_image_titles(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    description = str(payload.get("description", "")).strip()
-    if not description:
-        raise HTTPException(status_code=400, detail="description is required")
+@app.post("/api/generate/image-story")
+@app.post("/api/generate/video-titles")  # backward compatibility
+async def api_generate_image_story(
+    keyword: str = Form(""),
+    language: str = Form(""),
+    count: int = Form(12),
+    image_description: str = Form(""),
+    image: UploadFile | None = File(None),
+) -> dict[str, Any]:
+    keyword = keyword.strip()
+    language = (language or settings.default_language).strip() or settings.default_language
 
-    keyword = str(payload.get("keyword", "") or "").strip()
-    language = str(payload.get("language", settings.default_language) or settings.default_language)
     try:
-        requested_count = int(payload.get("count", 30))
+        requested_count = int(count)
     except (TypeError, ValueError):
-        requested_count = 30
-    count = max(5, min(requested_count, 60))
+        requested_count = 12
+    count = max(3, min(requested_count, 24))
 
-    context_keyword = keyword or description[:40] or "스토리"
+    context_lines: list[str] = []
+    image_filename: str | None = None
+    image_size: int | None = None
+
+    if image is not None:
+        image_filename = image.filename
+        try:
+            data = await image.read()
+            image_size = len(data)
+        except Exception:
+            image_size = None
+        finally:
+            try:
+                await image.close()
+            except Exception:  # pragma: no cover - best effort
+                pass
+        if image_filename:
+            size_text = f" ({image_size} bytes)" if image_size is not None else ""
+            context_lines.append(f"업로드된 이미지: {image_filename}{size_text}")
+            context_lines.append("이미지의 분위기와 디테일을 창의적으로 해석해 제목과 묘사를 작성하세요.")
+
+    if image_description.strip():
+        context_lines.append(f"사용자 이미지 설명: {image_description.strip()}")
+
+    if not context_lines:
+        context_lines.append("이미지 설명 없음. 키워드만으로 장면을 상상해 작성하세요.")
+
+    context_keyword = keyword or (image_description[:30] if image_description else "이미지 스토리")
     context = GenerationContext(keyword=context_keyword, language=language, duration=settings.default_story_duration)
-    titles = ImageTitleGenerator().generate(description, context, count=count)
+    story_items = ImageStoryGenerator().generate(context, "\n".join(context_lines), count=count)
+
     return {
         "keyword": context_keyword,
         "language": language,
-        "description": description,
-        "count": len(titles),
-        "items": [title.dict() for title in titles],
+        "count": len(story_items),
+        "source": {
+            "image_filename": image_filename,
+            "image_size": image_size,
+            "description": image_description.strip(),
+        },
+        "items": [item.dict() for item in story_items],
     }
 
 
@@ -224,6 +256,43 @@ async def api_generate_shorts_scenes(payload: dict[str, Any] = Body(...)) -> dic
         "subtitles": [segment.dict() for segment in subtitles],
         "scenes": [prompt.dict() for prompt in scenes],
     }
+
+
+# ---------------------------------------------------------------------------
+# Tool record management
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/tools/{tool}/records", response_model=list[ToolRecord])
+async def api_list_tool_records(tool: ToolType) -> list[ToolRecord]:
+    return tool_store.list_records(tool)
+
+
+@app.get("/api/tools/{tool}/records/{record_id}", response_model=ToolRecord)
+async def api_get_tool_record(tool: ToolType, record_id: str) -> ToolRecord:
+    try:
+        return tool_store.get_record(tool, record_id)
+    except KeyError as exc:  # pragma: no cover - runtime path
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/tools/{tool}/records",
+    response_model=ToolRecord,
+    status_code=status.HTTP_201_CREATED,
+)
+async def api_save_tool_record(tool: ToolType, payload: ToolRecordCreate = Body(...)) -> ToolRecord:
+    if not payload.payload:
+        raise HTTPException(status_code=400, detail="payload is required")
+    return tool_store.save_record(tool, payload.title, payload.payload)
+
+
+@app.delete("/api/tools/{tool}/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def api_delete_tool_record(tool: ToolType, record_id: str) -> Response:
+    removed = tool_store.delete_record(tool, record_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------
