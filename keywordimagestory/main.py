@@ -34,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     context = GenerationContext(keyword=args.keyword, language=args.language, duration=args.duration)
 
     project = editor_service.create_project(args.keyword, args.language)
+    editor_service.set_duration(project.project_id, float(args.duration))
 
     titles = KeywordTitleGenerator().generate(context)
     editor_service.set_titles(project.project_id, titles)

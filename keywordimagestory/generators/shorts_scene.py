@@ -25,11 +25,13 @@ class ShortsSceneGenerator(BaseGenerator):
         for idx, match in enumerate(_SCENE_DESC_RE.finditer(raw), start=1):
             scene_tag = match.group("tag").replace("#", "")
             description = match.group("desc").strip()
+            start_time = (idx - 1) * 6.0
+            end_time = idx * 6.0
             subtitles.append(
                 SubtitleSegment(
                     index=idx,
-                    start=(idx - 1) * 6.0,
-                    end=idx * 6.0,
+                    start=start_time,
+                    end=end_time,
                     text=re.sub(r"\[(?:씬|Scene).*?\]", "", description).strip(),
                     scene_tag=f"씬 {scene_tag}",
                 )
@@ -40,15 +42,19 @@ class ShortsSceneGenerator(BaseGenerator):
                     camera="미디엄 샷",
                     action=description,
                     mood="드라마틱",
+                    start=start_time,
+                    end=end_time,
                 )
             )
         if not subtitles:
             for i in range(6):
+                start_time = i * 6.0
+                end_time = (i + 1) * 6.0
                 subtitles.append(
                     SubtitleSegment(
                         index=i + 1,
-                        start=i * 6.0,
-                        end=(i + 1) * 6.0,
+                        start=start_time,
+                        end=end_time,
                         text=f"Mock scene subtitle {i+1}",
                         scene_tag=f"씬 {i+1}",
                     )
@@ -59,6 +65,8 @@ class ShortsSceneGenerator(BaseGenerator):
                         camera="Wide",
                         action=f"Mock action {i+1}",
                         mood="Neutral",
+                        start=start_time,
+                        end=end_time,
                     )
                 )
         return subtitles, video_prompts

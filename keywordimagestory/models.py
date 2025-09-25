@@ -47,7 +47,16 @@ class SubtitleSegment(BaseModel):
 class ImagePrompt(BaseModel):
     tag: str
     description: str
+    start: float | None = None
+    end: float | None = None
     status: GenerationStatus = GenerationStatus.draft
+
+    @validator("end")
+    def _validate_end(cls, value: float | None, values: dict[str, Any]) -> float | None:
+        start = values.get("start")
+        if value is not None and start is not None and value < start:
+            raise ValueError("Image prompt end must be greater than start")
+        return value
 
 
 class VideoPrompt(BaseModel):
@@ -55,7 +64,16 @@ class VideoPrompt(BaseModel):
     camera: str
     action: str
     mood: str
+    start: float | None = None
+    end: float | None = None
     status: GenerationStatus = GenerationStatus.draft
+
+    @validator("end")
+    def _validate_end(cls, value: float | None, values: dict[str, Any]) -> float | None:
+        start = values.get("start")
+        if value is not None and start is not None and value < start:
+            raise ValueError("Video prompt end must be greater than start")
+        return value
 
 
 class StoryChapter(BaseModel):
@@ -95,6 +113,7 @@ class StoryProject(BaseModel):
     language: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    duration: float = 60.0
     titles: list[TitleItem] = Field(default_factory=list)
     subtitles: list[SubtitleSegment] = Field(default_factory=list)
     image_prompts: list[ImagePrompt] = Field(default_factory=list)

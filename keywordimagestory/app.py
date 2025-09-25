@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Iterable
+from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -17,7 +17,13 @@ from keywordimagestory.generators import (
     ShortsSceneGenerator,
     ShortsScriptGenerator,
 )
-from keywordimagestory.models import MediaEffect, StoryProject, TemplateSetting
+from keywordimagestory.models import (
+    ImagePrompt,
+    MediaEffect,
+    StoryProject,
+    TemplateSetting,
+    VideoPrompt,
+)
 from keywordimagestory.services import editor_service, history_service
 
 logger = logging.getLogger(__name__)
@@ -179,10 +185,36 @@ async def api_remove_effect(project_id: str, effect_id: str) -> StoryProject:
     return _project_or_404(project_id)
 
 
+@app.post("/api/projects/{project_id}/prompts/image", response_model=StoryProject)
+async def api_add_image_prompt(project_id: str, payload: dict[str, Any] = Body(...)) -> StoryProject:
+    try:
+        prompt = ImagePrompt.parse_obj(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    editor_service.add_image_prompt(project_id, prompt)
+    return _project_or_404(project_id)
+
+
+@app.post("/api/projects/{project_id}/prompts/video", response_model=StoryProject)
+async def api_add_video_prompt(project_id: str, payload: dict[str, Any] = Body(...)) -> StoryProject:
+    try:
+        prompt = VideoPrompt.parse_obj(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    editor_service.add_video_prompt(project_id, prompt)
+    return _project_or_404(project_id)
+
+
 @app.post("/api/projects/{project_id}/export")
 async def api_export_project(project_id: str) -> JSONResponse:
     data = editor_service.export_project(project_id)
     return JSONResponse(data)
+
+
+@app.post("/api/projects/{project_id}/align", response_model=StoryProject)
+async def api_auto_align(project_id: str) -> StoryProject:
+    editor_service.auto_align(project_id)
+    return _project_or_404(project_id)
 
 
 @app.get("/api/settings")

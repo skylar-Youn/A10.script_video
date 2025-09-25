@@ -28,7 +28,7 @@ class ShortsScriptGenerator(BaseGenerator):
         prompt = SHORTS_SCRIPT_TEMPLATE.format(keyword=context.keyword)
         raw = self.client.generate_structured(prompt, context.keyword)
         subtitles = self._parse_srt(raw)
-        images = self._parse_images(raw)
+        images = self._parse_images(raw, subtitles)
         return subtitles, images
 
     # ------------------------------------------------------------------
@@ -76,26 +76,43 @@ class ShortsScriptGenerator(BaseGenerator):
                 )
         return subtitles
 
-    def _parse_images(self, raw: str) -> list[ImagePrompt]:
+    def _parse_images(self, raw: str, subtitles: list[SubtitleSegment]) -> list[ImagePrompt]:
         image_section = []
         if "[이미지" in raw:
             parts = raw.split("[이미지")
             if len(parts) > 1:
                 image_section = parts[1:]
         prompts: list[ImagePrompt] = []
-        for chunk in image_section:
+        for idx, chunk in enumerate(image_section):
             tag_match = re.match(r"\s*(?P<tag>\d+)\]\s*(?P<desc>.+)", chunk.strip())
             if not tag_match:
                 continue
+            start, end = self._subtitle_window(subtitles, idx)
             prompts.append(
                 ImagePrompt(
                     tag=f"이미지 {tag_match.group('tag')}",
                     description=tag_match.group("desc").strip(),
+                    start=start,
+                    end=end,
                 )
             )
         if not prompts:
-            prompts = [
-                ImagePrompt(tag=f"이미지 {i+1}", description="Mock image description")
-                for i in range(len(raw.splitlines()) % 5 + 3)
-            ]
+            for i in range(max(len(subtitles), 1)):
+                start, end = self._subtitle_window(subtitles, i)
+                prompts.append(
+                    ImagePrompt(
+                        tag=f"이미지 {i+1}",
+                        description="Mock image description",
+                        start=start,
+                        end=end,
+                    )
+                )
         return prompts
+
+    def _subtitle_window(self, subtitles: list[SubtitleSegment], index: int) -> Tuple[float, float]:
+        if not subtitles:
+            slot = 10.0
+            return index * slot, (index + 1) * slot
+        wrapped_index = index if index < len(subtitles) else len(subtitles) - 1
+        segment = subtitles[max(0, wrapped_index)]
+        return segment.start, segment.end

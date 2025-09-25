@@ -63,7 +63,12 @@ def get_project(project_id: str) -> StoryProject:
 
 def create_project(keyword: str, language: str) -> StoryProject:
     project_id = uuid.uuid4().hex[:12]
-    project = StoryProject(project_id=project_id, keyword=keyword, language=language)
+    project = StoryProject(
+        project_id=project_id,
+        keyword=keyword,
+        language=language,
+        duration=float(settings.default_story_duration),
+    )
     _PROJECT_CACHE[project_id] = project
     _persist(project)
     return project
@@ -93,6 +98,27 @@ def set_image_prompts(project_id: str, prompts: Sequence[ImagePrompt]) -> StoryP
 def set_video_prompts(project_id: str, prompts: Sequence[VideoPrompt]) -> StoryProject:
     project = _get_project(project_id)
     project.video_prompts = list(prompts)
+    _persist(project)
+    return project
+
+
+def set_duration(project_id: str, duration: float) -> StoryProject:
+    project = _get_project(project_id)
+    project.duration = duration
+    _persist(project)
+    return project
+
+
+def add_image_prompt(project_id: str, prompt: ImagePrompt) -> StoryProject:
+    project = _get_project(project_id)
+    project.image_prompts.append(prompt)
+    _persist(project)
+    return project
+
+
+def add_video_prompt(project_id: str, prompt: VideoPrompt) -> StoryProject:
+    project = _get_project(project_id)
+    project.video_prompts.append(prompt)
     _persist(project)
     return project
 
@@ -187,3 +213,30 @@ def export_project(project_id: str) -> dict[str, str]:
         "story": str(story_path),
         "prompts": str(prompts_path),
     }
+
+
+def auto_align(project_id: str) -> StoryProject:
+    project = _get_project(project_id)
+    count = max(
+        len(project.subtitles),
+        len(project.image_prompts),
+        len(project.video_prompts),
+    )
+    if count == 0:
+        return project
+    total = project.duration or float(settings.default_story_duration)
+    slot = total / count
+    for index in range(count):
+        start = round(index * slot, 3)
+        end = round(min(total, (index + 1) * slot), 3)
+        if index < len(project.subtitles):
+            project.subtitles[index].start = start
+            project.subtitles[index].end = end
+        if index < len(project.image_prompts):
+            project.image_prompts[index].start = start
+            project.image_prompts[index].end = end
+        if index < len(project.video_prompts):
+            project.video_prompts[index].start = start
+            project.video_prompts[index].end = end
+    _persist(project)
+    return project
