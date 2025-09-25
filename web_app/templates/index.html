@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 쇼츠 제작기</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <h1>AI 쇼츠 제작기</h1>
+    <nav class="nav-links">
+        <a href="/ytdl">유튜브 다운로드 도구로 이동</a>
+    </nav>
+
+    <section class="panel">
+        <h2>새 프로젝트 생성</h2>
+        <form method="post" action="/generate" class="generate-form">
+            <div class="field">
+                <label for="topic">주제</label>
+                <input type="text" id="topic" name="topic" value="{{ form_values.topic }}" required>
+            </div>
+            <div class="field">
+                <label for="style">스타일</label>
+                <input type="text" id="style" name="style" value="{{ form_values.style }}">
+            </div>
+            <div class="field inline">
+                <label for="duration">길이(초)</label>
+                <input type="number" id="duration" name="duration" min="10" max="180" value="{{ form_values.duration }}">
+                <label for="lang">언어</label>
+                <select id="lang" name="lang">
+                    {% for value, label in lang_options %}
+                    <option value="{{ value }}" {% if form_values.lang == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <label for="fps">FPS</label>
+                <input type="number" id="fps" name="fps" min="12" max="60" value="{{ form_values.fps }}">
+            </div>
+            <div class="field inline">
+                <label for="voice">TTS 음성</label>
+                <input type="text" id="voice" name="voice" value="{{ form_values.voice }}">
+                <label for="output_name">파일명(선택)</label>
+                <input type="text" id="output_name" name="output_name" value="{{ form_values.output_name }}" placeholder="자동 생성">
+            </div>
+            <div class="field inline">
+                <label><input type="checkbox" name="music" {% if form_values.music %}checked{% endif %}> 배경음 사용</label>
+                <label>볼륨<input type="number" step="0.01" min="0" max="1" name="music_volume" value="{{ form_values.music_volume }}"></label>
+                <label>덕킹<input type="number" step="0.05" min="0" max="1" name="ducking" value="{{ form_values.ducking }}"></label>
+            </div>
+            <div class="field inline">
+                <label><input type="checkbox" name="burn_subs" {% if form_values.burn_subs %}checked{% endif %}> 자막 번인</label>
+                <label><input type="checkbox" name="dry_run" {% if form_values.dry_run %}checked{% endif %}> 드라이런</label>
+                <label><input type="checkbox" name="save_json" {% if form_values.save_json %}checked{% endif %}> JSON 저장</label>
+            </div>
+            <details class="advanced">
+                <summary>고급 설정</summary>
+                <div class="field inline">
+                    <label for="script_model">스크립트 모델</label>
+                    <input type="text" id="script_model" name="script_model" value="{{ form_values.script_model }}">
+                    <label for="tts_model">TTS 모델</label>
+                    <input type="text" id="tts_model" name="tts_model" value="{{ form_values.tts_model }}">
+                </div>
+            </details>
+            <button type="submit">생성하기</button>
+        </form>
+    </section>
+
+    <section class="panel">
+        <h2>기존 프로젝트 불러오기</h2>
+        <form method="get" action="/shorts" class="existing-form">
+            <label for="existing">프로젝트 선택</label>
+            <select id="existing" name="existing">
+                <option value="">선택하세요</option>
+                {% for item in project_summaries %}
+                <option value="{{ item.base_name }}" {% if selected_project == item.base_name %}selected{% endif %}>
+                    {{ item.base_name }} ({{ item.duration or '-' }}s)
+                </option>
+                {% endfor %}
+            </select>
+            <button type="submit">불러오기</button>
+        </form>
+        <ul class="existing-list">
+            {% for item in project_summaries %}
+            <li>{{ item.base_name }} - {{ item.topic or '토픽 없음' }} <small>({{ item.updated_at }})</small></li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    {% if error %}
+    <div class="alert error">
+        <strong>오류:</strong> {{ error }}
+    </div>
+    {% endif %}
+
+    {% if result %}
+    <section class="panel project-detail">
+        <h2>프로젝트 세부 정보</h2>
+        <div class="links">
+            {% if result.video_url %}<a href="{{ result.video_url }}" target="_blank">영상 다운로드</a>{% endif %}
+            {% if result.audio_url %}<a href="{{ result.audio_url }}" target="_blank">음성 파일</a>{% endif %}
+            {% if result.srt_url %}<a href="{{ result.srt_url }}" target="_blank">자막(SRT)</a>{% endif %}
+            {% if result.json_url %}<a href="{{ result.json_url }}" target="_blank">메타데이터</a>{% endif %}
+        </div>
+        <pre>{{ result.metadata_json }}</pre>
+
+        <div class="timeline-visual">
+            <div class="wave-controls">
+                <button type="button" onclick="wavePlay()">▶ 재생</button>
+                <button type="button" onclick="wavePause()">⏸ 일시정지</button>
+                <span id="current-time">0.00s</span>
+            </div>
+            <div id="waveform"></div>
+            <div id="timeline-overlay"></div>
+        </div>
+
+        <div class="timeline-controls">
+            <h3>타임라인 세그먼트</h3>
+            <div class="control-row">
+                <label>세그먼트 ID <input type="text" id="segment-id" readonly></label>
+                <label>시작 <input type="number" step="0.1" id="segment-start"></label>
+                <label>끝 <input type="number" step="0.1" id="segment-end"></label>
+            </div>
+            <div class="control-row">
+                <label>소스 <input type="text" id="segment-source"></label>
+                <label>타입
+                    <select id="segment-type">
+                        <option value="broll">broll</option>
+                        <option value="image">image</option>
+                        <option value="audio">audio</option>
+                    </select>
+                </label>
+                <button type="button" onclick="applyTimelineEdit('{{ result.metadata.base_name }}')">세그먼트 적용</button>
+                <button type="button" onclick="refreshVersionHistory('{{ result.metadata.base_name }}')">버전 새로고침</button>
+            </div>
+            <div class="control-row secondary">
+                <label>새 시작 <input type="number" step="0.1" id="new-segment-start"></label>
+                <label>새 끝 <input type="number" step="0.1" id="new-segment-end"></label>
+                <label>새 소스 <input type="text" id="new-segment-source" placeholder="auto"></label>
+                <label>타입
+                    <select id="new-segment-type">
+                        <option value="broll" selected>broll</option>
+                        <option value="image">image</option>
+                        <option value="audio">audio</option>
+                    </select>
+                </label>
+                <button type="button" onclick="addTimelineSegment()">세그먼트 추가</button>
+                <button type="button" class="danger" onclick="removeTimelineSegment()">선택 삭제</button>
+            </div>
+            <h4 class="control-subtitle">선택 세그먼트 수동 조정</h4>
+            <div class="control-row extras">
+                <label>Pos X <input type="number" step="1" id="segment-pos-x"></label>
+                <label>Pos Y <input type="number" step="1" id="segment-pos-y"></label>
+                <label>End X <input type="number" step="1" id="segment-end-pos-x"></label>
+                <label>End Y <input type="number" step="1" id="segment-end-pos-y"></label>
+                <label>Scale 시작 <input type="number" step="0.05" min="0.1" id="segment-scale-start"></label>
+                <label>Scale 끝 <input type="number" step="0.05" min="0.1" id="segment-scale-end"></label>
+            </div>
+            <h4 class="control-subtitle">선택 세그먼트 자동 모션</h4>
+            <div class="control-row extras">
+                <label><input type="checkbox" id="segment-auto-enabled" checked> 자동 모션</label>
+                <label>모션 종류
+                    <select id="segment-auto-mode">
+                        <option value="">기본(Ken Burns)</option>
+                        <option value="kenburns">Ken Burns</option>
+                        <option value="zoom_in">Zoom In</option>
+                        <option value="zoom_out">Zoom Out</option>
+                        <option value="pan_left">Pan Left</option>
+                        <option value="pan_right">Pan Right</option>
+                        <option value="pan_up">Pan Up</option>
+                        <option value="pan_down">Pan Down</option>
+                        <option value="none">사용 안함</option>
+                    </select>
+                </label>
+                <label>강도 <input type="number" step="0.01" min="0" max="0.35" id="segment-auto-strength" placeholder="0.12"></label>
+                <label>기본 스케일 <input type="number" step="0.01" min="1" id="segment-auto-base" placeholder="1.10"></label>
+                <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.3" id="segment-auto-shift" placeholder="자동"></label>
+            </div>
+            <h4 class="control-subtitle">새 세그먼트 수동 조정</h4>
+            <div class="control-row extras">
+                <label>새 Pos X <input type="number" step="1" id="new-pos-x"></label>
+                <label>새 Pos Y <input type="number" step="1" id="new-pos-y"></label>
+                <label>새 End X <input type="number" step="1" id="new-end-pos-x"></label>
+                <label>새 End Y <input type="number" step="1" id="new-end-pos-y"></label>
+                <label>새 Scale 시작 <input type="number" step="0.05" min="0.1" id="new-scale-start"></label>
+                <label>새 Scale 끝 <input type="number" step="0.05" min="0.1" id="new-scale-end"></label>
+            </div>
+            <h4 class="control-subtitle">새 세그먼트 자동 모션</h4>
+            <div class="control-row extras">
+                <label><input type="checkbox" id="new-auto-enabled" checked> 자동 모션</label>
+                <label>모션 종류
+                    <select id="new-auto-mode">
+                        <option value="">기본(Ken Burns)</option>
+                        <option value="kenburns">Ken Burns</option>
+                        <option value="zoom_in">Zoom In</option>
+                        <option value="zoom_out">Zoom Out</option>
+                        <option value="pan_left">Pan Left</option>
+                        <option value="pan_right">Pan Right</option>
+                        <option value="pan_up">Pan Up</option>
+                        <option value="pan_down">Pan Down</option>
+                        <option value="none">사용 안함</option>
+                    </select>
+                </label>
+                <label>강도 <input type="number" step="0.01" min="0" max="0.35" id="new-auto-strength" placeholder="0.12"></label>
+                <label>기본 스케일 <input type="number" step="0.01" min="1" id="new-auto-base" placeholder="1.10"></label>
+                <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.3" id="new-auto-shift" placeholder="자동"></label>
+            </div>
+        </div>
+
+        <div class="timeline-editor">
+            <h3>타임라인 JSON</h3>
+            <textarea id="timeline-json">{{ result.metadata.timeline | tojson(indent=2) }}</textarea>
+            <button type="button" onclick="updateTimeline('{{ result.metadata.base_name }}')">타임라인 저장</button>
+        </div>
+
+        <div class="subtitle-editor">
+            <h3>자막 편집</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Start</th><th>End</th><th>Text</th><th></th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for sub in result.metadata.captions %}
+                <tr>
+                    <td><input type="number" step="0.1" value="{{ '%.1f'|format(sub.start) if sub.start is not none else '' }}" data-sub-id="{{ sub.id }}" data-field="start"></td>
+                    <td><input type="number" step="0.1" value="{{ '%.1f'|format(sub.end) if sub.end is not none else '' }}" data-sub-id="{{ sub.id }}" data-field="end"></td>
+                    <td><textarea data-sub-id="{{ sub.id }}" data-field="text">{{ sub.text }}</textarea></td>
+                    <td>
+                        <button type="button" onclick="updateSubtitle('{{ result.metadata.base_name }}', '{{ sub.id }}')">저장</button>
+                        <button type="button" class="danger" onclick="deleteSubtitle('{{ result.metadata.base_name }}', '{{ sub.id }}')">삭제</button>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <div class="add-subtitle">
+                <h4>자막 추가</h4>
+                <input type="number" step="0.1" id="new-start" placeholder="start">
+                <input type="number" step="0.1" id="new-end" placeholder="end">
+                <input type="text" id="new-text" placeholder="text">
+                <button type="button" onclick="createSubtitle('{{ result.metadata.base_name }}')">추가</button>
+            </div>
+        </div>
+
+        <div class="audio-editor">
+            <h3>오디오 설정</h3>
+            <label><input type="checkbox" id="music-enabled" {% if result.metadata.audio_settings.music_enabled %}checked{% endif %}> 배경음 사용</label>
+            <label>볼륨 <input type="number" step="0.01" min="0" max="1" id="music-volume" value="{{ result.metadata.audio_settings.music_volume }}"></label>
+            <label>덕킹 <input type="number" step="0.05" min="0" max="1" id="ducking" value="{{ result.metadata.audio_settings.ducking }}"></label>
+            <label>배경음 경로 <input type="text" id="music-track" value="{{ result.metadata.audio_settings.music_track or '' }}" placeholder="assets/music/..."></label>
+            <button type="button" onclick="updateAudio('{{ result.metadata.base_name }}')">오디오 저장</button>
+        </div>
+
+        <div class="subtitle-style">
+            <h3>자막 스타일</h3>
+            <label>폰트 크기 <input type="number" min="10" max="120" id="subtitle-font-size" placeholder="62"></label>
+            <label>Y 오프셋 <input type="number" step="1" id="subtitle-y-offset" placeholder="0"></label>
+            <label>외곽선 두께 <input type="number" min="0" max="10" id="subtitle-stroke-width" placeholder="2"></label>
+            <label>폰트 경로 <input type="text" id="subtitle-font-path" placeholder="예: /usr/share/fonts/..." autocomplete="off"></label>
+            <label>레이아웃 템플릿
+                <select id="subtitle-template">
+                    <option value="classic">1. 기본 템플릿</option>
+                    <option value="banner">2. 하이라이트 배너</option>
+                </select>
+            </label>
+            <div id="banner-text-wrapper" class="banner-text-wrapper is-hidden">
+                <label>배너 첫 줄 텍스트 <input type="text" id="banner-primary-text" placeholder="예: 모두를 놀라게 한" autocomplete="off"></label>
+                <label>배너 둘째 줄 텍스트 <input type="text" id="banner-secondary-text" placeholder="예: 레전드 시상식 공연" autocomplete="off"></label>
+                <label>첫 줄 글자 크기 <input type="number" min="10" max="200" id="banner-primary-size" placeholder="자동"></label>
+                <label>둘째 줄 글자 크기 <input type="number" min="10" max="200" id="banner-secondary-size" placeholder="자동"></label>
+                <label>두 줄 간격(픽셀) <input type="number" step="1" min="-120" max="240" id="banner-line-spacing" placeholder="0"></label>
+            </div>
+            <label>애니메이션
+                <select id="subtitle-animation">
+                    <option value="none">없음</option>
+                    <option value="bounce">바운스</option>
+                    <option value="typewriter">타이핑</option>
+                    <option value="highlight">하이라이트 박스</option>
+                    <option value="fire">불꽃 텍스트</option>
+                    <option value="slide_up">슬라이드 업</option>
+                    <option value="slide_down">슬라이드 다운</option>
+                    <option value="slide_left">슬라이드 좌방향</option>
+                    <option value="slide_right">슬라이드 우방향</option>
+                </select>
+            </label>
+            <button type="button" onclick="updateSubtitleStyle('{{ result.metadata.base_name }}')">자막 스타일 저장</button>
+        </div>
+
+        <div class="versions">
+            <h3>버전 히스토리</h3>
+            <ul id="version-list"></ul>
+        </div>
+
+        <div class="actions">
+            <label><input type="checkbox" id="burn-render"> 자막 번인 후 재렌더</label>
+            <button type="button" onclick="requestRender('{{ result.metadata.base_name }}')">재렌더</button>
+            <button type="button" class="danger" onclick="deleteProject('{{ result.metadata.base_name }}')">프로젝트 삭제</button>
+        </div>
+
+        <div id="message"></div>
+    </section>
+    {% endif %}
+</div>
+
+<script>
+const messageBox = document.getElementById('message');
+function showMessage(text, type = 'info') {
+    if (!messageBox) return;
+    messageBox.textContent = text;
+    messageBox.className = type;
+}
+
+function updateBannerVisibility() {
+    const wrapper = document.getElementById('banner-text-wrapper');
+    const templateSelect = document.getElementById('subtitle-template');
+    if (!wrapper) return;
+    const shouldShow = !!templateSelect && templateSelect.value === 'banner';
+    wrapper.classList.toggle('is-hidden', !shouldShow);
+    const primaryInput = document.getElementById('banner-primary-text');
+    const secondaryInput = document.getElementById('banner-secondary-text');
+    const primarySizeInput = document.getElementById('banner-primary-size');
+    const secondarySizeInput = document.getElementById('banner-secondary-size');
+    const spacingInput = document.getElementById('banner-line-spacing');
+    if (primaryInput) primaryInput.disabled = !shouldShow;
+    if (secondaryInput) secondaryInput.disabled = !shouldShow;
+    if (primarySizeInput) primarySizeInput.disabled = !shouldShow;
+    if (secondarySizeInput) secondarySizeInput.disabled = !shouldShow;
+    if (spacingInput) spacingInput.disabled = !shouldShow;
+}
+
+{% if result %}
+const projectData = {{ result.metadata_json | safe }};
+const audioUrl = {{ result.audio_url | tojson }};
+const initialVersionHistory = {{ version_history_json | tojson }};
+{% else %}
+const projectData = null;
+const audioUrl = null;
+const initialVersionHistory = [];
+{% endif %}
+
+let versionHistory = Array.isArray(initialVersionHistory) ? [...initialVersionHistory] : [];
+let timelineSegments = projectData ? JSON.parse(JSON.stringify(projectData.timeline || [])) : [];
+let selectedSegmentIndex = null;
+let wavesurferInstance = null;
+
+const AUTO_DEFAULT_STRENGTH = 0.12;
+const AUTO_DEFAULT_BASE_SCALE = 1.1;
+
+function setAutoControls(prefix, extras = {}, fillDefaults = false) {
+    const enabledEl = document.getElementById(`${prefix}-auto-enabled`);
+    if (enabledEl) enabledEl.checked = extras.auto_motion !== false;
+
+    const modeEl = document.getElementById(`${prefix}-auto-mode`);
+    if (modeEl) modeEl.value = extras.auto_motion_mode ?? '';
+
+    const strengthEl = document.getElementById(`${prefix}-auto-strength`);
+    if (strengthEl) {
+        let value = extras.auto_motion_strength;
+        if (value === undefined || value === null || value === '') {
+            value = fillDefaults ? AUTO_DEFAULT_STRENGTH : '';
+        }
+        strengthEl.value = value === '' ? '' : Number(value);
+    }
+
+    const baseEl = document.getElementById(`${prefix}-auto-base`);
+    if (baseEl) {
+        let value = extras.auto_motion_base_scale;
+        if (value === undefined || value === null || value === '') {
+            value = fillDefaults ? AUTO_DEFAULT_BASE_SCALE : '';
+        }
+        baseEl.value = value === '' ? '' : Number(value);
+    }
+
+    const shiftEl = document.getElementById(`${prefix}-auto-shift`);
+    if (shiftEl) {
+        let value = extras.auto_motion_shift;
+        if (value === undefined || value === null || value === '') {
+            value = '';
+        }
+        shiftEl.value = value === '' ? '' : Number(value);
+    }
+}
+
+function generateSegmentId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    return `seg-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+}
+
+function ensureNumber(value, fallback = 0) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+}
+
+function roundToTenths(value) {
+    if (!Number.isFinite(value)) return Number.NaN;
+    return Math.round(value * 10) / 10;
+}
+
+function normalizeTimelineSegments() {
+    timelineSegments = (timelineSegments || []).map((seg) => {
+        const start = ensureNumber(seg.start, 0);
+        const end = ensureNumber(seg.end, start + 0.1);
+        const extrasRaw = (seg.extras && typeof seg.extras === 'object') ? { ...seg.extras } : {};
+        return {
+            id: seg.id || generateSegmentId(),
+            media_type: seg.media_type || 'broll',
+            source: seg.source ?? 'auto',
+            start,
+            end: end <= start ? start + 0.1 : end,
+            extras: extrasRaw,
+        };
+    }).sort((a, b) => a.start - b.start);
+    if (projectData) {
+        projectData.timeline = timelineSegments;
+    }
+    if (!timelineSegments.length) {
+        selectedSegmentIndex = null;
+    } else if (selectedSegmentIndex === null || selectedSegmentIndex >= timelineSegments.length) {
+        selectedSegmentIndex = 0;
+    }
+}
+
+function syncTimelineTextarea() {
+    const textarea = document.getElementById('timeline-json');
+    if (textarea) {
+        textarea.value = JSON.stringify(timelineSegments, null, 2);
+    }
+    if (projectData) {
+        projectData.timeline = timelineSegments;
+    }
+}
+
+function renderTimelineOverlay() {
+    const overlay = document.getElementById('timeline-overlay');
+    if (!overlay || !projectData) return;
+    overlay.innerHTML = '';
+    const duration = projectData.duration || 1;
+    timelineSegments.forEach((segment, idx) => {
+        const bar = document.createElement('div');
+        const startPct = (segment.start / duration) * 100;
+        const widthPct = Math.max(((segment.end - segment.start) / duration) * 100, 0.5);
+        bar.className = 'timeline-segment-bar';
+        if (idx === selectedSegmentIndex) {
+            bar.classList.add('selected');
+        }
+        bar.style.left = `${Math.max(0, Math.min(startPct, 100))}%`;
+        bar.style.width = `${Math.min(widthPct, 100)}%`;
+        bar.title = `${segment.media_type} • ${segment.source || 'auto'}`;
+        bar.onclick = () => selectTimelineSegment(idx, { seek: true });
+        overlay.appendChild(bar);
+    });
+}
+
+function clearSegmentForm() {
+    ['segment-id', 'segment-start', 'segment-end', 'segment-source'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const typeSelect = document.getElementById('segment-type');
+    if (typeSelect) typeSelect.value = 'broll';
+    ['segment-pos-x', 'segment-pos-y', 'segment-end-pos-x', 'segment-end-pos-y', 'segment-scale-start', 'segment-scale-end'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    setAutoControls('segment', {}, true);
+}
+
+function setSegmentForm(segment) {
+    document.getElementById('segment-id').value = segment.id || '';
+    document.getElementById('segment-start').value = segment.start ?? 0;
+    document.getElementById('segment-end').value = segment.end ?? segment.start + 0.1;
+    document.getElementById('segment-source').value = segment.source || 'auto';
+    document.getElementById('segment-type').value = segment.media_type || 'broll';
+    const extras = segment.extras || {};
+    const pos = Array.isArray(extras.position) ? extras.position : null;
+    document.getElementById('segment-pos-x').value = pos ? pos[0] : '';
+    document.getElementById('segment-pos-y').value = pos ? pos[1] : '';
+    const endPos = Array.isArray(extras.position_end) ? extras.position_end : null;
+    document.getElementById('segment-end-pos-x').value = endPos ? endPos[0] : '';
+    document.getElementById('segment-end-pos-y').value = endPos ? endPos[1] : '';
+    document.getElementById('segment-scale-start').value = extras.scale_start ?? '';
+    document.getElementById('segment-scale-end').value = extras.scale_end ?? '';
+    setAutoControls('segment', extras, true);
+}
+
+function selectTimelineSegment(index, options = {}) {
+    if (!timelineSegments[index]) return;
+    const { seek = true } = options;
+    selectedSegmentIndex = index;
+    const segment = timelineSegments[index];
+    setSegmentForm(segment);
+    renderTimelineOverlay();
+    if (seek && wavesurferInstance && projectData?.duration) {
+        const duration = projectData.duration || 1;
+        const ratio = Math.min(Math.max(segment.start / duration, 0), 1);
+        wavesurferInstance.seekTo(ratio);
+    }
+}
+
+function applyTimelineEdit(baseName) {
+    if (selectedSegmentIndex === null) {
+        showMessage('편집할 세그먼트를 선택하세요.', 'error');
+        return;
+    }
+    const segment = timelineSegments[selectedSegmentIndex];
+    const start = ensureNumber(document.getElementById('segment-start').value, segment.start);
+    const end = ensureNumber(document.getElementById('segment-end').value, segment.end);
+    segment.id = document.getElementById('segment-id').value || segment.id || generateSegmentId();
+   segment.start = start;
+   segment.end = end <= start ? start + 0.1 : end;
+    segment.source = document.getElementById('segment-source').value || 'auto';
+    segment.media_type = document.getElementById('segment-type').value || 'broll';
+    segment.extras = segment.extras || {};
+    const extras = segment.extras;
+
+    const autoEnabledEl = document.getElementById('segment-auto-enabled');
+    const autoEnabled = autoEnabledEl ? autoEnabledEl.checked : true;
+    if (!autoEnabled) {
+        extras.auto_motion = false;
+    } else {
+        delete extras.auto_motion;
+    }
+    const autoModeVal = document.getElementById('segment-auto-mode').value;
+    if (autoModeVal) {
+        extras.auto_motion_mode = autoModeVal;
+    } else {
+        delete extras.auto_motion_mode;
+    }
+    const autoStrengthVal = parseFloat(document.getElementById('segment-auto-strength').value);
+    if (!Number.isNaN(autoStrengthVal)) {
+        extras.auto_motion_strength = autoStrengthVal;
+    } else {
+        delete extras.auto_motion_strength;
+    }
+    const autoBaseVal = parseFloat(document.getElementById('segment-auto-base').value);
+    if (!Number.isNaN(autoBaseVal)) {
+        extras.auto_motion_base_scale = autoBaseVal;
+    } else {
+        delete extras.auto_motion_base_scale;
+    }
+    const autoShiftVal = parseFloat(document.getElementById('segment-auto-shift').value);
+    if (!Number.isNaN(autoShiftVal)) {
+        extras.auto_motion_shift = autoShiftVal;
+    } else {
+        delete extras.auto_motion_shift;
+    }
+
+    const posX = parseFloat(document.getElementById('segment-pos-x').value);
+    const posY = parseFloat(document.getElementById('segment-pos-y').value);
+    if (!Number.isNaN(posX) && !Number.isNaN(posY)) {
+        extras.position = [posX, posY];
+    } else {
+        delete extras.position;
+    }
+
+    const endPosX = parseFloat(document.getElementById('segment-end-pos-x').value);
+    const endPosY = parseFloat(document.getElementById('segment-end-pos-y').value);
+    if (!Number.isNaN(endPosX) && !Number.isNaN(endPosY)) {
+        extras.position_end = [endPosX, endPosY];
+    } else {
+        delete extras.position_end;
+    }
+
+    const scaleStartVal = parseFloat(document.getElementById('segment-scale-start').value);
+    const scaleEndVal = parseFloat(document.getElementById('segment-scale-end').value);
+    if (!Number.isNaN(scaleStartVal)) {
+        extras.scale_start = scaleStartVal;
+    } else {
+        delete extras.scale_start;
+    }
+    if (!Number.isNaN(scaleEndVal)) {
+        extras.scale_end = scaleEndVal;
+    } else {
+        delete extras.scale_end;
+    }
+
+    timelineSegments.sort((a, b) => a.start - b.start);
+    selectedSegmentIndex = timelineSegments.findIndex((seg) => seg.id === segment.id);
+    syncTimelineTextarea();
+    renderTimelineOverlay();
+    showMessage('세그먼트가 수정되었습니다. 저장 버튼을 눌러 반영하세요.', 'info');
+}
+
+function addTimelineSegment() {
+    const start = ensureNumber(document.getElementById('new-segment-start').value, 0);
+    const end = ensureNumber(document.getElementById('new-segment-end').value, start + 0.1);
+    const source = document.getElementById('new-segment-source').value || 'auto';
+    const mediaType = document.getElementById('new-segment-type').value || 'broll';
+    const posX = parseFloat(document.getElementById('new-pos-x').value);
+    const posY = parseFloat(document.getElementById('new-pos-y').value);
+    const endPosX = parseFloat(document.getElementById('new-end-pos-x').value);
+    const endPosY = parseFloat(document.getElementById('new-end-pos-y').value);
+    const scaleStartVal = parseFloat(document.getElementById('new-scale-start').value);
+    const scaleEndVal = parseFloat(document.getElementById('new-scale-end').value);
+    const newAutoEnabledEl = document.getElementById('new-auto-enabled');
+    const newAutoEnabled = newAutoEnabledEl ? newAutoEnabledEl.checked : true;
+    const newAutoMode = document.getElementById('new-auto-mode').value;
+    const newAutoStrength = parseFloat(document.getElementById('new-auto-strength').value);
+    const newAutoBase = parseFloat(document.getElementById('new-auto-base').value);
+    const newAutoShift = parseFloat(document.getElementById('new-auto-shift').value);
+
+    const newSegment = {
+        id: generateSegmentId(),
+        media_type: mediaType,
+        source,
+        start,
+        end: end <= start ? start + 0.1 : end,
+        extras: {},
+    };
+    if (!newAutoEnabled) {
+        newSegment.extras.auto_motion = false;
+    }
+    if (newAutoMode) {
+        newSegment.extras.auto_motion_mode = newAutoMode;
+    }
+    if (!Number.isNaN(newAutoStrength)) {
+        newSegment.extras.auto_motion_strength = newAutoStrength;
+    }
+    if (!Number.isNaN(newAutoBase)) {
+        newSegment.extras.auto_motion_base_scale = newAutoBase;
+    }
+    if (!Number.isNaN(newAutoShift)) {
+        newSegment.extras.auto_motion_shift = newAutoShift;
+    }
+    if (!Number.isNaN(posX) && !Number.isNaN(posY)) {
+        newSegment.extras.position = [posX, posY];
+    }
+    if (!Number.isNaN(endPosX) && !Number.isNaN(endPosY)) {
+        newSegment.extras.position_end = [endPosX, endPosY];
+    }
+    if (!Number.isNaN(scaleStartVal)) {
+        newSegment.extras.scale_start = scaleStartVal;
+    }
+    if (!Number.isNaN(scaleEndVal)) {
+        newSegment.extras.scale_end = scaleEndVal;
+    }
+    timelineSegments.push(newSegment);
+    timelineSegments.sort((a, b) => a.start - b.start);
+    selectedSegmentIndex = timelineSegments.findIndex((seg) => seg.id === newSegment.id);
+    syncTimelineTextarea();
+    renderTimelineOverlay();
+    setSegmentForm(newSegment);
+    document.getElementById('new-segment-start').value = '';
+    document.getElementById('new-segment-end').value = '';
+    document.getElementById('new-segment-source').value = '';
+    document.getElementById('new-segment-type').value = 'broll';
+    ['new-pos-x', 'new-pos-y', 'new-end-pos-x', 'new-end-pos-y', 'new-scale-start', 'new-scale-end'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    setAutoControls('new', {}, true);
+    showMessage('세그먼트가 추가되었습니다. 저장 버튼을 눌러 반영하세요.', 'success');
+}
+
+function removeTimelineSegment() {
+    if (selectedSegmentIndex === null) {
+        showMessage('삭제할 세그먼트를 선택하세요.', 'error');
+        return;
+    }
+    timelineSegments.splice(selectedSegmentIndex, 1);
+    if (!timelineSegments.length) {
+        selectedSegmentIndex = null;
+        clearSegmentForm();
+    } else {
+        selectedSegmentIndex = Math.min(selectedSegmentIndex, timelineSegments.length - 1);
+        setSegmentForm(timelineSegments[selectedSegmentIndex]);
+    }
+    syncTimelineTextarea();
+    renderTimelineOverlay();
+    showMessage('세그먼트가 제거되었습니다. 저장 버튼을 눌러 반영하세요.', 'info');
+}
+
+async function updateTimeline(baseName) {
+    const textarea = document.getElementById('timeline-json');
+    if (!textarea) return;
+    try {
+        const parsed = JSON.parse(textarea.value || '[]');
+        timelineSegments = Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        showMessage('유효한 JSON 형식이 아닙니다.', 'error');
+        return;
+    }
+    normalizeTimelineSegments();
+    const res = await fetch(`/api/projects/${baseName}/timeline`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ segments: timelineSegments })
+    });
+    if (res.ok) {
+        showMessage('타임라인이 저장되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 600);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '타임라인 저장 실패', 'error');
+    }
+}
+
+async function updateSubtitle(baseName, subtitleId) {
+    const startInput = document.querySelector(`[data-sub-id="${subtitleId}"][data-field="start"]`);
+    const endInput = document.querySelector(`[data-sub-id="${subtitleId}"][data-field="end"]`);
+    const textInput = document.querySelector(`[data-sub-id="${subtitleId}"][data-field="text"]`);
+    if (!startInput || !endInput || !textInput) return;
+
+    const startValue = roundToTenths(parseFloat(startInput.value));
+    const endValue = roundToTenths(parseFloat(endInput.value));
+    if (Number.isNaN(startValue) || Number.isNaN(endValue)) {
+        showMessage('start/end 값을 확인해주세요. 예: 12.3', 'error');
+        return;
+    }
+    startInput.value = startValue.toFixed(1);
+    endInput.value = endValue.toFixed(1);
+
+    const payload = {
+        start: startValue,
+        end: endValue,
+        text: textInput.value
+    };
+
+    const res = await fetch(`/api/projects/${baseName}/subtitles/${subtitleId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+        showMessage('자막이 저장되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 500);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '자막 저장 실패', 'error');
+    }
+}
+
+async function deleteSubtitle(baseName, subtitleId) {
+    if (!confirm('선택한 자막을 삭제할까요?')) return;
+    const res = await fetch(`/api/projects/${baseName}/subtitles/${subtitleId}`, { method: 'DELETE' });
+    if (res.ok) {
+        showMessage('자막이 삭제되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 500);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '자막 삭제 실패', 'error');
+    }
+}
+
+async function createSubtitle(baseName) {
+    const start = roundToTenths(parseFloat(document.getElementById('new-start').value));
+    const end = roundToTenths(parseFloat(document.getElementById('new-end').value));
+    const text = document.getElementById('new-text').value;
+    if (Number.isNaN(start) || Number.isNaN(end) || !text) {
+        showMessage('start, end, text를 모두 입력해주세요.', 'error');
+        return;
+    }
+    document.getElementById('new-start').value = start.toFixed(1);
+    document.getElementById('new-end').value = end.toFixed(1);
+    const res = await fetch(`/api/projects/${baseName}/subtitles`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ start, end, text })
+    });
+    if (res.ok) {
+        showMessage('자막이 추가되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 500);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '자막 추가 실패', 'error');
+    }
+}
+
+async function updateAudio(baseName) {
+    const enabled = document.getElementById('music-enabled').checked;
+    const volume = parseFloat(document.getElementById('music-volume').value);
+    const ducking = parseFloat(document.getElementById('ducking').value);
+    const track = document.getElementById('music-track').value;
+
+    const res = await fetch(`/api/projects/${baseName}/audio`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            music_enabled: enabled,
+            music_volume: volume,
+            ducking,
+            music_track: track || null
+        })
+    });
+    if (res.ok) {
+        showMessage('오디오 설정이 저장되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 600);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '오디오 저장 실패', 'error');
+    }
+}
+
+async function updateSubtitleStyle(baseName) {
+    const fontSize = parseInt(document.getElementById('subtitle-font-size').value, 10);
+    const yOffset = parseInt(document.getElementById('subtitle-y-offset').value, 10);
+    const strokeWidth = parseInt(document.getElementById('subtitle-stroke-width').value, 10);
+    const fontPathInput = document.getElementById('subtitle-font-path');
+    const animationSelect = document.getElementById('subtitle-animation');
+    const templateSelect = document.getElementById('subtitle-template');
+    const bannerPrimaryInput = document.getElementById('banner-primary-text');
+    const bannerSecondaryInput = document.getElementById('banner-secondary-text');
+    const bannerPrimarySizeInput = document.getElementById('banner-primary-size');
+    const bannerSecondarySizeInput = document.getElementById('banner-secondary-size');
+    const bannerLineSpacingInput = document.getElementById('banner-line-spacing');
+
+    const payload = {};
+    if (!Number.isNaN(fontSize)) payload.font_size = fontSize;
+    if (!Number.isNaN(yOffset)) payload.y_offset = yOffset;
+    if (!Number.isNaN(strokeWidth)) payload.stroke_width = strokeWidth;
+    if (fontPathInput) {
+        const currentValue = fontPathInput.value.trim();
+        const initialValue = fontPathInput.dataset.initial ?? '';
+        if (currentValue !== initialValue) {
+            payload.font_path = currentValue || null;
+        }
+    }
+    if (animationSelect) {
+        const currentAnimation = (animationSelect.value || 'none');
+        const initialAnimation = animationSelect.dataset.initial ?? 'none';
+        if (currentAnimation !== initialAnimation) {
+            payload.animation = currentAnimation;
+        }
+    }
+    if (templateSelect) {
+        const currentTemplate = (templateSelect.value || 'classic');
+        const initialTemplate = templateSelect.dataset.initial ?? 'classic';
+        if (currentTemplate !== initialTemplate) {
+            payload.template = currentTemplate;
+        }
+    }
+    if (bannerPrimaryInput) {
+        const currentPrimary = bannerPrimaryInput.value.trim();
+        const initialPrimary = bannerPrimaryInput.dataset.initial ?? '';
+        if (currentPrimary !== initialPrimary) {
+            payload.banner_primary_text = currentPrimary;
+        }
+    }
+    if (bannerSecondaryInput) {
+        const currentSecondary = bannerSecondaryInput.value.trim();
+        const initialSecondary = bannerSecondaryInput.dataset.initial ?? '';
+        if (currentSecondary !== initialSecondary) {
+            payload.banner_secondary_text = currentSecondary;
+        }
+    }
+    if (bannerPrimarySizeInput) {
+        const currentPrimarySize = bannerPrimarySizeInput.value.trim();
+        const initialPrimarySize = bannerPrimarySizeInput.dataset.initial ?? '';
+        if (currentPrimarySize !== initialPrimarySize) {
+            payload.banner_primary_font_size = currentPrimarySize ? parseInt(currentPrimarySize, 10) : null;
+        }
+    }
+    if (bannerSecondarySizeInput) {
+        const currentSecondarySize = bannerSecondarySizeInput.value.trim();
+        const initialSecondarySize = bannerSecondarySizeInput.dataset.initial ?? '';
+        if (currentSecondarySize !== initialSecondarySize) {
+            payload.banner_secondary_font_size = currentSecondarySize ? parseInt(currentSecondarySize, 10) : null;
+        }
+    }
+    if (bannerLineSpacingInput) {
+        const currentSpacing = bannerLineSpacingInput.value.trim();
+        const initialSpacing = bannerLineSpacingInput.dataset.initial ?? '';
+        if (currentSpacing !== initialSpacing) {
+            payload.banner_line_spacing = currentSpacing ? parseInt(currentSpacing, 10) : null;
+        }
+    }
+
+    const res = await fetch(`/api/projects/${baseName}/subtitle-style`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+        showMessage('자막 스타일이 저장되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 600);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '자막 스타일 저장 실패', 'error');
+    }
+}
+
+async function deleteProject(baseName) {
+    if (!confirm('프로젝트의 모든 파일을 삭제할까요?')) return;
+    const res = await fetch(`/api/projects/${baseName}`, { method: 'DELETE' });
+    if (res.status === 204) {
+        showMessage('프로젝트가 삭제되었습니다.', 'success');
+        setTimeout(() => window.location.href = '/', 500);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '삭제 실패', 'error');
+    }
+}
+
+async function requestRender(baseName) {
+    const burn = document.getElementById('burn-render')?.checked || false;
+    showMessage('재렌더링을 시작합니다...', 'info');
+    const res = await fetch(`/api/projects/${baseName}/render`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ burn_subs: burn })
+    });
+    if (res.ok) {
+        showMessage('재렌더링이 완료되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 800);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '재렌더링 실패', 'error');
+    }
+}
+
+function renderVersionList(list) {
+    const container = document.getElementById('version-list');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!list.length) {
+        const li = document.createElement('li');
+        li.textContent = '저장된 버전이 없습니다.';
+        container.appendChild(li);
+        return;
+    }
+    list
+        .slice()
+        .sort((a, b) => (b.version || 0) - (a.version || 0))
+        .forEach((item) => {
+            const li = document.createElement('li');
+            const dateLabel = item.updated_at ? ` (${item.updated_at})` : '';
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = '복원';
+            button.onclick = () => restoreVersion(projectData.base_name, item.version);
+            li.textContent = `v${item.version}${dateLabel} `;
+            li.appendChild(button);
+            container.appendChild(li);
+        });
+}
+
+async function refreshVersionHistory(baseName) {
+    const res = await fetch(`/api/projects/${baseName}/versions`);
+    if (res.ok) {
+        versionHistory = await res.json();
+        renderVersionList(versionHistory);
+    }
+}
+
+async function restoreVersion(baseName, version) {
+    if (!confirm(`v${version} 버전으로 복원할까요? 현재 상태는 새 버전으로 저장됩니다.`)) return;
+    const res = await fetch(`/api/projects/${baseName}/versions/${version}/restore`, { method: 'POST' });
+    if (res.ok) {
+        showMessage('복원되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 700);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '복원 실패', 'error');
+    }
+}
+
+function wavePlay() {
+    if (wavesurferInstance) {
+        wavesurferInstance.play();
+    }
+}
+
+function wavePause() {
+    if (wavesurferInstance) {
+        wavesurferInstance.pause();
+    }
+}
+
+function updateCurrentTimeDisplay(time) {
+    const label = document.getElementById('current-time');
+    if (!label) return;
+    const safeTime = Number.isFinite(time) ? time : 0;
+    label.textContent = `${safeTime.toFixed(2)}s`;
+}
+
+function findSegmentIndexByTime(time) {
+    return timelineSegments.findIndex((segment) => time >= segment.start && time <= segment.end + 0.05);
+}
+
+function maybeSelectSegmentByTime(time) {
+    if (!timelineSegments.length) return;
+    const idx = findSegmentIndexByTime(time);
+    if (idx !== -1 && idx !== selectedSegmentIndex) {
+        selectTimelineSegment(idx, { seek: false });
+    }
+}
+
+function initWaveform() {
+    if (!projectData || !audioUrl || !document.getElementById('waveform')) return;
+    wavesurferInstance = WaveSurfer.create({
+        container: '#waveform',
+        waveColor: '#4bd4ff',
+        progressColor: '#5b7fff',
+        cursorColor: '#ffd166',
+        height: 96,
+    });
+    wavesurferInstance.load(audioUrl);
+    wavesurferInstance.on('ready', () => {
+        updateCurrentTimeDisplay(0);
+        renderTimelineOverlay();
+    });
+    wavesurferInstance.on('audioprocess', (time) => {
+        const current = Number.isFinite(time) ? time : wavesurferInstance.getCurrentTime();
+        updateCurrentTimeDisplay(current);
+        maybeSelectSegmentByTime(current);
+    });
+    wavesurferInstance.on('seek', () => {
+        const current = wavesurferInstance.getCurrentTime();
+        updateCurrentTimeDisplay(current);
+        maybeSelectSegmentByTime(current);
+    });
+}
+
+function addInitialVersionList() {
+    renderVersionList(versionHistory);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+    if (projectData) {
+        normalizeTimelineSegments();
+        syncTimelineTextarea();
+        renderTimelineOverlay();
+        if (timelineSegments.length) {
+            selectTimelineSegment(selectedSegmentIndex ?? 0, { seek: false });
+        } else {
+            clearSegmentForm();
+        }
+        setAutoControls('new', {}, true);
+        const style = projectData.subtitle_style || {};
+        const fontSizeInput = document.getElementById('subtitle-font-size');
+        const yOffsetInput = document.getElementById('subtitle-y-offset');
+        const strokeWidthInput = document.getElementById('subtitle-stroke-width');
+        const fontPathInput = document.getElementById('subtitle-font-path');
+        const animationSelect = document.getElementById('subtitle-animation');
+        const templateSelect = document.getElementById('subtitle-template');
+        const bannerPrimaryInput = document.getElementById('banner-primary-text');
+        const bannerSecondaryInput = document.getElementById('banner-secondary-text');
+        const bannerPrimarySizeInput = document.getElementById('banner-primary-size');
+        const bannerSecondarySizeInput = document.getElementById('banner-secondary-size');
+        const bannerLineSpacingInput = document.getElementById('banner-line-spacing');
+        if (fontSizeInput) fontSizeInput.value = style.font_size ?? 62;
+        if (yOffsetInput) yOffsetInput.value = style.y_offset ?? 0;
+        if (strokeWidthInput) strokeWidthInput.value = style.stroke_width ?? 2;
+        if (fontPathInput) {
+            const currentFontPath = style.font_path ?? '';
+            fontPathInput.value = currentFontPath;
+            fontPathInput.dataset.initial = currentFontPath;
+        }
+        if (animationSelect) {
+            const animationValue = style.animation ?? 'none';
+            animationSelect.value = animationValue;
+            animationSelect.dataset.initial = animationValue;
+        }
+        if (templateSelect) {
+            const templateValue = (style.template ?? 'classic').toLowerCase();
+            templateSelect.value = templateValue;
+            templateSelect.dataset.initial = templateValue;
+            templateSelect.addEventListener('change', updateBannerVisibility);
+        }
+        if (bannerPrimaryInput) {
+            const primaryText = style.banner_primary_text ?? '';
+            bannerPrimaryInput.value = primaryText;
+            bannerPrimaryInput.dataset.initial = primaryText;
+        }
+        if (bannerSecondaryInput) {
+            const secondaryText = style.banner_secondary_text ?? '';
+            bannerSecondaryInput.value = secondaryText;
+            bannerSecondaryInput.dataset.initial = secondaryText;
+        }
+        if (bannerPrimarySizeInput) {
+            const primarySize = style.banner_primary_font_size;
+            const primarySizeValue = primarySize ?? '';
+            bannerPrimarySizeInput.value = primarySizeValue;
+            bannerPrimarySizeInput.dataset.initial = primarySizeValue === '' ? '' : String(primarySizeValue);
+        }
+        if (bannerSecondarySizeInput) {
+            const secondarySize = style.banner_secondary_font_size;
+            const secondarySizeValue = secondarySize ?? '';
+            bannerSecondarySizeInput.value = secondarySizeValue;
+            bannerSecondarySizeInput.dataset.initial = secondarySizeValue === '' ? '' : String(secondarySizeValue);
+        }
+        if (bannerLineSpacingInput) {
+            const spacingValue = style.banner_line_spacing;
+            const spacingString = spacingValue ?? '';
+            bannerLineSpacingInput.value = spacingString;
+            bannerLineSpacingInput.dataset.initial = spacingString === '' ? '' : String(spacingString);
+        }
+        updateBannerVisibility();
+        addInitialVersionList();
+        refreshVersionHistory(projectData.base_name);
+        initWaveform();
+    } else {
+        renderVersionList([]);
+        [['subtitle-font-size', 62], ['subtitle-y-offset', 0], ['subtitle-stroke-width', 2]].forEach(([id, defaultVal]) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.value = defaultVal;
+        });
+        const fontPathInput = document.getElementById('subtitle-font-path');
+        if (fontPathInput) {
+            fontPathInput.value = '';
+            fontPathInput.dataset.initial = '';
+        }
+        const animationSelect = document.getElementById('subtitle-animation');
+        if (animationSelect) {
+            animationSelect.value = 'none';
+            animationSelect.dataset.initial = 'none';
+        }
+        const templateSelect = document.getElementById('subtitle-template');
+        if (templateSelect) {
+            templateSelect.value = 'classic';
+            templateSelect.dataset.initial = 'classic';
+            templateSelect.addEventListener('change', updateBannerVisibility);
+        }
+        const bannerPrimaryInput = document.getElementById('banner-primary-text');
+        const bannerSecondaryInput = document.getElementById('banner-secondary-text');
+        const bannerPrimarySizeInput = document.getElementById('banner-primary-size');
+        const bannerSecondarySizeInput = document.getElementById('banner-secondary-size');
+        const bannerLineSpacingInput = document.getElementById('banner-line-spacing');
+        if (bannerPrimaryInput) {
+            bannerPrimaryInput.value = '';
+            bannerPrimaryInput.dataset.initial = '';
+        }
+        if (bannerSecondaryInput) {
+            bannerSecondaryInput.value = '';
+            bannerSecondaryInput.dataset.initial = '';
+        }
+        if (bannerPrimarySizeInput) {
+            bannerPrimarySizeInput.value = '';
+            bannerPrimarySizeInput.dataset.initial = '';
+        }
+        if (bannerSecondarySizeInput) {
+            bannerSecondarySizeInput.value = '';
+            bannerSecondarySizeInput.dataset.initial = '';
+        }
+        if (bannerLineSpacingInput) {
+            bannerLineSpacingInput.value = '';
+            bannerLineSpacingInput.dataset.initial = '';
+        }
+        updateBannerVisibility();
+        setAutoControls('segment', {}, true);
+        setAutoControls('new', {}, true);
+    }
+});
+</script>
+</body>
+</html>

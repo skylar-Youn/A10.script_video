@@ -1,0 +1,1542 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>쇼츠 번역 및 재해석기</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="brand">
+                <h1><a href="/">유튜브 제작기</a> / 쇼츠 번역기</h1>
+            </div>
+        </header>
+
+        <div id="project-view" class="hidden">
+            <section class="panel">
+                <div class="panel-header">
+                    <h2 id="project-title"></h2>
+                    <p id="project-status" class="panel-subtitle"></p>
+                </div>
+                <div id="project-actions"></div>
+            </section>
+            <section class="panel">
+                <h3>번역 결과</h3>
+                <div id="segments-table" class="segments-table"></div>
+            </section>
+        </div>
+
+        <div id="creation-view">
+            <section class="panel">
+                <div class="panel-header">
+                    <h2>1. 소스 선택</h2>
+                    <p class="panel-subtitle">번역할 영상과 자막 파일을 선택하세요. 파일은 <code>youtube/download</code> 폴더에서 가져옵니다.</p>
+                </div>
+                <div id="downloads-list" class="downloads-list">
+                    <p class="empty-state">다운로드된 파일을 불러오는 중...</p>
+                    <p class="empty-state" style="color: #666; font-size: 0.9em;">
+                        만약 이 메시지가 계속 표시된다면
+                        <button onclick="location.reload(true)" style="margin: 0 5px; padding: 2px 8px;">강제 새로고침</button>
+                        또는 개발자 도구(F12)에서 콘솔 오류를 확인해주세요.
+                    </p>
+                </div>
+            </section>
+
+            <section class="panel" id="ai-commentary-section">
+                <div class="panel-header">
+                    <h2>2. AI 해설 생성</h2>
+                    <p class="panel-subtitle">선택된 영상의 자막을 분석하여 AI가 자동으로 해설을 생성합니다.</p>
+                </div>
+                <div id="selected-source-info" class="source-info">
+                    <div class="source-details">
+                        <h4 id="selected-source-title">선택된 소스</h4>
+                        <p><strong>영상:</strong> <span id="selected-video-name">선택되지 않음</span></p>
+                        <p><strong>자막:</strong> <span id="selected-subtitle-name">선택되지 않음</span></p>
+                    </div>
+                </div>
+                <div class="ai-commentary-controls">
+                    <button type="button" id="generate-commentary-btn" class="btn-primary">
+                        AI 해설 생성하기
+                    </button>
+                    <button type="button" id="skip-commentary-btn" class="btn-secondary">
+                        건너뛰기
+                    </button>
+                </div>
+                <div id="commentary-generation-status" class="status-message" style="display: none;">
+                    <p>AI가 해설을 생성하고 있습니다...</p>
+                </div>
+            </section>
+
+            <section class="panel" id="translation-settings-section">
+                <div class="panel-header">
+                    <h2>3. 번역 설정</h2>
+                    <div>
+                        <button type="button" id="load-settings-btn" class="btn-secondary btn-sm">지난 설정 불러오기</button>
+                        <button type="button" id="save-settings-btn" class="btn-secondary btn-sm">설정 저장</button>
+                    </div>
+                </div>
+                <form id="creation-form" class="form-grid" autocomplete="off">
+                    <div class="form-group">
+                        <label for="target-lang">목표 언어</label>
+                        <select id="target-lang" name="target_lang" class="form-control" autocomplete="off">
+                            <option value="ko">한국어</option>
+                            <option value="en">English</option>
+                            <option value="ja" selected>日本語</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="translation-mode">번역 모드</label>
+                        <select id="translation-mode" name="translation_mode" class="form-control">
+                            <option value="adaptive">적응형</option>
+                            <option value="literal">직역</option>
+                            <option value="reinterpret" selected>재해석 (기본)</option>
+                        </select>
+                    </div>
+                    <div class="form-group form-group-full">
+                        <label for="tone-hint">톤/스타일 힌트 (선택 사항)</label>
+                        <input type="text" id="tone-hint" name="tone_hint" class="form-control" placeholder="드라마하고 유쾌하면서 유머러스하게" value="드라마하고 유쾌하면서 유머러스하게">
+                    </div>
+                    <div class="form-group form-group-full">
+                        <button type="submit" class="btn-primary">번역 프로젝트 생성</button>
+                    </div>
+                </form>
+            </section>
+        </div>
+    </div>
+
+
+
+    <script>
+    (function () {
+        const creationView = document.getElementById('creation-view');
+        const projectView = document.getElementById('project-view');
+        const downloadsList = document.getElementById('downloads-list');
+        const creationForm = document.getElementById('creation-form');
+
+        const projectTitle = document.getElementById('project-title');
+        const projectStatus = document.getElementById('project-status');
+        const projectActions = document.getElementById('project-actions');
+        const segmentsTable = document.getElementById('segments-table');
+
+        let selectedSource = null;
+        let currentProject = null;
+
+
+
+        function renderDownloads(items) {
+            if (!items || !items.length) {
+                downloadsList.innerHTML = '<p class="empty-state">다운로드된 영상이 없습니다. <a href="/ytdl">유튜브 다운로드</a> 도구를 사용하여 먼저 영상을 받아주세요.</p>';
+                return;
+            }
+            const html = items.map((item, index) => {
+                const hasSubtitle = item.subtitle_path;
+                const videoName = item.base_name;
+                const subtitleName = hasSubtitle ? item.subtitle_path.split('/').pop() : '자막 없음';
+                return `
+                    <div class="download-item" data-index="${index}">
+                        <div class="item-header">
+                            <input type="radio" name="source" id="source-${index}" value="${index}">
+                            <label for="source-${index}">${videoName}</label>
+                        </div>
+                        <div class="item-meta">
+                            <span>${item.video_path}</span>
+                            <span class="${hasSubtitle ? 'text-success' : 'text-warning'}">${subtitleName}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            downloadsList.innerHTML = `<div class="form-group">${html}</div>`;
+            downloadsList.querySelectorAll('input[name="source"]').forEach(radio => {
+                radio.addEventListener('change', (event) => {
+                    const selectedIndex = parseInt(event.target.value, 10);
+                    selectedSource = items[selectedIndex];
+                    showAICommentarySection();
+                });
+            });
+        }
+
+        function fetchDownloads() {
+            downloadsList.innerHTML = '<p class="empty-state">API 호출 중...</p>';
+
+            // Add cache busting parameter
+            const cacheBuster = Date.now();
+            fetch(`/api/translator/downloads?_cb=${cacheBuster}`)
+                .then(res => {
+                    if (res.ok) {
+                        return res.json();
+                    } else {
+                        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                    }
+                })
+                .then(data => {
+                    renderDownloads(data);
+                })
+                .catch(err => {
+                    console.error('Download fetch error:', err);
+                    downloadsList.innerHTML = `<p class="empty-state error">오류가 발생했습니다: ${err.message}</p>`;
+                });
+        }
+
+        function applySettings(settings) {
+            // alert('Received settings: ' + JSON.stringify(settings));
+            if (settings) {
+                document.getElementById('target-lang').value = settings.target_lang || 'ja';
+                document.getElementById('translation-mode').value = settings.translation_mode || 'reinterpret';
+                document.getElementById('tone-hint').value = settings.tone_hint || '드라마하고 유쾌하면서 유머러스하게';
+            }
+        }
+
+        const loadSettingsBtn = document.getElementById('load-settings-btn');
+        if (loadSettingsBtn) {
+            loadSettingsBtn.addEventListener('click', () => {
+                fetch('/api/translator/settings')
+                    .then(res => res.ok ? res.json() : Promise.reject(res))
+                    .then(applySettings)
+                    .catch(err => {
+                        console.error(err);
+                        alert('설정을 불러오는 데 실패했습니다.');
+                    });
+            });
+        }
+
+        const saveSettingsBtn = document.getElementById('save-settings-btn');
+        if (saveSettingsBtn) {
+            saveSettingsBtn.addEventListener('click', () => {
+                const formData = new FormData(creationForm);
+                const settings = {
+                    target_lang: formData.get('target_lang'),
+                    translation_mode: formData.get('translation_mode'),
+                    tone_hint: formData.get('tone_hint') || null,
+                };
+
+                fetch('/api/translator/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings),
+                })
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(result => {
+                    alert('설정이 저장되었습니다.');
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('설정 저장에 실패했습니다.');
+                });
+            });
+        }
+
+        creationForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            if (!selectedSource) {
+                alert('번역할 소스 파일을 선택해주세요.');
+                return;
+            }
+            const formData = new FormData(creationForm);
+            const payload = {
+                source_video: selectedSource.video_path,
+                source_subtitle: selectedSource.subtitle_path || null,
+                target_lang: formData.get('target_lang'),
+                translation_mode: formData.get('translation_mode'),
+                tone_hint: formData.get('tone_hint') || null,
+            };
+            const submitButton = creationForm.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
+            submitButton.textContent = '생성 중...';
+            fetch('/api/translator/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            })
+            .then(res => res.ok ? res.json() : Promise.reject(res))
+            .then(project => {
+                window.location.href = `/translator?id=${project.id}`;
+            })
+            .catch(err => {
+                console.error(err);
+                alert('오류가 발생했습니다.');
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.textContent = '번역 프로젝트 생성';
+            });
+        });
+
+        function renderProject(project) {
+            currentProject = project;
+            creationView.classList.add('hidden');
+            projectView.classList.remove('hidden');
+
+            projectTitle.textContent = project.base_name;
+            projectStatus.textContent = `상태: ${project.status}`;
+
+            // Reconstruct selectedSource from project data
+            if (project.source_video) {
+                selectedSource = {
+                    video_path: project.source_video,
+                    subtitle_path: project.source_subtitle,
+                    base_name: project.base_name
+                };
+            }
+
+            projectActions.innerHTML = ''; // Clear actions
+
+            // Always show delete button
+            const deleteBtn = document.createElement('button');
+            deleteBtn.id = 'delete-project-btn';
+            deleteBtn.className = 'btn-secondary';
+            deleteBtn.style.background = 'linear-gradient(120deg, #ff6d6d, #ff3d7f)';
+            deleteBtn.style.color = '#fff6f6';
+            deleteBtn.textContent = '프로젝트 삭제';
+            deleteBtn.addEventListener('click', deleteProject);
+            projectActions.appendChild(deleteBtn);
+
+            if (project.status === 'segmenting' || project.status === 'draft') {
+                const translateBtn = document.createElement('button');
+                translateBtn.id = 'translate-btn';
+                translateBtn.className = 'btn-primary';
+                translateBtn.textContent = '번역 실행';
+                translateBtn.addEventListener('click', runTranslation);
+                projectActions.appendChild(translateBtn);
+
+                const commentaryBtn = document.createElement('button');
+                commentaryBtn.id = 'korean-commentary-btn';
+                commentaryBtn.className = 'btn-secondary';
+                commentaryBtn.textContent = '한국어 AI 해설 넣기';
+                commentaryBtn.style.background = '#28a745';
+                commentaryBtn.style.color = 'white';
+                commentaryBtn.addEventListener('click', generateKoreanCommentary);
+                projectActions.appendChild(commentaryBtn);
+            } else if (project.status === 'voice_ready') {
+                // Voice synthesis mode selector
+                const voiceModeDiv = document.createElement('div');
+                voiceModeDiv.style.display = 'flex';
+                voiceModeDiv.style.alignItems = 'center';
+                voiceModeDiv.style.gap = '10px';
+                voiceModeDiv.style.marginBottom = '10px';
+
+                const voiceModeLabel = document.createElement('label');
+                voiceModeLabel.textContent = '음성 합성 대상:';
+                voiceModeLabel.style.fontWeight = 'bold';
+
+                const voiceModeSelect = document.createElement('select');
+                voiceModeSelect.id = 'voice-synthesis-mode';
+                voiceModeSelect.innerHTML = `
+                    <option value="subtitle" ${project.voice_synthesis_mode === 'subtitle' ? 'selected' : ''}>자막만</option>
+                    <option value="commentary" ${project.voice_synthesis_mode === 'commentary' ? 'selected' : ''}>해설만</option>
+                    <option value="both" ${project.voice_synthesis_mode === 'both' ? 'selected' : ''}>자막+해설</option>
+                `;
+                voiceModeSelect.addEventListener('change', updateVoiceSynthesisMode);
+
+                voiceModeDiv.appendChild(voiceModeLabel);
+                voiceModeDiv.appendChild(voiceModeSelect);
+                projectActions.appendChild(voiceModeDiv);
+
+                const voiceBtn = document.createElement('button');
+                voiceBtn.id = 'voice-btn';
+                voiceBtn.className = 'btn-primary';
+                voiceBtn.textContent = '음성 생성';
+                voiceBtn.addEventListener('click', runVoiceSynthesis);
+                projectActions.appendChild(voiceBtn);
+
+                const reverseTranslateAllBtn = document.createElement('button');
+                reverseTranslateAllBtn.id = 'reverse-translate-all-btn';
+                reverseTranslateAllBtn.className = 'btn-secondary';
+                reverseTranslateAllBtn.style.background = 'rgba(255, 209, 102, 0.15)';
+                reverseTranslateAllBtn.style.border = '1px solid rgba(255, 209, 102, 0.6)';
+                reverseTranslateAllBtn.style.color = '#ffd166';
+                reverseTranslateAllBtn.textContent = '전체 역번역';
+                reverseTranslateAllBtn.addEventListener('click', runReverseTranslateAll);
+                projectActions.appendChild(reverseTranslateAllBtn);
+            } else if (project.status === 'voice_complete') {
+                // Voice synthesis mode selector (keep it for re-generation)
+                const voiceModeDiv = document.createElement('div');
+                voiceModeDiv.style.display = 'flex';
+                voiceModeDiv.style.alignItems = 'center';
+                voiceModeDiv.style.gap = '10px';
+                voiceModeDiv.style.marginBottom = '10px';
+
+                const voiceModeLabel = document.createElement('label');
+                voiceModeLabel.textContent = '음성 합성 대상:';
+                voiceModeLabel.style.fontWeight = 'bold';
+
+                const voiceModeSelect = document.createElement('select');
+                voiceModeSelect.id = 'voice-synthesis-mode';
+                voiceModeSelect.innerHTML = `
+                    <option value="subtitle" ${project.voice_synthesis_mode === 'subtitle' ? 'selected' : ''}>자막만</option>
+                    <option value="commentary" ${project.voice_synthesis_mode === 'commentary' ? 'selected' : ''}>해설만</option>
+                    <option value="both" ${project.voice_synthesis_mode === 'both' ? 'selected' : ''}>자막+해설</option>
+                `;
+                voiceModeSelect.addEventListener('change', updateVoiceSynthesisMode);
+
+                voiceModeDiv.appendChild(voiceModeLabel);
+                voiceModeDiv.appendChild(voiceModeSelect);
+                projectActions.appendChild(voiceModeDiv);
+
+                const editBtn = document.createElement('button');
+                editBtn.id = 'edit-btn';
+                editBtn.className = 'btn-secondary';
+                editBtn.textContent = '편집 모드로 돌아가기';
+                editBtn.addEventListener('click', () => {
+                    // Reset project status to allow editing
+                    fetch(`/api/translator/projects/${currentProject.id}/reset-to-translated`, {
+                        method: 'POST'
+                    })
+                    .then(res => res.ok ? res.json() : Promise.reject(res))
+                    .then(renderProject)
+                    .catch(err => {
+                        console.error(err);
+                        alert('편집 모드 전환 중 오류가 발생했습니다.');
+                    });
+                });
+                projectActions.appendChild(editBtn);
+
+                const voiceBtn = document.createElement('button');
+                voiceBtn.id = 'voice-btn';
+                voiceBtn.className = 'btn-secondary';
+                voiceBtn.textContent = '음성 재생성';
+                voiceBtn.addEventListener('click', runVoiceSynthesis);
+                projectActions.appendChild(voiceBtn);
+
+                const reverseTranslateAllBtn = document.createElement('button');
+                reverseTranslateAllBtn.id = 'reverse-translate-all-btn';
+                reverseTranslateAllBtn.className = 'btn-secondary';
+                reverseTranslateAllBtn.textContent = '전체 역번역';
+                reverseTranslateAllBtn.addEventListener('click', runReverseTranslateAll);
+                projectActions.appendChild(reverseTranslateAllBtn);
+
+                const renderBtn = document.createElement('button');
+                renderBtn.id = 'render-btn';
+                renderBtn.className = 'btn-primary';
+                renderBtn.textContent = '비디오 렌더링';
+                renderBtn.addEventListener('click', runRender);
+                projectActions.appendChild(renderBtn);
+            }
+
+            const segmentsHtml = project.segments.map((seg, index) => `
+                <div class="segment-item" data-segment-id="${seg.id}">
+                    <div class="segment-header">
+                        <div class="segment-time" data-segment-id="${seg.id}">
+                            <span class="time-display" style="cursor: pointer; color: #007bff; text-decoration: underline;" title="클릭하여 시간 수정">
+                                ${seg.start.toFixed(2)} - ${seg.end.toFixed(2)}
+                            </span>
+                            <div class="time-edit" style="display: none;">
+                                <input type="number" class="start-input" step="0.01" value="${seg.start.toFixed(2)}" min="0" style="width: 60px;">
+                                <span> - </span>
+                                <input type="number" class="end-input" step="0.01" value="${seg.end.toFixed(2)}" min="0" style="width: 60px;">
+                                <button class="btn-save-time" style="margin-left: 5px; font-size: 12px; padding: 2px 6px; background: #28a745; color: white; border: none; border-radius: 3px;">저장</button>
+                                <button class="btn-cancel-time" style="margin-left: 2px; font-size: 12px; padding: 2px 6px; background: #6c757d; color: white; border: none; border-radius: 3px;">취소</button>
+                            </div>
+                        </div>
+                        <div class="segment-actions">
+                            <button class="btn-move-up" data-segment-id="${seg.id}" title="위로 이동">⬆️</button>
+                            <button class="btn-move-down" data-segment-id="${seg.id}" title="아래로 이동">⬇️</button>
+                            <button class="btn-edit-segment" data-segment-id="${seg.id}" title="세그먼트 수정">✏️</button>
+                            <button class="btn-delete-segment" data-segment-id="${seg.id}" title="세그먼트 삭제">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="segment-content">
+                        <div class="text-pair">
+                            <div class="text-row korean original">
+                                <label>원본 한국어:</label>
+                                <div class="text-content" data-type="source" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.source_text || ''}</span>
+                                    <input class="text-edit" type="text" value="${(seg.source_text || '').replace(/"/g, '&quot;')}" style="display: none;">
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="source" data-segment-id="${seg.id}" title="한국어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="source" data-segment-id="${seg.id}" title="한국어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="source" data-segment-id="${seg.id}" title="한국어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                            <div class="text-row japanese">
+                                <label>번역 일본어:</label>
+                                <div class="text-content" data-type="translated" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.translated_text || ''}</span>
+                                    <input class="text-edit" type="text" value="${(seg.translated_text || '').replace(/"/g, '&quot;')}" style="display: none;">
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 복사">복사</button>
+                                        <button class="btn-translate-reverse" data-segment-id="${seg.id}" title="일본어→한국어 번역">역번역</button>
+                                        <button class="btn-delete-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                            <div class="text-row korean reverse">
+                                <label>역번역 한국어:</label>
+                                <div class="text-content" data-type="reverse_translated" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.reverse_translated_text || ''}</span>
+                                    <input class="text-edit" type="text" value="${(seg.reverse_translated_text || '').replace(/"/g, '&quot;')}" style="display: none;">
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                            <div class="text-row commentary korean">
+                                <label>해설 한국어:</label>
+                                <div class="text-content" data-type="commentary_korean" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.commentary_korean || ''}</span>
+                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_korean || '').replace(/"/g, '&quot;')}</textarea>
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                            <div class="text-row commentary japanese">
+                                <label>해설 일본어:</label>
+                                <div class="text-content" data-type="commentary_japanese" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.commentary_japanese || ''}</span>
+                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_japanese || '').replace(/"/g, '&quot;')}</textarea>
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                            <div class="text-row commentary reverse">
+                                <label>해설 역번역 한국어:</label>
+                                <div class="text-content" data-type="commentary_reverse_korean" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.commentary_reverse_korean || ''}</span>
+                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_reverse_korean || '').replace(/"/g, '&quot;')}</textarea>
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            segmentsTable.innerHTML = segmentsHtml;
+
+            // Add event listeners for edit/delete buttons
+            attachSegmentEventListeners();
+            attachTimeEditListeners();
+
+            // Update AI commentary section with selected source info
+            showAICommentarySection();
+        }
+
+        function runTranslation() {
+            const btn = document.getElementById('translate-btn');
+            btn.disabled = true;
+            btn.textContent = '번역 중...';
+
+            fetch(`/api/translator/projects/${currentProject.id}/translate`, { method: 'POST' })
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(renderProject)
+                .catch(err => {
+                    console.error(err);
+                    alert('번역 실행 중 오류가 발생했습니다.');
+                })
+                .finally(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = '번역 실행';
+                    }
+                });
+        }
+
+        function runVoiceSynthesis() {
+            const btn = document.getElementById('voice-btn');
+            btn.disabled = true;
+            btn.textContent = '음성 생성 중...';
+
+            fetch(`/api/translator/projects/${currentProject.id}/voice`, { method: 'POST' })
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(renderProject)
+                .catch(err => {
+                    console.error(err);
+                    alert('음성 생성 중 오류가 발생했습니다.');
+                })
+                .finally(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = '음성 생성';
+                    }
+                });
+        }
+
+        function runRender() {
+            const btn = document.getElementById('render-btn');
+            btn.disabled = true;
+            btn.textContent = '렌더링 중...';
+
+            fetch(`/api/translator/projects/${currentProject.id}/render`, { method: 'POST' })
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(project => {
+                    renderProject(project);
+                    const videoPath = project.extra.rendered_video_path;
+                    if (videoPath) {
+                        const videoLink = document.createElement('a');
+                        videoLink.href = videoPath.replace('/home/sk/ws/mcp-playwright', '');
+                        videoLink.textContent = '다운로드';
+                        videoLink.target = '_blank';
+                        projectActions.appendChild(videoLink);
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('렌더링 중 오류가 발생했습니다.');
+                })
+                .finally(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = '비디오 렌더링';
+                    }
+                });
+        }
+
+        async function saveSegmentText(segmentId, textType, textValue) {
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/segments`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        segment_id: segmentId,
+                        text_type: textType,
+                        text_value: textValue
+                    })
+                });
+
+                if (response.ok) {
+                    console.log(`Successfully saved ${textType} text for segment ${segmentId}`);
+                    return true;
+                } else {
+                    console.error('Failed to save segment text:', response.status, response.statusText);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Error saving segment text:', error);
+                return false;
+            }
+        }
+
+        function loadProject(id) {
+            fetch(`/api/translator/projects/${id}`)
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(renderProject)
+                .catch(err => {
+                    console.error(err);
+                    creationView.innerHTML = '<p class="empty-state error">프로젝트를 불러오지 못했습니다.</p>';
+                });
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const projectId = urlParams.get('id');
+
+        function loadInitialSettings() {
+            const cacheBuster = Date.now();
+            fetch(`/api/translator/settings?_cb=${cacheBuster}`)
+                .then(res => {
+                    if (res.ok) {
+                        return res.json();
+                    } else {
+                        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                    }
+                })
+                .then(settings => {
+                    applySettings(settings);
+                })
+                .catch(err => {
+                    console.error('Failed to load initial settings:', err);
+                });
+        }
+
+        function attachSegmentEventListeners() {
+            // Edit text buttons
+            document.querySelectorAll('.btn-edit-text').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const textType = e.target.dataset.type;
+                    const textContent = e.target.closest('.text-content');
+                    const textDisplay = textContent.querySelector('.text-display');
+                    const textEdit = textContent.querySelector('.text-edit');
+
+                    if (e.target.textContent === '수정') {
+                        // Enter edit mode
+                        textEdit.value = textDisplay.textContent;
+                        textDisplay.style.display = 'none';
+                        textEdit.style.display = '';
+                        textEdit.focus();
+                        e.target.textContent = '저장';
+                    } else if (e.target.textContent === '저장') {
+                        // Save changes
+                        const newText = textEdit.value.trim();
+
+                        // 저장 중 표시
+                        const originalText = e.target.textContent;
+                        e.target.textContent = '저장 중...';
+                        e.target.disabled = true;
+
+                        // 서버에 저장
+                        saveSegmentText(segmentId, textType, newText).then(success => {
+                            if (success) {
+                                textDisplay.textContent = newText;
+                                textDisplay.style.display = '';
+                                textEdit.style.display = 'none';
+                                e.target.textContent = '수정';
+
+                                // 저장 시간 표시
+                                const now = new Date();
+                                const timeString = now.toLocaleString('ko-KR', {
+                                    month: '2-digit',
+                                    day: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                });
+                                const lastModifiedDiv = textContent.querySelector('.last-modified');
+                                lastModifiedDiv.textContent = `마지막 저장: ${timeString}`;
+                                lastModifiedDiv.style.color = '#28a745';
+
+                                // 성공 표시
+                                const originalColor = e.target.style.backgroundColor;
+                                e.target.textContent = '✓ 저장완료';
+                                e.target.style.backgroundColor = '#28a745';
+                                e.target.style.color = 'white';
+                                setTimeout(() => {
+                                    e.target.textContent = '수정';
+                                    e.target.style.backgroundColor = originalColor;
+                                    e.target.style.color = '';
+                                    // 저장 시간 색상을 원래대로
+                                    lastModifiedDiv.style.color = '#888';
+                                }, 3000);
+                            } else {
+                                alert('저장에 실패했습니다. 다시 시도해주세요.');
+                                e.target.textContent = '저장';
+                            }
+                            e.target.disabled = false;
+                        });
+                    }
+                });
+            });
+
+            // Copy text buttons
+            document.querySelectorAll('.btn-copy-text').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const textType = e.target.dataset.type;
+                    const textDisplay = e.target.closest('.text-content').querySelector('.text-display');
+                    const textToCopy = textDisplay.textContent.trim();
+
+                    if (!textToCopy) {
+                        alert('복사할 텍스트가 없습니다.');
+                        return;
+                    }
+
+                    try {
+                        await navigator.clipboard.writeText(textToCopy);
+                        e.target.textContent = '복사됨';
+                        setTimeout(() => {
+                            e.target.textContent = '복사';
+                        }, 1000);
+                    } catch (err) {
+                        console.error('클립보드 복사 실패:', err);
+                        // Fallback for older browsers
+                        const textarea = document.createElement('textarea');
+                        textarea.value = textToCopy;
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textarea);
+
+                        e.target.textContent = '복사됨';
+                        setTimeout(() => {
+                            e.target.textContent = '복사';
+                        }, 1000);
+                    }
+                });
+            });
+
+            // Reverse translate buttons (Japanese to Korean)
+            document.querySelectorAll('.btn-translate-reverse').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const japaneseText = e.target.closest('.text-content').querySelector('.text-display').textContent.trim();
+
+                    if (!japaneseText) {
+                        alert('번역할 일본어 텍스트가 없습니다.');
+                        return;
+                    }
+
+                    e.target.disabled = true;
+                    e.target.textContent = '번역중...';
+
+                    try {
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/reverse-translate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                segment_id: segmentId,
+                                japanese_text: japaneseText
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+
+                        const result = await response.json();
+
+                        // Update reverse translation Korean text display
+                        const segmentItem = e.target.closest('.segment-item');
+                        const reverseKoreanTextDisplay = segmentItem.querySelector('.text-row.korean.reverse .text-display');
+                        if (reverseKoreanTextDisplay) {
+                            reverseKoreanTextDisplay.textContent = result.korean_text;
+                        } else {
+                            console.error('Cannot find reverse translation text display element');
+                        }
+
+                        // Update the server with the new reverse translated text
+                        updateSegmentText(segmentId, 'reverse_translated', result.korean_text);
+
+                    } catch (err) {
+                        console.error('역번역 실패:', err);
+                        alert('역번역에 실패했습니다: ' + err.message);
+                    } finally {
+                        e.target.disabled = false;
+                        e.target.textContent = '역번역';
+                    }
+                });
+            });
+
+            // Delete text buttons
+            document.querySelectorAll('.btn-delete-text').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const textType = e.target.dataset.type;
+
+                    if (confirm(`정말로 ${textType === 'source' ? '한국어' : '일본어'} 텍스트를 삭제하시겠습니까?`)) {
+                        updateSegmentText(segmentId, textType, '');
+                        const textDisplay = e.target.closest('.text-content').querySelector('.text-display');
+                        textDisplay.textContent = '';
+                    }
+                });
+            });
+
+            // Move up buttons
+            document.querySelectorAll('.btn-move-up').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    moveSegment(segmentId, 'up');
+                });
+            });
+
+            // Move down buttons
+            document.querySelectorAll('.btn-move-down').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    moveSegment(segmentId, 'down');
+                });
+            });
+        }
+
+        function updateSegmentText(segmentId, textType, newText) {
+            const payload = {
+                segment_id: segmentId,
+                text_type: textType,
+                text_value: newText
+            };
+
+            fetch(`/api/translator/projects/${currentProject.id}/segments`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                return res.json();
+            })
+            .then(() => {
+                // Update successful
+                console.log(`Updated ${textType} for segment ${segmentId}`);
+            })
+            .catch(err => {
+                console.error('Failed to update segment text:', err);
+                alert('텍스트 업데이트에 실패했습니다.');
+            });
+        }
+
+        function moveSegment(segmentId, direction) {
+            const segments = currentProject.segments;
+            const currentIndex = segments.findIndex(seg => seg.id === segmentId);
+
+            if (currentIndex === -1) {
+                console.error('Segment not found:', segmentId);
+                return;
+            }
+
+            let newIndex;
+            if (direction === 'up' && currentIndex > 0) {
+                newIndex = currentIndex - 1;
+            } else if (direction === 'down' && currentIndex < segments.length - 1) {
+                newIndex = currentIndex + 1;
+            } else {
+                // Cannot move - already at boundary
+                return;
+            }
+
+            // Swap segments in the array
+            const segmentToMove = segments[currentIndex];
+            const segmentAtTarget = segments[newIndex];
+
+            segments[currentIndex] = segmentAtTarget;
+            segments[newIndex] = segmentToMove;
+
+            // Update clip_index values to maintain order
+            segments.forEach((seg, index) => {
+                seg.clip_index = index;
+            });
+
+            // Save the reordered segments to the server
+            fetch(`/api/translator/projects/${currentProject.id}/reorder-segments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    segment_orders: segments.map((seg, index) => ({
+                        segment_id: seg.id,
+                        new_index: index
+                    }))
+                })
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                return res.json();
+            })
+            .then(() => {
+                // Re-render the project to show the new order
+                renderProject(currentProject);
+            })
+            .catch(err => {
+                console.error('Failed to reorder segments:', err);
+                alert('세그먼트 순서 변경에 실패했습니다.');
+                // Revert the local changes
+                segments[newIndex] = segmentToMove;
+                segments[currentIndex] = segmentAtTarget;
+            });
+        }
+
+        function updateVoiceSynthesisMode() {
+            const select = document.getElementById('voice-synthesis-mode');
+            const mode = select.value;
+
+            fetch(`/api/translator/projects/${currentProject.id}/voice-synthesis-mode`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ voice_synthesis_mode: mode })
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                return res.json();
+            })
+            .then(() => {
+                console.log(`Voice synthesis mode updated to: ${mode}`);
+                currentProject.voice_synthesis_mode = mode;
+            })
+            .catch(err => {
+                console.error('Failed to update voice synthesis mode:', err);
+                alert('음성 합성 모드 업데이트에 실패했습니다.');
+                // Revert select to previous value
+                select.value = currentProject.voice_synthesis_mode;
+            });
+        }
+
+        function runReverseTranslateAll() {
+            const btn = document.getElementById('reverse-translate-all-btn');
+            btn.disabled = true;
+            btn.textContent = '전체 역번역 중...';
+
+            let completedCount = 0;
+            const totalSegments = currentProject.segments.filter(seg => seg.translated_text).length;
+
+            if (totalSegments === 0) {
+                alert('역번역할 일본어 텍스트가 없습니다.');
+                btn.disabled = false;
+                btn.textContent = '전체 역번역';
+                return;
+            }
+
+            // Process each segment with Japanese text
+            currentProject.segments.forEach(async (segment, index) => {
+                if (!segment.translated_text) return;
+
+                try {
+                    const response = await fetch(`/api/translator/projects/${currentProject.id}/reverse-translate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            segment_id: segment.id,
+                            japanese_text: segment.translated_text
+                        })
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+
+                        // Update UI
+                        const segmentElement = document.querySelector(`[data-segment-id="${segment.id}"]`);
+                        if (segmentElement) {
+                            const reverseDisplay = segmentElement.querySelector('.text-row.korean.reverse .text-display');
+                            if (reverseDisplay) {
+                                reverseDisplay.textContent = result.korean_text;
+                            }
+                        }
+
+                        // Update server
+                        updateSegmentText(segment.id, 'reverse_translated', result.korean_text);
+                    }
+                } catch (err) {
+                    console.error(`Failed to reverse translate segment ${segment.id}:`, err);
+                }
+
+                completedCount++;
+                if (completedCount === totalSegments) {
+                    btn.disabled = false;
+                    btn.textContent = '전체 역번역';
+                    alert(`전체 역번역 완료! (${completedCount}개 세그먼트)`);
+                }
+            });
+        }
+
+        function attachTimeEditListeners() {
+            // Time display click to edit
+            document.querySelectorAll('.time-display').forEach(timeDisplay => {
+                timeDisplay.addEventListener('click', (e) => {
+                    const segmentId = e.currentTarget.dataset.segmentId;
+                    const timeEdit = document.querySelector(`.time-edit[data-segment-id="${segmentId}"]`);
+
+                    // Hide display, show edit
+                    e.currentTarget.style.display = 'none';
+                    timeEdit.style.display = 'block';
+
+                    // Focus on start input
+                    timeEdit.querySelector('.start-input').focus();
+                });
+            });
+
+            // Save time changes
+            document.querySelectorAll('.btn-save-time').forEach(saveBtn => {
+                saveBtn.addEventListener('click', async (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const timeEdit = e.target.closest('.time-edit');
+                    const startInput = timeEdit.querySelector('.start-input');
+                    const endInput = timeEdit.querySelector('.end-input');
+
+                    const newStart = parseFloat(startInput.value);
+                    const newEnd = parseFloat(endInput.value);
+
+                    // Validation
+                    if (newStart >= newEnd) {
+                        alert('시작 시간은 종료 시간보다 작아야 합니다.');
+                        return;
+                    }
+
+                    if (newStart < 0 || newEnd < 0) {
+                        alert('시간은 0보다 크거나 같아야 합니다.');
+                        return;
+                    }
+
+                    // Save to server
+                    try {
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/segments/timing`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                segment_id: segmentId,
+                                start_time: newStart,
+                                end_time: newEnd
+                            })
+                        });
+
+                        if (response.ok) {
+                            // Update display
+                            const timeDisplay = document.querySelector(`.time-display[data-segment-id="${segmentId}"]`);
+                            const startTime = timeDisplay.querySelector('.start-time');
+                            const endTime = timeDisplay.querySelector('.end-time');
+                            const duration = timeDisplay.querySelector('.time-duration');
+
+                            startTime.textContent = `${Math.floor(newStart / 60)}:${(newStart % 60).toFixed(2).padStart(5, '0')}`;
+                            endTime.textContent = `${Math.floor(newEnd / 60)}:${(newEnd % 60).toFixed(2).padStart(5, '0')}`;
+                            duration.textContent = ` (${(newEnd - newStart).toFixed(1)}초)`;
+
+                            // Hide edit, show display
+                            timeEdit.style.display = 'none';
+                            timeDisplay.style.display = 'block';
+
+                            // Success feedback
+                            saveBtn.textContent = '✓';
+                            setTimeout(() => {
+                                saveBtn.textContent = '저장';
+                            }, 1000);
+                        } else {
+                            alert('시간 저장에 실패했습니다.');
+                        }
+                    } catch (error) {
+                        console.error('Time save error:', error);
+                        alert('시간 저장 중 오류가 발생했습니다.');
+                    }
+                });
+            });
+
+            // Cancel time edit
+            document.querySelectorAll('.btn-cancel-time').forEach(cancelBtn => {
+                cancelBtn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const timeEdit = e.target.closest('.time-edit');
+                    const timeDisplay = document.querySelector(`.time-display[data-segment-id="${segmentId}"]`);
+
+                    // Reset inputs to original values
+                    const segment = currentProject.segments.find(s => s.id === segmentId);
+                    if (segment) {
+                        timeEdit.querySelector('.start-input').value = segment.start.toFixed(1);
+                        timeEdit.querySelector('.end-input').value = segment.end.toFixed(1);
+                    }
+
+                    // Hide edit, show display
+                    timeEdit.style.display = 'none';
+                    timeDisplay.style.display = 'block';
+                });
+            });
+        }
+
+        function showAICommentarySection() {
+            const aiCommentarySection = document.getElementById('ai-commentary-section');
+            const translationSettingsSection = document.getElementById('translation-settings-section');
+
+            // Show AI commentary section
+            aiCommentarySection.style.display = 'block';
+
+            // Keep translation settings section visible
+            translationSettingsSection.style.display = 'block';
+
+            // Update selected source info if selectedSource is available
+            const videoNameElem = document.getElementById('selected-video-name');
+            const subtitleNameElem = document.getElementById('selected-subtitle-name');
+
+            if (selectedSource) {
+                videoNameElem.textContent = selectedSource.base_name || '';
+                subtitleNameElem.textContent = selectedSource.subtitle_path ? selectedSource.subtitle_path.split('/').pop() : '자막 없음';
+            } else {
+                // If no selectedSource, show placeholder text
+                videoNameElem.textContent = '프로젝트에서 소스 정보를 가져오는 중...';
+                subtitleNameElem.textContent = '프로젝트에서 소스 정보를 가져오는 중...';
+            }
+
+            // Scroll to AI commentary section with a slight delay for better UX
+            setTimeout(() => {
+                aiCommentarySection.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            }, 100);
+        }
+
+        // Make function globally accessible for debugging
+        window.showAICommentarySection = showAICommentarySection;
+
+        function showTranslationSettings() {
+            const translationSettingsSection = document.getElementById('translation-settings-section');
+            translationSettingsSection.style.display = 'block';
+
+            // Scroll to translation settings
+            translationSettingsSection.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function generateAICommentary() {
+            if (!selectedSource) {
+                alert('소스가 선택되지 않았습니다.');
+                return;
+            }
+
+            const generateBtn = document.getElementById('generate-commentary-btn');
+            const skipBtn = document.getElementById('skip-commentary-btn');
+            const statusDiv = document.getElementById('commentary-generation-status');
+
+            // Disable buttons and show status
+            generateBtn.disabled = true;
+            skipBtn.disabled = true;
+            generateBtn.textContent = 'AI 해설 생성 중...';
+            statusDiv.style.display = 'block';
+
+            try {
+                // First create the project
+                const projectData = {
+                    source_video: selectedSource.video_path,
+                    source_subtitle: selectedSource.subtitle_path || null,
+                    target_lang: 'ja',
+                    translation_mode: 'literal',
+                    tone_hint: '간결하게'
+                };
+
+                const createResponse = await fetch('/api/translator/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(projectData)
+                });
+
+                if (!createResponse.ok) {
+                    throw new Error(`프로젝트 생성 실패: ${createResponse.status}`);
+                }
+
+                const project = await createResponse.json();
+
+                // Then generate AI commentary
+                const commentaryResponse = await fetch(`/api/translator/projects/${project.id}/generate-commentary`, {
+                    method: 'POST'
+                });
+
+                if (!commentaryResponse.ok) {
+                    throw new Error(`AI 해설 생성 실패: ${commentaryResponse.status}`);
+                }
+
+                const updatedProject = await commentaryResponse.json();
+
+                // Load the project in the UI
+                renderProject(updatedProject);
+
+            } catch (error) {
+                console.error('AI 해설 생성 오류:', error);
+                alert(`AI 해설 생성 중 오류가 발생했습니다: ${error.message}`);
+
+                // Re-enable buttons
+                generateBtn.disabled = false;
+                skipBtn.disabled = false;
+                generateBtn.textContent = 'AI 해설 생성하기';
+                statusDiv.style.display = 'none';
+            }
+        }
+
+        function skipAICommentary() {
+            showTranslationSettings();
+        }
+
+        async function generateKoreanCommentary() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const btn = document.getElementById('korean-commentary-btn');
+            btn.disabled = true;
+            btn.textContent = '한국어 AI 해설 생성 중...';
+
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/generate-korean-commentary`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Response details:', {
+                        status: response.status,
+                        statusText: response.statusText,
+                        url: response.url,
+                        body: errorText
+                    });
+                    throw new Error(`한국어 AI 해설 생성 실패: ${response.status} - ${response.statusText} - ${errorText}`);
+                }
+
+                const updatedProject = await response.json();
+
+                // Update current project and re-render
+                renderProject(updatedProject);
+
+                alert('한국어 AI 해설이 성공적으로 생성되었습니다!');
+
+            } catch (error) {
+                console.error('한국어 해설 생성 오류:', error);
+                alert(`한국어 AI 해설 생성 중 오류가 발생했습니다: ${error.message}`);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '한국어 AI 해설 넣기';
+                }
+            }
+        }
+
+        function deleteProject() {
+            if (!confirm('정말로 이 프로젝트를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+                return;
+            }
+
+            const deleteBtn = document.getElementById('delete-project-btn');
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = '삭제 중...';
+
+            fetch(`/api/translator/projects/${currentProject.id}`, {
+                method: 'DELETE'
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                return res.json();
+            })
+            .then(() => {
+                alert('프로젝트가 삭제되었습니다.');
+                window.location.href = '/translator';
+            })
+            .catch(err => {
+                console.error('Failed to delete project:', err);
+                alert('프로젝트 삭제에 실패했습니다.');
+            })
+            .finally(() => {
+                if (deleteBtn) {
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = '프로젝트 삭제';
+                }
+            });
+        }
+
+        function attachTimeEditListeners() {
+            // Time display click to edit
+            document.querySelectorAll('.time-display').forEach(timeDisplay => {
+                timeDisplay.addEventListener('click', (e) => {
+                    const segmentTimeDiv = e.target.closest('.segment-time');
+                    const timeEdit = segmentTimeDiv.querySelector('.time-edit');
+
+                    // Hide display, show edit
+                    e.target.style.display = 'none';
+                    timeEdit.style.display = 'inline-block';
+
+                    // Focus on first input
+                    timeEdit.querySelector('.start-input').focus();
+                    timeEdit.querySelector('.start-input').select();
+                });
+            });
+
+            // Save time button
+            document.querySelectorAll('.btn-save-time').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const segmentTimeDiv = e.target.closest('.segment-time');
+                    const segmentId = segmentTimeDiv.dataset.segmentId;
+                    const timeDisplay = segmentTimeDiv.querySelector('.time-display');
+                    const timeEdit = segmentTimeDiv.querySelector('.time-edit');
+                    const startInput = timeEdit.querySelector('.start-input');
+                    const endInput = timeEdit.querySelector('.end-input');
+
+                    const startTime = parseFloat(startInput.value);
+                    const endTime = parseFloat(endInput.value);
+
+                    // Validation
+                    if (startTime >= endTime) {
+                        alert('시작 시간은 종료 시간보다 작아야 합니다.');
+                        return;
+                    }
+
+                    if (startTime < 0 || endTime < 0) {
+                        alert('시간은 0보다 크거나 같아야 합니다.');
+                        return;
+                    }
+
+                    // Save to server
+                    e.target.disabled = true;
+                    e.target.textContent = '저장중...';
+
+                    try {
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/segments/time`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                segment_id: segmentId,
+                                start_time: startTime,
+                                end_time: endTime
+                            })
+                        });
+
+                        if (response.ok) {
+                            // Update display
+                            timeDisplay.textContent = `${startTime.toFixed(2)} - ${endTime.toFixed(2)}`;
+                            timeEdit.style.display = 'none';
+                            timeDisplay.style.display = 'inline';
+
+                            // Success feedback
+                            e.target.textContent = '✓';
+                            e.target.style.background = '#28a745';
+                            setTimeout(() => {
+                                e.target.textContent = '저장';
+                                e.target.style.background = '';
+                            }, 1500);
+                        } else {
+                            throw new Error('서버 저장 실패');
+                        }
+                    } catch (error) {
+                        console.error('Time save error:', error);
+                        alert('시간 저장에 실패했습니다.');
+                    } finally {
+                        e.target.disabled = false;
+                        e.target.textContent = '저장';
+                    }
+                });
+            });
+
+            // Cancel time edit button
+            document.querySelectorAll('.btn-cancel-time').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentTimeDiv = e.target.closest('.segment-time');
+                    const timeDisplay = segmentTimeDiv.querySelector('.time-display');
+                    const timeEdit = segmentTimeDiv.querySelector('.time-edit');
+
+                    // Reset inputs to original values
+                    const segmentId = segmentTimeDiv.dataset.segmentId;
+                    const segment = currentProject.segments.find(s => s.id === segmentId);
+                    if (segment) {
+                        timeEdit.querySelector('.start-input').value = segment.start.toFixed(2);
+                        timeEdit.querySelector('.end-input').value = segment.end.toFixed(2);
+                    }
+
+                    // Hide edit, show display
+                    timeEdit.style.display = 'none';
+                    timeDisplay.style.display = 'inline';
+                });
+            });
+        }
+
+        // Add event listeners for AI commentary buttons
+        document.getElementById('generate-commentary-btn').addEventListener('click', generateAICommentary);
+        document.getElementById('skip-commentary-btn').addEventListener('click', skipAICommentary);
+
+        if (projectId) {
+            loadProject(projectId);
+        } else {
+            creationView.classList.remove('hidden');
+            projectView.classList.add('hidden');
+            fetchDownloads();
+            loadInitialSettings();
+
+            // Show AI commentary section on initial load
+            showAICommentarySection();
+        }
+    })();
+    </script>
+
+    <style>
+        .text-row.commentary {
+            background: #f8f9ff;
+            border-left: 3px solid #6c5ce7;
+            padding-left: 10px;
+            margin: 8px 0;
+        }
+
+        .text-row.commentary label {
+            color: #6c5ce7;
+            font-weight: bold;
+        }
+
+        .text-row.commentary .text-edit {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+
+        .text-row.commentary .text-display {
+            font-style: italic;
+            color: #555;
+            min-height: 20px;
+        }
+
+        .text-row.commentary .text-display:empty::before {
+            content: '해설을 입력하세요...';
+            color: #999;
+            font-style: italic;
+        }
+
+        #voice-synthesis-mode {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            color: #333;
+        }
+
+        #ai-commentary-section {
+            border: 2px solid #007bff;
+            border-radius: 10px;
+            background: #f8fbff;
+            box-shadow: 0 2px 10px rgba(0, 123, 255, 0.1);
+        }
+
+        #ai-commentary-section .panel-header h2 {
+            color: #007bff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #ai-commentary-section .panel-header h2::before {
+            content: '🤖';
+            font-size: 1.2em;
+        }
+
+        .source-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .source-details h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+
+        .source-details p {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+
+        .ai-commentary-controls {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+            justify-content: center;
+        }
+
+        .ai-commentary-controls button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+        }
+
+        .status-message {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 6px;
+            padding: 15px;
+            text-align: center;
+            color: #1565c0;
+            font-weight: bold;
+        }
+
+        .status-message p {
+            margin: 0;
+        }
+    </style>
+</body>
+</html>

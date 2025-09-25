@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<section>
+  <hgroup>
+    <h1>Keyword Image Story Studio</h1>
+    <p>키워드 기반 스토리 생성 · 자막/음성/장면 동시 편집 · 템플릿 & 효과 적용</p>
+  </hgroup>
+  <form id="project-form">
+    <div class="grid">
+      <label>
+        스토리 키워드
+        <input type="text" name="keyword" required placeholder="예: 달빛 여행" />
+      </label>
+      <label>
+        언어
+        <select name="language">
+          <option value="ko">한국어</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select>
+      </label>
+      <label>
+        이미지 설명 (선택)
+        <input type="text" name="image_description" placeholder="썸네일 설명" />
+      </label>
+    </div>
+    <button type="submit" class="contrast">프로젝트 생성</button>
+  </form>
+</section>
+
+<section id="project-state">
+  <div class="placeholder">
+    <p>프로젝트를 생성하면 여기에서 모든 상태를 확인할 수 있습니다.</p>
+  </div>
+</section>
+
+<section>
+  <details open>
+    <summary>최근 작업 내역</summary>
+    <table>
+      <thead>
+        <tr><th>프로젝트</th><th>버전</th><th>설명</th><th>시간</th></tr>
+      </thead>
+      <tbody>
+        {% for item in history %}
+        <tr>
+          <td>{{ item.project_id }}</td>
+          <td>{{ item.version }}</td>
+          <td>{{ item.summary }}</td>
+          <td>{{ item.timestamp }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</section>
+{% endblock %}
