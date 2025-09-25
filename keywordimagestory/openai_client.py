@@ -1,8 +1,10 @@
 """OpenAI client wrapper with graceful degradation for offline development."""
 from __future__ import annotations
 
+import io
 import logging
-from typing import Any, Iterable
+import wave
+from typing import Any, Iterable, Tuple
 
 try:
     from openai import OpenAI
@@ -97,6 +99,37 @@ class OpenAIClient:
             logger.error("OpenAI structured generation failed: %s", exc)
             return self._mock_structured(instructions, content)
 
+    def synthesize_speech(
+        self,
+        text: str,
+        *,
+        voice: str = "alloy",
+        audio_format: str = "mp3",
+        model: str = "gpt-4o-mini-tts",
+    ) -> Tuple[bytes, str]:
+        """Generate speech from text and return (audio_bytes, format)."""
+
+        if not text or not text.strip():
+            raise ValueError("text is required for speech synthesis")
+
+        if self._client is None:
+            return self._mock_audio()
+
+        try:
+            response = self._client.audio.speech.create(
+                model=model,
+                voice=voice,
+                input=text,
+                response_format=audio_format,
+            )
+            buffer = io.BytesIO()
+            for chunk in response.iter_bytes():
+                buffer.write(chunk)
+            return buffer.getvalue(), audio_format
+        except Exception as exc:  # pragma: no cover - network failure
+            logger.error("OpenAI speech synthesis failed: %s", exc)
+            return self._mock_audio()
+
     # ------------------------------------------------------------------
     # Mock helpers used during development or offline mode
     # ------------------------------------------------------------------
@@ -126,6 +159,20 @@ class OpenAIClient:
             f"Instructions: {instructions[:60]}...\n"
             f"Content: {content[:60]}...\n"
         )
+
+    def _mock_audio(self) -> Tuple[bytes, str]:
+        """Create a single second of silence as a WAV fallback."""
+
+        buffer = io.BytesIO()
+        sample_rate = 16000
+        duration_seconds = 1
+        n_frames = sample_rate * duration_seconds
+        with wave.open(buffer, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+            wav.writeframes(b"\x00\x00" * n_frames)
+        return buffer.getvalue(), "wav"
 
 
 client = OpenAIClient()

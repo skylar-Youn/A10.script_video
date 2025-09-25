@@ -49,6 +49,10 @@ const state = {
     image_story: null,
     shorts_script: null,
     shorts_scenes: null
+  },
+  audioResults: {
+    shorts_script: null,
+    shorts_scenes: null
   }
 };
 
@@ -63,6 +67,43 @@ const GENERATION_ENDPOINTS = {
   [TOOL_KEYS.SCRIPT]: { url: "/api/generate/shorts-script", type: "json" },
   [TOOL_KEYS.SCENES]: { url: "/api/generate/shorts-scenes", type: "json" }
 };
+
+const AUDIO_CONTAINER_IDS = {
+  [TOOL_KEYS.SCRIPT]: "shorts-script-audio",
+  [TOOL_KEYS.SCENES]: "shorts-scenes-audio"
+};
+
+let pendingRecordSelection = null;
+
+const STORAGE_KEY = "kis-selected-record";
+
+function persistSelection(tool, recordId, payload) {
+  try {
+    const value = JSON.stringify({ tool, recordId, payload });
+    window.localStorage.setItem(STORAGE_KEY, value);
+  } catch (error) {
+    console.warn("Failed to persist selection", error);
+  }
+}
+
+function loadPersistedSelection() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn("Failed to load persisted selection", error);
+    return null;
+  }
+}
+
+function clearPersistedSelection() {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch (error) {
+    console.warn("Failed to clear persisted selection", error);
+  }
+}
 
 async function api(path, options = {}) {
   const init = { ...options };
@@ -97,6 +138,20 @@ function escapeHtml(value) {
 function formatTime(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "";
   return Number(value).toFixed(1);
+}
+
+function toSafeString(value, fallback = "") {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+  if (value === null || value === undefined) return fallback;
+  try {
+    const serialised = JSON.stringify(value);
+    return serialised && serialised !== "{}" ? serialised : fallback;
+  } catch (error) {
+    return String(value);
+  }
 }
 
 function formatTimecode(value) {
@@ -135,6 +190,63 @@ function toOptionalNumber(value) {
   if (normalized === "") return null;
   const parsed = Number(normalized);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function displayAudioResult(tool, result) {
+  const containerId = AUDIO_CONTAINER_IDS[tool];
+  if (!containerId) return;
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (!result || !result.url) {
+    container.innerHTML = '<div class="placeholder"><p>자막 음성 변환 결과가 여기에 표시됩니다.</p></div>';
+    return;
+  }
+
+  const extra = [];
+  if (result.character_count) {
+    extra.push(`${escapeHtml(String(result.character_count))}자`);
+  }
+  const meta = extra.length ? ` · ${extra.join(" · ")}` : "";
+
+  container.innerHTML = `
+    <article class="audio-link">
+      <span>음성 파일 (${escapeHtml(result.voice || "alloy")} · ${escapeHtml(result.format || "mp3")}${meta}):</span>
+      <a href="${escapeHtml(result.url)}" target="_blank" rel="noopener">다운로드</a>
+    </article>
+  `;
+}
+
+function updateRecordSelectOptions() {
+  const toolSelect = document.getElementById("tool-selection");
+  const recordSelect = document.getElementById("record-selection");
+  if (!toolSelect || !recordSelect) return;
+
+  const selectedTool = toolSelect.value;
+  recordSelect.innerHTML = '<option value="">선택하세요</option>';
+
+  if (!selectedTool) {
+    recordSelect.disabled = true;
+    recordSelect.value = "";
+    return;
+  }
+
+  const records = state.savedRecords[selectedTool] || [];
+  const optionMarkup = records
+    .map((record) => `<option value="${record.id}">${escapeHtml(record.title || record.id)}</option>`)
+    .join("");
+  recordSelect.insertAdjacentHTML("beforeend", optionMarkup);
+  recordSelect.disabled = records.length === 0;
+
+  const persisted = loadPersistedSelection();
+  const targetRecordId = pendingRecordSelection || (persisted && persisted.tool === selectedTool ? persisted.recordId : "");
+  if (targetRecordId && records.some((record) => record.id === targetRecordId)) {
+    recordSelect.value = targetRecordId;
+    state.activeRecords[selectedTool] = targetRecordId;
+    pendingRecordSelection = null;
+  } else if (records.length === 0) {
+    recordSelect.value = "";
+  }
 }
 
 function renderStoryKeywordResults(result) {
@@ -287,6 +399,7 @@ function renderShortsScriptResults(result) {
       </div>
     </article>
   `;
+  displayAudioResult(TOOL_KEYS.SCRIPT, state.audioResults[TOOL_KEYS.SCRIPT]);
 }
 
 function renderShortsSceneResults(result) {
@@ -357,6 +470,7 @@ function renderShortsSceneResults(result) {
       </div>
     </article>
   `;
+  displayAudioResult(TOOL_KEYS.SCENES, state.audioResults[TOOL_KEYS.SCENES]);
 }
 
 const TOOL_CONFIG = {
@@ -379,19 +493,34 @@ const TOOL_CONFIG = {
       const first = Array.isArray(payload?.items) && payload.items.length ? payload.items[0] : null;
       if (first?.title) return first.title;
       return "이미지 스토리";
+    },
+    enrichForm: (formData, payload) => {
+      if (!payload) return;
+      formData.set("keyword", payload.keyword || "");
+      formData.set("image_description", payload.source?.description || "");
     }
   },
   [TOOL_KEYS.SCRIPT]: {
     savedContainer: "shorts-script-saved",
     resultsContainer: "shorts-script-results",
     renderer: renderShortsScriptResults,
-    defaultTitle: (payload) => `${payload?.keyword || "쇼츠 대본"} 자막`
+    defaultTitle: (payload) => `${payload?.keyword || "쇼츠 대본"} 자막`,
+    enrichForm: (formData, payload) => {
+      if (!payload) return;
+      formData.set("keyword", payload.keyword || "");
+      formData.set("language", payload.language || "ko");
+    }
   },
   [TOOL_KEYS.SCENES]: {
     savedContainer: "shorts-scenes-saved",
     resultsContainer: "shorts-scenes-results",
     renderer: renderShortsSceneResults,
-    defaultTitle: (payload) => `${payload?.keyword || "쇼츠 장면"} 씬`
+    defaultTitle: (payload) => `${payload?.keyword || "쇼츠 장면"} 씬`,
+    enrichForm: (formData, payload) => {
+      if (!payload) return;
+      formData.set("keyword", payload.keyword || "");
+      formData.set("language", payload.language || "ko");
+    }
   }
 };
 
@@ -447,7 +576,32 @@ async function loadSavedRecords(tool) {
       }
     });
     state.checkedRecords[tool] = next;
+    const persisted = loadPersistedSelection();
+    if (persisted && persisted.tool === tool) {
+      const exists = state.savedRecords[tool].some((record) => record.id === persisted.recordId);
+      if (exists) {
+        state.activeRecords[tool] = persisted.recordId;
+        if (!state.latestResults[tool]) {
+          const saved = state.savedRecords[tool].find((record) => record.id === persisted.recordId);
+          if (saved) {
+            state.latestResults[tool] = saved.payload;
+            if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES) {
+              const keyword = saved.payload?.keyword;
+              const language = saved.payload?.language || "ko";
+              if (keyword) {
+                state.lastRequests[tool] = { keyword, language };
+              }
+            }
+          }
+        }
+      } else if (persisted.payload) {
+        state.latestResults[tool] = state.latestResults[tool] || persisted.payload;
+      } else {
+        clearPersistedSelection();
+      }
+    }
     renderSavedRecords(tool);
+    updateRecordSelectOptions();
   } catch (error) {
     console.error(`Failed to load records for ${tool}:`, error);
   }
@@ -490,6 +644,10 @@ async function deleteSavedRecord(tool, recordId) {
     if (state.activeRecords[tool] === recordId) {
       state.activeRecords[tool] = null;
     }
+    const persisted = loadPersistedSelection();
+    if (persisted && persisted.tool === tool && persisted.recordId === recordId) {
+      clearPersistedSelection();
+    }
     await loadSavedRecords(tool);
   } catch (error) {
     alert(error.message);
@@ -509,6 +667,11 @@ function selectSavedRecord(tool, recordId) {
   state.latestResults[tool] = record.payload;
   state.activeRecords[tool] = recordId;
   config.renderer(record.payload);
+  if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES) {
+    state.audioResults[tool] = null;
+    displayAudioResult(tool, null);
+  }
+  persistSelection(tool, recordId, record.payload);
   if (tool === TOOL_KEYS.SCRIPT) {
     const keyword = record.payload?.keyword;
     const language = record.payload?.language || "ko";
@@ -610,6 +773,10 @@ async function continueGeneration(tool) {
       state.latestResults[tool] = current;
       renderShortsSceneResults(current);
     }
+    if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES) {
+      state.audioResults[tool] = null;
+      displayAudioResult(tool, null);
+    }
   } catch (error) {
     alert(error.message);
   }
@@ -648,6 +815,10 @@ async function regenerateAll(tool) {
     const renderer = config.renderer;
     if (renderer) {
       renderer(data);
+    }
+    if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES) {
+      state.audioResults[tool] = null;
+      displayAudioResult(tool, null);
     }
   } catch (error) {
     alert(error.message);
@@ -712,6 +883,34 @@ async function regenerateSingle(tool, index) {
         alert("새 장면 프롬프트를 찾을 수 없습니다.");
       }
     }
+    if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES) {
+      state.audioResults[tool] = null;
+      displayAudioResult(tool, null);
+    }
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function convertToSpeech(tool) {
+  const latest = state.latestResults[tool];
+  if (!latest) {
+    alert("먼저 결과를 생성하세요.");
+    return;
+  }
+  const subtitles = Array.isArray(latest.subtitles) ? latest.subtitles : [];
+  if (!subtitles.length) {
+    alert("자막 데이터를 찾을 수 없습니다.");
+    return;
+  }
+  displayAudioResult(tool, null);
+  try {
+    const result = await api(`/api/tools/${tool}/speech`, {
+      method: "POST",
+      body: JSON.stringify({ subtitles, voice: "alloy", format: "mp3" })
+    });
+    state.audioResults[tool] = result;
+    displayAudioResult(tool, result);
   } catch (error) {
     alert(error.message);
   }
@@ -843,6 +1042,7 @@ function initShortsScriptPage() {
       });
       state.latestResults[TOOL_KEYS.SCRIPT] = data;
       state.activeRecords[TOOL_KEYS.SCRIPT] = null;
+      state.audioResults[TOOL_KEYS.SCRIPT] = null;
       renderShortsScriptResults(data);
       renderSavedRecords(TOOL_KEYS.SCRIPT);
     } catch (error) {
@@ -886,6 +1086,7 @@ function initShortsScenesPage() {
       });
       state.latestResults[TOOL_KEYS.SCENES] = data;
       state.activeRecords[TOOL_KEYS.SCENES] = null;
+      state.audioResults[TOOL_KEYS.SCENES] = null;
       renderShortsSceneResults(data);
       renderSavedRecords(TOOL_KEYS.SCENES);
     } catch (error) {
@@ -932,6 +1133,7 @@ function buildProjectMarkup(project, totalDuration) {
         <div class="timeline-grid">
           ${renderTimelineRow("자막", project.subtitles, buildSubtitleSegment, "subtitle")}
           ${renderTimelineRow("음성", project.subtitles, buildAudioSegment, "audio")}
+          ${renderTimelineRow("배경 음악", project.background_music || [], buildMusicSegment, "music")}
           ${renderTimelineRow("이미지 프롬프트", project.image_prompts, buildImageSegment, "image")}
           ${renderTimelineRow("영상 프롬프트", project.video_prompts, buildVideoSegment, "video")}
           <div><strong>정렬 미리보기</strong></div>
@@ -990,6 +1192,18 @@ function buildProjectMarkup(project, totalDuration) {
             <label>시작(초)<input type="number" step="0.1" name="start" placeholder="0" /></label>
             <label>종료(초)<input type="number" step="0.1" name="end" placeholder="5" /></label>
             <button type="submit">프롬프트 추가</button>
+          </form>
+          <h3>배경 음악 추가</h3>
+          <form id="music-track-form" class="grid">
+            <label>트랙 ID<input type="text" name="track_id" placeholder="bgm-main" required /></label>
+            <label>제목<input type="text" name="title" placeholder="메인 테마" required /></label>
+            <label>출처/파일<input type="text" name="source" placeholder="bgm/main-theme.mp3" /></label>
+            <div class="segment-edit-grid">
+              <label>시작(초)<input type="number" step="0.1" name="start" placeholder="0" /></label>
+              <label>종료(초)<input type="number" step="0.1" name="end" placeholder="60" /></label>
+            </div>
+            <label>볼륨(0-1)<input type="number" step="0.05" min="0" max="1" name="volume" value="0.8" /></label>
+            <button type="submit">배경 음악 추가</button>
           </form>
         </div>
         <div id="prompt-preview">
@@ -1061,6 +1275,44 @@ function buildAudioSegment(segment) {
     <div class="segment read-only" data-type="audio" data-index="${segment.index}">
       <span>${start}s-${end}s</span>
       <small>음성 클립</small>
+    </div>
+  `;
+}
+
+function buildMusicSegment(track) {
+  const trackId = escapeHtml(track.track_id);
+  const title = escapeHtml(track.title);
+  const source = escapeHtml(track.source);
+  const start = formatTime(track.start);
+  const end = formatTime(track.end);
+  const volume = typeof track.volume === "number" && !Number.isNaN(track.volume) ? track.volume : 0.8;
+  const volumeLabel = `${Math.round(volume * 100)}%`;
+  return `
+    <div class="segment editable music-segment" data-type="music" data-track="${trackId}">
+      <div class="segment-view">
+        <span>${title}</span>
+        <small>ID: ${trackId}</small>
+        ${source ? `<small>${source}</small>` : ""}
+        <small>${start || "-"}s → ${end || "-"}s · 볼륨 ${volumeLabel}</small>
+      </div>
+      <form class="segment-edit" data-form="music">
+        <label>트랙 ID<input type="text" name="track_id" value="${trackId}" required /></label>
+        <label>제목<input type="text" name="title" value="${title}" required /></label>
+        <label>출처/파일<input type="text" name="source" value="${source}" /></label>
+        <div class="segment-edit-grid">
+          <label>시작(초)<input type="number" step="0.1" name="start" value="${start}" /></label>
+          <label>종료(초)<input type="number" step="0.1" name="end" value="${end}" /></label>
+        </div>
+        <label>볼륨(0-1)<input type="number" step="0.05" min="0" max="1" name="volume" value="${volume}" /></label>
+        <div class="segment-edit-actions">
+          <button type="submit" data-action="save">저장</button>
+          <button type="button" data-action="cancel">취소</button>
+        </div>
+      </form>
+      <div class="segment-actions">
+        <button type="button" data-action="edit">수정</button>
+        <button type="button" data-action="delete">삭제</button>
+      </div>
     </div>
   `;
 }
@@ -1251,6 +1503,49 @@ function bindTimelineEditors(container) {
     });
   });
 
+  container.querySelectorAll(".segment[data-type='music']").forEach((segmentEl) => {
+    const originalTrackId = segmentEl.dataset.track;
+    if (!originalTrackId) return;
+    setupSegmentEditor(segmentEl, {
+      confirmMessage: "선택한 배경 음악을 삭제할까요?",
+      onSave: async (formData) => {
+        const payload = {
+          track_id: String(formData.get("track_id") || "").trim(),
+          title: String(formData.get("title") || "").trim(),
+          source: String(formData.get("source") || "").trim() || undefined,
+          start: toOptionalNumber(formData.get("start")),
+          end: toOptionalNumber(formData.get("end")),
+          volume: toOptionalNumber(formData.get("volume"))
+        };
+        if (!payload.track_id || !payload.title) {
+          alert("트랙 ID와 제목을 입력하세요.");
+          return;
+        }
+        if (payload.start === null) delete payload.start;
+        if (payload.end === null) delete payload.end;
+        if (payload.volume === null || Number.isNaN(payload.volume)) {
+          delete payload.volume;
+        }
+        const project = await api(`/api/projects/${projectId}/music/${encodeURIComponent(originalTrackId)}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        });
+        renderProject(project);
+      },
+      onDelete: async () => {
+        const project = await api(`/api/projects/${projectId}/music/${encodeURIComponent(originalTrackId)}`, {
+          method: "DELETE"
+        });
+        renderProject(project);
+      }
+    });
+
+    segmentEl.addEventListener("click", (event) => {
+      if (event.target.closest(".segment-actions") || event.target.closest(".segment-edit")) return;
+      highlightPrompt(originalTrackId, "music");
+    });
+  });
+
   container.querySelectorAll(".segment[data-type='video']").forEach((segmentEl) => {
     const originalTag = segmentEl.dataset.scene;
     if (!originalTag) return;
@@ -1438,6 +1733,43 @@ function bindProjectHandlers() {
     });
   }
 
+  const musicTrackForm = container.querySelector("#music-track-form");
+  if (musicTrackForm) {
+    musicTrackForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const formData = new FormData(musicTrackForm);
+      const payload = {
+        track_id: String(formData.get("track_id") || "").trim(),
+        title: String(formData.get("title") || "").trim(),
+        source: String(formData.get("source") || "").trim() || undefined,
+        start: toOptionalNumber(formData.get("start")),
+        end: toOptionalNumber(formData.get("end")),
+        volume: toOptionalNumber(formData.get("volume")),
+      };
+      if (!payload.track_id || !payload.title) {
+        alert("트랙 ID와 제목을 입력하세요.");
+        return;
+      }
+      if (payload.start === null) delete payload.start;
+      if (payload.end === null) delete payload.end;
+      if (payload.volume === null || Number.isNaN(payload.volume)) {
+        delete payload.volume;
+      }
+      try {
+        const project = await api(`/api/projects/${state.project.project_id}/music`, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        musicTrackForm.reset();
+        const volumeInput = musicTrackForm.querySelector("input[name='volume']");
+        if (volumeInput) volumeInput.value = "0.8";
+        renderProject(project);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  }
+
   bindTimelineEditors(container);
 }
 
@@ -1449,23 +1781,67 @@ function getTotalDuration(project) {
   project.subtitles.forEach((segment) => collect(segment.start, segment.end));
   project.image_prompts.forEach((prompt) => collect(prompt.start, prompt.end));
   project.video_prompts.forEach((prompt) => collect(prompt.start, prompt.end));
+  (project.background_music || []).forEach((track) => collect(track.start, track.end));
   const max = Math.max(...candidates, 60);
   return max || 60;
 }
 
 function buildOverlapBars(project, totalDuration) {
   const items = [];
-  const pushItem = (type, label, start, end) => {
-    if (start == null || end == null) return;
-    const s = Number(start);
-    const e = Number(end);
-    if (Number.isNaN(s) || Number.isNaN(e)) return;
-    items.push({ type, label, start: s, end: e });
+  const safeDuration = totalDuration && totalDuration > 0 ? totalDuration : 60;
+  const clampToDuration = (value) => {
+    const numeric = toOptionalNumber(value);
+    if (numeric === null) return null;
+    return Math.min(Math.max(0, numeric), safeDuration);
   };
-  project.subtitles.forEach((segment) => pushItem("subtitle", `#${segment.index}`, segment.start, segment.end));
-  project.subtitles.forEach((segment) => pushItem("audio", `오디오 ${segment.index}`, segment.start, segment.end));
-  project.image_prompts.forEach((prompt, idx) => pushItem("image", prompt.tag || `이미지 ${idx + 1}`, prompt.start, prompt.end));
-  project.video_prompts.forEach((prompt, idx) => pushItem("video", prompt.scene_tag || `씬 ${idx + 1}`, prompt.start, prompt.end));
+  const pushItem = (type, label, start, end, order = 0, total = 1) => {
+    const rawStart = clampToDuration(start);
+    const rawEnd = clampToDuration(end);
+    const missingStart = rawStart === null;
+    const missingEnd = rawEnd === null;
+    const slot = total > 0 ? safeDuration / total : safeDuration;
+    const fallbackWidth = Math.min(slot, Math.max(safeDuration * 0.05, slot * 0.6, 0.5));
+
+    let itemStart = missingStart ? null : rawStart;
+    let itemEnd = missingEnd ? null : rawEnd;
+
+    if (missingStart && missingEnd) {
+      itemStart = order * slot;
+      itemEnd = itemStart + fallbackWidth;
+    } else if (missingStart) {
+      itemEnd = rawEnd ?? 0;
+      itemStart = itemEnd - fallbackWidth;
+    } else if (missingEnd) {
+      itemStart = rawStart ?? 0;
+      itemEnd = itemStart + fallbackWidth;
+    }
+
+    if (itemStart === null || itemEnd === null) return;
+
+    itemStart = Math.min(Math.max(0, itemStart), safeDuration);
+    itemEnd = Math.min(Math.max(0, itemEnd), safeDuration);
+    if (itemEnd <= itemStart) {
+      itemEnd = Math.min(safeDuration, itemStart + fallbackWidth);
+    }
+
+    items.push({
+      type,
+      label,
+      start: itemStart,
+      end: itemEnd,
+      missing: missingStart || missingEnd,
+      missingStart,
+      missingEnd
+    });
+  };
+
+  project.subtitles.forEach((segment, index, list) => pushItem("subtitle", `#${segment.index}`, segment.start, segment.end, index, list.length || 1));
+  project.subtitles.forEach((segment, index, list) => pushItem("audio", `오디오 ${segment.index}`, segment.start, segment.end, index, list.length || 1));
+  (project.background_music || []).forEach((track, index, list) =>
+    pushItem("music", track.title || track.track_id || `BGM ${index + 1}`, track.start, track.end, index, list.length || 1)
+  );
+  project.image_prompts.forEach((prompt, index, list) => pushItem("image", prompt.tag || `이미지 ${index + 1}`, prompt.start, prompt.end, index, list.length || 1));
+  project.video_prompts.forEach((prompt, index, list) => pushItem("video", prompt.scene_tag || `씬 ${index + 1}`, prompt.start, prompt.end, index, list.length || 1));
 
   items.sort((a, b) => a.start - b.start);
   let lastEnd = -1;
@@ -1473,11 +1849,14 @@ function buildOverlapBars(project, totalDuration) {
     .map((item) => {
       const overlap = item.start < lastEnd;
       lastEnd = Math.max(lastEnd, item.end);
-      const leftPercent = (item.start / totalDuration) * 100;
-      const widthPercent = ((item.end - item.start) / totalDuration) * 100 || 0.5;
+      const leftPercent = safeDuration ? (item.start / safeDuration) * 100 : 0;
+      const widthPercent = safeDuration ? ((item.end - item.start) / safeDuration) * 100 || 0.5 : 0;
       const classes = ["timeline-bar", item.type];
+      if (item.missing) classes.push("missing");
       if (overlap) classes.push("overlap");
-      return `<div class="${classes.join(" ")}" style="left:${leftPercent}%;width:${widthPercent}%">${item.label}<small>${item.start.toFixed(1)}s→${item.end.toFixed(1)}s</small></div>`;
+      const startLabel = item.missingStart ? "-" : item.start.toFixed(1);
+      const endLabel = item.missingEnd ? "-" : item.end.toFixed(1);
+      return `<div class="${classes.join(" ")}" style="left:${leftPercent}%;width:${widthPercent}%">${item.label}<small>${startLabel}s→${endLabel}s</small></div>`;
     })
     .join("");
 }
@@ -1488,10 +1867,32 @@ function highlightPrompt(tag, type) {
   let prompt;
   if (type === "image") {
     prompt = state.project.image_prompts.find((item) => item.tag === tag);
-  } else {
+  } else if (type === "video") {
     prompt = state.project.video_prompts.find((item) => item.scene_tag === tag);
+  } else if (type === "music") {
+    prompt = (state.project.background_music || []).find((item) => item.track_id === tag);
+  } else {
+    return;
   }
   if (!prompt) return;
+  if (type === "music") {
+    const volume = typeof prompt.volume === "number" && !Number.isNaN(prompt.volume) ? prompt.volume : 0.8;
+    const title = escapeHtml(prompt.title);
+    const trackId = escapeHtml(prompt.track_id);
+    const source = escapeHtml(prompt.source);
+    container.querySelector(".preview-body").innerHTML = `
+      <h4>🎵 ${title}</h4>
+      <p>ID: ${trackId}</p>
+      ${prompt.source ? `<p>출처: ${source}</p>` : ""}
+      <dl>
+        <dt>시간</dt>
+        <dd>${(prompt.start ?? 0).toFixed(1)}s → ${(prompt.end ?? 0).toFixed(1)}s</dd>
+        <dt>볼륨</dt>
+        <dd>${Math.round(volume * 100)}%</dd>
+      </dl>
+    `;
+    return;
+  }
   container.querySelector(".preview-body").innerHTML = `
     <h4>${type === "image" ? prompt.tag : prompt.scene_tag}</h4>
     <p>${type === "image" ? prompt.description : prompt.action}</p>
@@ -1610,6 +2011,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  document.querySelectorAll("[data-tts]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tool = button.getAttribute("data-tts");
+      if (!tool) return;
+      convertToSpeech(tool);
+    });
+  });
+
   document.querySelectorAll("[data-regenerate-all]").forEach((button) => {
     button.addEventListener("click", () => {
       const tool = button.getAttribute("data-regenerate-all");
@@ -1648,31 +2057,107 @@ document.addEventListener("DOMContentLoaded", () => {
     loadSavedRecords(tool);
   });
 
+  const persistedSelection = loadPersistedSelection();
+  const toolSelect = document.getElementById("tool-selection");
+  if (toolSelect && persistedSelection?.tool) {
+    toolSelect.value = persistedSelection.tool;
+  }
+  if (persistedSelection?.tool) {
+    state.activeRecords[persistedSelection.tool] = persistedSelection.recordId || null;
+    if (persistedSelection.payload && !state.latestResults[persistedSelection.tool]) {
+      state.latestResults[persistedSelection.tool] = persistedSelection.payload;
+    }
+    if (
+      (persistedSelection.tool === TOOL_KEYS.SCRIPT || persistedSelection.tool === TOOL_KEYS.SCENES) &&
+      persistedSelection.payload?.keyword
+    ) {
+      state.lastRequests[persistedSelection.tool] = {
+        keyword: persistedSelection.payload.keyword,
+        language: persistedSelection.payload.language || "ko"
+      };
+    }
+  }
+
   const form = document.getElementById("project-form");
   if (form) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const formData = new FormData(form);
-      const payload = Object.fromEntries(formData.entries());
-      if (!payload.keyword) {
-        alert("키워드를 입력하세요");
+      const selection = formData.get("tool_selection");
+      if (!selection) {
+        alert("먼저 도구에서 결과를 선택하세요.");
         return;
       }
+      const tool = String(selection);
+      let recordId = state.activeRecords[tool];
+      let records = state.savedRecords[tool] || [];
+      let record = recordId ? records.find((item) => item.id === recordId) : undefined;
+      const persisted = loadPersistedSelection();
+      if (!record && persisted && persisted.tool === tool) {
+        recordId = persisted.recordId || null;
+        record = recordId ? records.find((item) => item.id === recordId) : undefined;
+      }
+      const payload = record?.payload || (persisted && persisted.tool === tool ? persisted.payload : null);
+      if (!payload) {
+        alert("선택된 결과를 불러올 수 없습니다. 프롬프트 도구에서 저장 항목을 선택하세요.");
+        return;
+      }
+      if (!record && persisted && persisted.tool === tool && persisted.recordId) {
+        state.activeRecords[tool] = persisted.recordId;
+      }
+
       try {
+        const projectInit = {
+          keyword: toSafeString(payload.keyword, toSafeString(record?.title, "AI 프로젝트")),
+          language: toSafeString(payload.language, "ko")
+        };
         const project = await api("/api/projects", {
           method: "POST",
-          body: JSON.stringify({ keyword: payload.keyword, language: payload.language })
+          body: JSON.stringify(projectInit)
         });
-        renderProject(project);
-        if (payload.image_description) {
-          const updated = await api(`/api/projects/${project.project_id}/generate/titles`, {
+        let currentProject = project;
+
+        if (Array.isArray(payload.items)) {
+          const titles = payload.items.map((item, index) => ({
+            index: item.index || index + 1,
+            text: toSafeString(item.text || item.title, `아이템 ${index + 1}`),
+            source: tool === TOOL_KEYS.STORY ? "keyword" : "image"
+          }));
+          currentProject = await api(`/api/projects/${project.project_id}/generate/titles`, {
             method: "POST",
-            body: JSON.stringify({ type: "image", image_description: payload.image_description, count: 30 })
+            body: JSON.stringify({ type: "keyword", count: titles.length })
           });
-          renderProject(updated);
+          currentProject.titles = titles;
         }
-        const withSubtitles = await api(`/api/projects/${project.project_id}/generate/subtitles`, { method: "POST" });
-        renderProject(withSubtitles);
+
+        if (tool === TOOL_KEYS.SCRIPT) {
+          if (Array.isArray(payload.subtitles)) {
+            currentProject.subtitles = payload.subtitles;
+          }
+          if (Array.isArray(payload.images)) {
+            currentProject.image_prompts = payload.images;
+          }
+        }
+
+        if (tool === TOOL_KEYS.SCENES) {
+          if (Array.isArray(payload.subtitles)) {
+            currentProject.subtitles = payload.subtitles;
+          }
+          if (Array.isArray(payload.scenes)) {
+            currentProject.video_prompts = payload.scenes;
+          }
+        }
+
+        if (payload.keyword) {
+          state.lastRequests[tool] = {
+            keyword: toSafeString(payload.keyword),
+            language: toSafeString(payload.language, "ko")
+          };
+        }
+
+        renderProject(currentProject);
+        const activeId = state.activeRecords[tool] || recordId || (persisted?.tool === tool ? persisted.recordId : null);
+        persistSelection(tool, activeId, payload);
       } catch (error) {
         alert(error.message);
       }

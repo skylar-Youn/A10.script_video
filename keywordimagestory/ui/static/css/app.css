@@ -120,6 +120,20 @@
   gap: 0.4rem;
 }
 
+.audio-result {
+  margin-top: 1rem;
+}
+
+.audio-result .placeholder {
+  padding: 1.5rem;
+}
+
+.audio-result .audio-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .timeline-grid {
   display: grid;
   grid-template-columns: 180px 1fr;
@@ -137,7 +151,7 @@
 }
 
 .timeline-track.overlay {
-  min-height: 180px;
+  min-height: 320px;
 }
 
 .timeline-track .segment {
@@ -310,6 +324,11 @@
   top: 68px;
 }
 
+.timeline-bar.music {
+  background: rgba(255, 90, 150, 0.75);
+  top: 124px;
+}
+
 .keywords-results {
   margin-top: 2rem;
 }
@@ -355,12 +374,17 @@
 
 .timeline-bar.image {
   background: rgba(220, 160, 0, 0.75);
-  top: 124px;
+  top: 180px;
 }
 
 .timeline-bar.video {
   background: rgba(160, 75, 255, 0.75);
-  top: 180px;
+  top: 236px;
+}
+
+.timeline-bar.missing {
+  border: 2px dashed rgba(255, 255, 255, 0.85);
+  background-clip: padding-box;
 }
 
 .timeline-bar.overlap {

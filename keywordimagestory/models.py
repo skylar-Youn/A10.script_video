@@ -83,6 +83,29 @@ class VideoPrompt(BaseModel):
         return value
 
 
+class BackgroundMusicSegment(BaseModel):
+    track_id: str
+    title: str
+    source: str | None = None
+    start: float | None = None
+    end: float | None = None
+    volume: float = 0.8
+    status: GenerationStatus = GenerationStatus.draft
+
+    @validator("volume")
+    def _clamp_volume(cls, value: float) -> float:
+        if value < 0.0 or value > 1.0:
+            raise ValueError("Volume must be between 0.0 and 1.0")
+        return value
+
+    @validator("end")
+    def _validate_end(cls, value: float | None, values: dict[str, Any]) -> float | None:
+        start = values.get("start")
+        if value is not None and start is not None and value < start:
+            raise ValueError("Music segment end must be greater than start")
+        return value
+
+
 class StoryChapter(BaseModel):
     order: int
     source_id: str
@@ -125,6 +148,7 @@ class StoryProject(BaseModel):
     subtitles: list[SubtitleSegment] = Field(default_factory=list)
     image_prompts: list[ImagePrompt] = Field(default_factory=list)
     video_prompts: list[VideoPrompt] = Field(default_factory=list)
+    background_music: list[BackgroundMusicSegment] = Field(default_factory=list)
     chapters: list[StoryChapter] = Field(default_factory=list)
     applied_effects: list[MediaEffect] = Field(default_factory=list)
     template: TemplateSetting | None = None

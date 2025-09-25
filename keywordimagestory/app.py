@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
@@ -18,7 +19,18 @@ from keywordimagestory.generators import (
     ShortsSceneGenerator,
     ShortsScriptGenerator,
 )
-from keywordimagestory.models import ImagePrompt, MediaEffect, StoryProject, TemplateSetting, ToolRecord, ToolRecordCreate, ToolType, VideoPrompt
+from keywordimagestory.models import (
+    BackgroundMusicSegment,
+    ImagePrompt,
+    MediaEffect,
+    StoryProject,
+    TemplateSetting,
+    ToolRecord,
+    ToolRecordCreate,
+    ToolType,
+    VideoPrompt,
+)
+from keywordimagestory.openai_client import client as openai_client
 from keywordimagestory.services import editor_service, history_service, tool_store
 
 logger = logging.getLogger(__name__)
@@ -27,6 +39,7 @@ app = FastAPI(title="Keyword Image Story Studio", version="0.1.0")
 
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
+app.mount("/outputs", StaticFiles(directory=str(settings.outputs_dir)), name="outputs")
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +308,57 @@ async def api_delete_tool_record(tool: ToolType, record_id: str) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.post("/api/tools/{tool}/speech")
+async def api_generate_speech(tool: ToolType, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    if tool not in {ToolType.shorts_script, ToolType.shorts_scenes}:
+        raise HTTPException(status_code=400, detail="Speech synthesis is only supported for shorts tools.")
+
+    subtitles = payload.get("subtitles") or []
+    if not isinstance(subtitles, list):
+        raise HTTPException(status_code=400, detail="subtitles must be a list")
+
+    text_parts: list[str] = []
+    for item in subtitles:
+        if not isinstance(item, dict):
+            continue
+        candidate = str(item.get("text") or item.get("action") or "").strip()
+        if candidate:
+            text_parts.append(candidate)
+
+    if not text_parts:
+        raise HTTPException(status_code=400, detail="No subtitle text provided for speech synthesis")
+
+    full_text = "\n".join(text_parts)
+    voice = str(payload.get("voice") or "alloy")
+    requested_format = str(payload.get("format") or "mp3").lower()
+
+    try:
+        audio_bytes, audio_format = openai_client.synthesize_speech(
+            full_text,
+            voice=voice,
+            audio_format=requested_format,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not audio_bytes:
+        raise HTTPException(status_code=500, detail="Failed to generate audio content")
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    audio_dir = settings.outputs_dir / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{tool.value}-speech-{timestamp}.{audio_format}"
+    file_path = audio_dir / filename
+    file_path.write_bytes(audio_bytes)
+
+    return {
+        "url": f"/outputs/audio/{filename}",
+        "voice": voice,
+        "format": audio_format,
+        "character_count": len(full_text),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Editing endpoints
 # ---------------------------------------------------------------------------
@@ -410,6 +474,39 @@ async def api_delete_video_prompt(project_id: str, scene_tag: str) -> StoryProje
         editor_service.delete_video_prompt(project_id, scene_tag)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Video prompt not found") from exc
+    return _project_or_404(project_id)
+
+
+@app.post("/api/projects/{project_id}/music", response_model=StoryProject)
+async def api_add_music_track(project_id: str, payload: dict[str, Any] = Body(...)) -> StoryProject:
+    try:
+        track = BackgroundMusicSegment.parse_obj(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        editor_service.add_background_music(project_id, track)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _project_or_404(project_id)
+
+
+@app.patch("/api/projects/{project_id}/music/{track_id}", response_model=StoryProject)
+async def api_update_music_track(project_id: str, track_id: str, payload: dict[str, Any] = Body(...)) -> StoryProject:
+    try:
+        editor_service.update_background_music(project_id, track_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _project_or_404(project_id)
+
+
+@app.delete("/api/projects/{project_id}/music/{track_id}", response_model=StoryProject)
+async def api_delete_music_track(project_id: str, track_id: str) -> StoryProject:
+    try:
+        editor_service.delete_background_music(project_id, track_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _project_or_404(project_id)
 
 

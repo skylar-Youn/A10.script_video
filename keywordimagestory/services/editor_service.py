@@ -9,6 +9,7 @@ from typing import Any, Iterable, Sequence
 from keywordimagestory.config import settings
 from keywordimagestory.generators.story_assembler import StoryAssembler
 from keywordimagestory.models import (
+    BackgroundMusicSegment,
     ImagePrompt,
     MediaEffect,
     ProjectHistoryEntry,
@@ -102,6 +103,13 @@ def set_video_prompts(project_id: str, prompts: Sequence[VideoPrompt]) -> StoryP
     return project
 
 
+def set_background_music(project_id: str, tracks: Sequence[BackgroundMusicSegment]) -> StoryProject:
+    project = _get_project(project_id)
+    project.background_music = list(tracks)
+    _persist(project)
+    return project
+
+
 def set_duration(project_id: str, duration: float) -> StoryProject:
     project = _get_project(project_id)
     project.duration = duration
@@ -173,6 +181,46 @@ def delete_video_prompt(project_id: str, scene_tag: str) -> StoryProject:
     project.video_prompts = [prompt for prompt in project.video_prompts if prompt.scene_tag != scene_tag]
     if len(project.video_prompts) == before:
         raise KeyError(f"Video prompt {scene_tag} not found in project {project_id}")
+    _persist(project)
+    return project
+
+
+def add_background_music(project_id: str, track: BackgroundMusicSegment) -> StoryProject:
+    project = _get_project(project_id)
+    if any(existing.track_id == track.track_id for existing in project.background_music):
+        raise ValueError(f"Music track {track.track_id} already exists in project {project_id}")
+    project.background_music.append(track)
+    _persist(project)
+    return project
+
+
+def update_background_music(project_id: str, track_id: str, payload: dict[str, Any]) -> StoryProject:
+    project = _get_project(project_id)
+    for index, track in enumerate(project.background_music):
+        if track.track_id == track_id:
+            data = track.dict()
+            data.update(
+                {
+                    k: v
+                    for k, v in payload.items()
+                    if k in {"track_id", "title", "source", "start", "end", "volume", "status"}
+                }
+            )
+            updated = BackgroundMusicSegment.parse_obj(data)
+            project.background_music[index] = updated
+            break
+    else:
+        raise KeyError(f"Music track {track_id} not found in project {project_id}")
+    _persist(project)
+    return project
+
+
+def delete_background_music(project_id: str, track_id: str) -> StoryProject:
+    project = _get_project(project_id)
+    before = len(project.background_music)
+    project.background_music = [track for track in project.background_music if track.track_id != track_id]
+    if len(project.background_music) == before:
+        raise KeyError(f"Music track {track_id} not found in project {project_id}")
     _persist(project)
     return project
 
@@ -251,7 +299,12 @@ def export_project(project_id: str) -> dict[str, str]:
     snapshot = save_manager.save_project_snapshot(project)
     subtitle_path = save_manager.save_subtitles(project.project_id, project.subtitles)
     story_path = save_manager.save_story_markdown(project)
-    prompts_path = save_manager.save_prompts(project.project_id, project.image_prompts, project.video_prompts)
+    prompts_path = save_manager.save_prompts(
+        project.project_id,
+        images=project.image_prompts,
+        videos=project.video_prompts,
+        music=project.background_music,
+    )
 
     history_service.record(
         ProjectHistoryEntry(

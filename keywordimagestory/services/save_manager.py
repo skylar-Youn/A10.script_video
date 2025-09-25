@@ -8,6 +8,7 @@ from typing import Iterable
 
 from keywordimagestory.config import settings
 from keywordimagestory.models import (
+    BackgroundMusicSegment,
     ImagePrompt,
     StoryChapter,
     StoryProject,
@@ -54,12 +55,15 @@ def save_prompts(
     project_id: str,
     images: Iterable[ImagePrompt] | None = None,
     videos: Iterable[VideoPrompt] | None = None,
+    music: Iterable[BackgroundMusicSegment] | None = None,
 ) -> Path:
-    data: dict[str, list[dict[str, str]]] = {"images": [], "videos": []}
+    data: dict[str, list[dict[str, str]]] = {"images": [], "videos": [], "music": []}
     if images:
         data["images"] = [prompt.dict() for prompt in images]
     if videos:
         data["videos"] = [prompt.dict() for prompt in videos]
+    if music:
+        data["music"] = [track.dict() for track in music]
     path = _project_dir(project_id) / f"{_timestamp()}-prompts.json"
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
