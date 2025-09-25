@@ -349,39 +349,100 @@ function bindProjectHandlers() {
   refreshPreview();
 }
 
+async function loadProject(projectId) {
+  try {
+    const project = await api(`/api/projects/${projectId}`);
+    renderProject(project);
+    const projectSection = document.getElementById("project-state");
+    if (projectSection) {
+      projectSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set("project", projectId);
+    url.hash = `project-${projectId}`;
+    window.history.replaceState({}, "", url);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Form handling
 // ---------------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("project-form");
-  if (!form) return;
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const formData = new FormData(form);
-    const payload = Object.fromEntries(formData.entries());
-    if (!payload.keyword) {
-      alert("키워드를 입력하세요");
-      return;
-    }
-    try {
-      const project = await api("/api/projects", {
-        method: "POST",
-        body: JSON.stringify({ keyword: payload.keyword, language: payload.language })
-      });
-      renderProject(project);
-      if (payload.image_description) {
-        const updatedTitles = await api(`/api/projects/${project.project_id}/generate/titles`, {
-          method: "POST",
-          body: JSON.stringify({ type: "image", image_description: payload.image_description, count: 30 })
-        });
-        renderProject(updatedTitles);
+  if (form) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const payload = Object.fromEntries(formData.entries());
+      if (!payload.keyword) {
+        alert("키워드를 입력하세요");
+        return;
       }
-      const withSubtitles = await api(`/api/projects/${project.project_id}/generate/subtitles`, { method: "POST" });
-      renderProject(withSubtitles);
-    } catch (error) {
-      alert(error.message);
+      try {
+        const project = await api("/api/projects", {
+          method: "POST",
+          body: JSON.stringify({ keyword: payload.keyword, language: payload.language })
+        });
+        renderProject(project);
+        if (payload.image_description) {
+          const updatedTitles = await api(`/api/projects/${project.project_id}/generate/titles`, {
+            method: "POST",
+            body: JSON.stringify({ type: "image", image_description: payload.image_description, count: 30 })
+          });
+          renderProject(updatedTitles);
+        }
+        const withSubtitles = await api(`/api/projects/${project.project_id}/generate/subtitles`, { method: "POST" });
+        renderProject(withSubtitles);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  }
+
+  const historyTable = document.getElementById("project-history-table");
+  if (historyTable) {
+    const tbody = historyTable.querySelector("tbody");
+    historyTable.addEventListener("click", async (event) => {
+      const deleteButton = event.target.closest("button[data-delete-history]");
+      const row = event.target.closest("tr[data-project-id]");
+      if (!row) return;
+
+      const projectId = row.dataset.projectId;
+      const version = row.dataset.version;
+
+      if (deleteButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const confirmDelete = confirm("선택한 내보내기 기록을 삭제할까요?");
+        if (!confirmDelete) return;
+        try {
+          await api(`/api/history/${projectId}/${version}`, { method: "DELETE" });
+          row.remove();
+          if (tbody && !tbody.querySelector("tr[data-project-id]")) {
+            tbody.innerHTML = '<tr><td colspan="5">기록이 없습니다.</td></tr>';
+          }
+        } catch (error) {
+          alert(error.message);
+        }
+        return;
+      }
+
+      await loadProject(projectId);
+    });
+
+    if (tbody && !tbody.querySelector("tr[data-project-id]")) {
+      tbody.innerHTML = '<tr><td colspan="5">기록이 없습니다.</td></tr>';
     }
-  });
+  }
+
+  const url = new URL(window.location.href);
+  const projectFromQuery = url.searchParams.get("project");
+  const projectFromHash = url.hash.startsWith("#project-") ? url.hash.replace("#project-", "") : null;
+  const initialProjectId = projectFromQuery || projectFromHash;
+  if (initialProjectId) {
+    loadProject(initialProjectId);
+  }
 });

@@ -38,17 +38,18 @@
 <section>
   <details open>
     <summary>최근 작업 내역</summary>
-    <table>
+    <table id="project-history-table">
       <thead>
-        <tr><th>프로젝트</th><th>버전</th><th>설명</th><th>시간</th></tr>
+        <tr><th>프로젝트</th><th>버전</th><th>설명</th><th>시간</th><th>삭제</th></tr>
       </thead>
       <tbody>
         {% for item in history %}
-        <tr>
+        <tr data-project-id="{{ item.project_id }}" data-version="{{ item.version }}" title="클릭하여 프로젝트를 다시 열기">
           <td>{{ item.project_id }}</td>
           <td>{{ item.version }}</td>
           <td>{{ item.summary }}</td>
-          <td>{{ item.timestamp }}</td>
+          <td>{{ item.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td><button type="button" class="outline" data-delete-history>삭제</button></td>
         </tr>
         {% endfor %}
       </tbody>

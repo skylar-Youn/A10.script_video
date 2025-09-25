@@ -49,5 +49,5 @@ python3 ytdl.py "https://www.youtube.com/shorts/4y6uaG2UZ9E" --sub-langs ko
 - 고급 포맷 선택이 필요하면 `yt-dlp --help`를 참고하거나, 필요한 옵션을 환경 변수 `YT_DLP_ACCESS_ARGS`에 추가해 사용할 수 있습니다.
 
 ## 웹 UI 활용
-- FastAPI 앱(`uvicorn web_app.app:app --reload`)을 실행하면 `/ytdl` 경로에서 간단한 폼 기반 UI로 영상/자막 다운로드를 제어할 수 있습니다.
+- FastAPI 앱(`uvicorn web_app.app:app --reload --port 8001` 또는 `python -m web_app`)을 실행하면 `/ytdl` 경로에서 간단한 폼 기반 UI로 영상/자막 다운로드를 제어할 수 있습니다.
 - 한 번에 여러 URL을 줄바꿈으로 넣고, 자막 언어·드라이런 여부 등을 체크박스와 입력란으로 지정할 수 있습니다.

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable
 
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -199,6 +199,14 @@ async def api_settings() -> dict[str, Any]:
 async def api_history(project_id: str):
     entries = history_service.list_history(project_id)
     return [entry.dict() for entry in entries]
+
+
+@app.delete("/api/history/{project_id}/{version}", status_code=204)
+async def api_delete_history_entry(project_id: str, version: int) -> Response:
+    entry = history_service.delete_entry(project_id, version)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="History entry not found")
+    return Response(status_code=204)
 
 
 def include_router(app_: FastAPI) -> None:

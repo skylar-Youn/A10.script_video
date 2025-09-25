@@ -87,3 +87,16 @@
   min-width: 80%;
   text-align: center;
 }
+
+#project-history-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+#project-history-table tbody tr:hover {
+  background-color: var(--muted-border-color);
+}
+
+#project-history-table tbody tr button {
+  cursor: pointer;
+}

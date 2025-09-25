@@ -32,3 +32,22 @@ def list_history(project_id: str | None = None) -> list[ProjectHistoryEntry]:
     if project_id is None:
         return entries
     return [entry for entry in entries if entry.project_id == project_id]
+
+
+def delete_entry(project_id: str, version: int) -> ProjectHistoryEntry | None:
+    """Remove a history entry and return it if it existed."""
+
+    entries = _read_entries(settings.history_db_path)
+    removed: ProjectHistoryEntry | None = None
+    remaining: list[ProjectHistoryEntry] = []
+
+    for entry in entries:
+        if removed is None and entry.project_id == project_id and entry.version == version:
+            removed = entry
+            continue
+        remaining.append(entry)
+
+    if removed is not None:
+        _write_entries(settings.history_db_path, remaining)
+
+    return removed

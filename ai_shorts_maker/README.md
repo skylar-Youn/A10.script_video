@@ -41,7 +41,7 @@ ai_shorts_maker/
 | 용도 | 명령어 |
 | --- | --- |
 | CLI로 바로 쇼츠 생성 | `python shorts_maker.py --topic "무서운 썰" --style "공포/미스터리" --duration 30 --lang ko --voice alloy` |
-| FastAPI 웹 UI 실행 | `uvicorn web_app.app:app --reload` |
+| FastAPI 웹 UI 실행 | `uvicorn web_app.app:app --reload --port 8001` |
 
 ```bash
 python shorts_maker.py \
@@ -66,10 +66,12 @@ python shorts_maker.py \
 간단한 웹 인터페이스도 함께 제공합니다.
 
 ```bash
-uvicorn web_app.app:app --reload
+uvicorn web_app.app:app --reload --port 8001
 ```
 
-브라우저에서 `http://127.0.0.1:8000` 으로 접속해 주제를 입력하고 버튼 하나로 쇼츠를 만들 수 있습니다. 결과 페이지에서 생성된 MP4/MP3/SRT 파일을 바로 다운로드할 수 있습니다.
+또는 `python -m web_app` 명령으로 동일한 설정(기본 포트 8001, `WEB_APP_PORT` 환경 변수로 재정의 가능)을 사용해 서버를 실행할 수 있습니다.
+
+브라우저에서 `http://127.0.0.1:8001` 으로 접속해 주제를 입력하고 버튼 하나로 쇼츠를 만들 수 있습니다. 결과 페이지에서 생성된 MP4/MP3/SRT 파일을 바로 다운로드할 수 있습니다.
 또한 기존에 만들어 둔 결과물이 있다면 상단의 드롭다운에서 선택해 곧바로 다운로드 링크를 확인할 수 있습니다.
 
 ## 출력물
