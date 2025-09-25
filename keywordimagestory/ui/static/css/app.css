@@ -31,21 +31,107 @@
 }
 
 .timeline-track .segment {
+  position: relative;
   display: inline-flex;
   flex-direction: column;
   justify-content: center;
-  align-items: flex-start;
-  min-width: 120px;
-  padding: 0.5rem 0.75rem;
+  align-items: stretch;
+  min-width: 140px;
+  padding: 0.75rem;
   margin-right: 0.75rem;
   border-radius: 0.5rem;
   background: var(--primary-container);
   color: var(--primary-inverse);
-  cursor: grab;
+  cursor: default;
+  gap: 0.35rem;
+}
+
+.timeline-track .segment.read-only {
+  align-items: flex-start;
+  min-width: 120px;
+}
+
+.timeline-track .segment.empty {
+  border: 1px dashed var(--muted-border-color);
+  background: transparent;
+  color: var(--muted-color);
+  min-width: 160px;
 }
 
 .timeline-track .segment.active {
   outline: 2px solid var(--primary);
+}
+
+.segment-view span {
+  font-weight: 600;
+}
+
+.segment-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.segment-actions button {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.segment-edit {
+  display: none;
+  background: var(--card-background-color);
+  color: inherit;
+  border-radius: 0.4rem;
+  padding: 0.6rem;
+  gap: 0.5rem;
+  flex-direction: column;
+}
+
+.segment-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.segment-edit input,
+.segment-edit textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--muted-border-color);
+  background: var(--background-color);
+  color: inherit;
+}
+
+.segment-edit textarea {
+  resize: vertical;
+}
+
+.segment-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.5rem;
+}
+
+.segment-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.segment-edit-actions button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.segment.editing .segment-view,
+.segment.editing .segment-actions {
+  display: none;
+}
+
+.segment.editing .segment-edit {
+  display: flex;
 }
 
 .effect-badge {
@@ -112,6 +198,49 @@
 .timeline-bar.audio {
   background: rgba(0, 200, 170, 0.75);
   top: 68px;
+}
+
+.keywords-results {
+  margin-top: 2rem;
+}
+
+.keywords-results article {
+  border-radius: 1rem;
+  border: 1px solid var(--muted-border-color);
+  padding: 1.5rem;
+  background: var(--card-background-color);
+  box-shadow: var(--card-box-shadow);
+}
+
+.keywords-results header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.keywords-results ol {
+  margin: 0;
+  padding-left: 1.5rem;
+  columns: 1;
+}
+
+@media (min-width: 768px) {
+  .keywords-results ol {
+    columns: 2;
+    column-gap: 2rem;
+  }
+}
+
+.keywords-results li {
+  margin-bottom: 0.6rem;
+  break-inside: avoid-column;
+}
+
+.keywords-results .status {
+  font-size: 0.9rem;
+  color: var(--muted-color);
 }
 
 .timeline-bar.image {

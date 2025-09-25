@@ -35,6 +35,413 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatTime(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "";
+  return Number(value).toFixed(1);
+}
+
+function formatTimecode(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "00:00:00,000";
+  }
+  const total = Math.max(0, Number(value));
+  const hours = Math.floor(total / 3600)
+    .toString()
+    .padStart(2, "0");
+  const minutes = Math.floor((total % 3600) / 60)
+    .toString()
+    .padStart(2, "0");
+  const seconds = Math.floor(total % 60)
+    .toString()
+    .padStart(2, "0");
+  const millis = Math.round((total - Math.floor(total)) * 1000)
+    .toString()
+    .padStart(3, "0");
+  return `${hours}:${minutes}:${seconds},${millis}`;
+}
+
+function toOptionalNumber(value) {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  if (normalized === "") return null;
+  const parsed = Number(normalized);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function renderStoryKeywordResults(result) {
+  const container = document.getElementById("story-keyword-results");
+  if (!container) return;
+
+  const items = Array.isArray(result?.items) ? result.items : [];
+  if (!items.length) {
+    container.innerHTML = '<div class="placeholder"><p>생성된 항목이 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
+    return;
+  }
+
+  const listMarkup = items
+    .map((item, index) => {
+      const label = typeof item.index === "number" ? item.index : index + 1;
+      const text = escapeHtml(item.text ?? "");
+      return `<li><strong>${label}.</strong> ${text}</li>`;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <article>
+      <header>
+        <div>
+          <h2>생성된 키워드</h2>
+          <p class="status">입력 키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong> · 총 ${items.length}개</p>
+        </div>
+        <small class="status">언어: ${escapeHtml(result.language ?? "ko")}</small>
+      </header>
+      <ol>
+        ${listMarkup}
+      </ol>
+    </article>
+  `;
+}
+
+function renderImageTitleResults(result) {
+  const container = document.getElementById("image-title-results");
+  if (!container) return;
+
+  const items = Array.isArray(result?.items) ? result.items : [];
+  if (!items.length) {
+    container.innerHTML = '<div class="placeholder"><p>생성된 제목이 없습니다. 다른 설명을 입력해 보세요.</p></div>';
+    return;
+  }
+
+  const listMarkup = items
+    .map((item, index) => {
+      const label = typeof item.index === "number" ? item.index : index + 1;
+      const text = escapeHtml(item.text ?? "");
+      return `<li><strong>${label}.</strong> ${text}</li>`;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <article>
+      <header>
+        <div>
+          <h3>생성된 스토리 제목</h3>
+          <p class="status">설명 원문: <strong>${escapeHtml(result.description ?? "")}</strong></p>
+        </div>
+        <small class="status">키워드: ${escapeHtml(result.keyword ?? "")} · 언어: ${escapeHtml(result.language ?? "ko")}</small>
+      </header>
+      <ol>
+        ${listMarkup}
+      </ol>
+    </article>
+  `;
+}
+
+function renderShortsScriptResults(result) {
+  const container = document.getElementById("shorts-script-results");
+  if (!container) return;
+
+  const subtitles = Array.isArray(result?.subtitles) ? result.subtitles : [];
+  const images = Array.isArray(result?.images) ? result.images : [];
+
+  if (!subtitles.length && !images.length) {
+    container.innerHTML = '<div class="placeholder"><p>생성된 결과가 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
+    return;
+  }
+
+  const subtitleMarkup = subtitles
+    .map((segment) => {
+      const index = typeof segment.index === "number" ? segment.index : "-";
+      const start = formatTimecode(segment.start);
+      const end = formatTimecode(segment.end);
+      const text = escapeHtml(segment.text ?? "");
+      const tag = escapeHtml(segment.scene_tag ?? "");
+      return `
+        <li>
+          <header><strong>${index}</strong> <span>${start} → ${end}</span></header>
+          <p>${text}</p>
+          <small>${tag}</small>
+        </li>
+      `;
+    })
+    .join("");
+
+  const imageMarkup = images
+    .map((prompt, idx) => {
+      const tag = escapeHtml(prompt.tag ?? `이미지 ${idx + 1}`);
+      const description = escapeHtml(prompt.description ?? "");
+      const start = prompt.start !== undefined && prompt.start !== null ? formatTimecode(prompt.start) : "-";
+      const end = prompt.end !== undefined && prompt.end !== null ? formatTimecode(prompt.end) : "-";
+      return `
+        <li>
+          <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
+          <p>${description}</p>
+        </li>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <article>
+      <header>
+        <h3>쇼츠용 SRT 대본</h3>
+        <p class="status">키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong> · 언어: ${escapeHtml(result.language ?? "ko")}</p>
+      </header>
+      <div class="grid">
+        <section>
+          <h4>자막 타임라인</h4>
+          <ol class="srt-list">${subtitleMarkup || '<li>자막이 없습니다.</li>'}</ol>
+        </section>
+        <section>
+          <h4>이미지 장면 프롬프트</h4>
+          <ol class="prompt-list">${imageMarkup || '<li>이미지 프롬프트가 없습니다.</li>'}</ol>
+        </section>
+      </div>
+    </article>
+  `;
+}
+
+function renderShortsSceneResults(result) {
+  const container = document.getElementById("shorts-scenes-results");
+  if (!container) return;
+
+  const subtitles = Array.isArray(result?.subtitles) ? result.subtitles : [];
+  const scenes = Array.isArray(result?.scenes) ? result.scenes : [];
+
+  if (!subtitles.length && !scenes.length) {
+    container.innerHTML = '<div class="placeholder"><p>생성된 결과가 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
+    return;
+  }
+
+  const subtitleMarkup = subtitles
+    .map((segment) => {
+      const index = typeof segment.index === "number" ? segment.index : "-";
+      const start = formatTimecode(segment.start);
+      const end = formatTimecode(segment.end);
+      const text = escapeHtml(segment.text ?? "");
+      const tag = escapeHtml(segment.scene_tag ?? "");
+      return `
+        <li>
+          <header><strong>${index}</strong> <span>${start} → ${end}</span></header>
+          <p>${text}</p>
+          <small>${tag}</small>
+        </li>
+      `;
+    })
+    .join("");
+
+  const sceneMarkup = scenes
+    .map((scene, idx) => {
+      const tag = escapeHtml(scene.scene_tag ?? `씬 ${idx + 1}`);
+      const action = escapeHtml(scene.action ?? "");
+      const camera = escapeHtml(scene.camera ?? "");
+      const mood = escapeHtml(scene.mood ?? "");
+      const start = scene.start !== undefined && scene.start !== null ? formatTimecode(scene.start) : "-";
+      const end = scene.end !== undefined && scene.end !== null ? formatTimecode(scene.end) : "-";
+      return `
+        <li>
+          <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
+          <p>${action}</p>
+          <small>카메라: ${camera} · 분위기: ${mood}</small>
+        </li>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <article>
+      <header>
+        <h3>쇼츠용 씬 대본</h3>
+        <p class="status">키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong> · 언어: ${escapeHtml(result.language ?? "ko")}</p>
+      </header>
+      <div class="grid">
+        <section>
+          <h4>SRT 구간</h4>
+          <ol class="srt-list">${subtitleMarkup || '<li>자막이 없습니다.</li>'}</ol>
+        </section>
+        <section>
+          <h4>영상 장면 프롬프트</h4>
+          <ol class="prompt-list">${sceneMarkup || '<li>장면 프롬프트가 없습니다.</li>'}</ol>
+        </section>
+      </div>
+    </article>
+  `;
+}
+
+function initStoryKeywordPage() {
+  const form = document.getElementById("story-keyword-form");
+  const resultsContainer = document.getElementById("story-keyword-results");
+  if (!form || !resultsContainer) return;
+
+  const submitButton = form.querySelector("button[type='submit']");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const keyword = String(formData.get("keyword") || "").trim();
+    if (!keyword) {
+      alert("키워드를 입력하세요.");
+      return;
+    }
+
+    const language = String(formData.get("language") || "ko") || "ko";
+    let count = Number(formData.get("count") || 30);
+    if (!Number.isFinite(count)) {
+      count = 30;
+    }
+
+    const payload = { keyword, language, count };
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.setAttribute("aria-busy", "true");
+    }
+    resultsContainer.innerHTML = '<div class="placeholder"><p>생성 중입니다...</p></div>';
+    try {
+      const data = await api("/api/generate/story-keywords", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderStoryKeywordResults(data);
+    } catch (error) {
+      resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.removeAttribute("aria-busy");
+      }
+    }
+  });
+}
+
+function initImageTitlePage() {
+  const form = document.getElementById("image-title-form");
+  const resultsContainer = document.getElementById("image-title-results");
+  if (!form || !resultsContainer) return;
+
+  const submitButton = form.querySelector("button[type='submit']");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const description = String(formData.get("description") || "").trim();
+    if (!description) {
+      alert("이미지 설명을 입력하세요.");
+      return;
+    }
+    const keyword = String(formData.get("keyword") || "").trim();
+    let count = Number(formData.get("count") || 30);
+    if (!Number.isFinite(count)) {
+      count = 30;
+    }
+
+    const payload = { description, keyword, count };
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.setAttribute("aria-busy", "true");
+    }
+    resultsContainer.innerHTML = '<div class="placeholder"><p>생성 중입니다...</p></div>';
+    try {
+      const data = await api("/api/generate/image-titles", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderImageTitleResults(data);
+    } catch (error) {
+      resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.removeAttribute("aria-busy");
+      }
+    }
+  });
+}
+
+function initShortsScriptPage() {
+  const form = document.getElementById("shorts-script-form");
+  const resultsContainer = document.getElementById("shorts-script-results");
+  if (!form || !resultsContainer) return;
+
+  const submitButton = form.querySelector("button[type='submit']");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const keyword = String(formData.get("keyword") || "").trim();
+    if (!keyword) {
+      alert("스토리 키워드를 입력하세요.");
+      return;
+    }
+    const language = String(formData.get("language") || "ko") || "ko";
+
+    const payload = { keyword, language };
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.setAttribute("aria-busy", "true");
+    }
+    resultsContainer.innerHTML = '<div class="placeholder"><p>생성 중입니다...</p></div>';
+    try {
+      const data = await api("/api/generate/shorts-script", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderShortsScriptResults(data);
+    } catch (error) {
+      resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.removeAttribute("aria-busy");
+      }
+    }
+  });
+}
+
+function initShortsScenesPage() {
+  const form = document.getElementById("shorts-scenes-form");
+  const resultsContainer = document.getElementById("shorts-scenes-results");
+  if (!form || !resultsContainer) return;
+
+  const submitButton = form.querySelector("button[type='submit']");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const keyword = String(formData.get("keyword") || "").trim();
+    if (!keyword) {
+      alert("스토리 키워드를 입력하세요.");
+      return;
+    }
+    const language = String(formData.get("language") || "ko") || "ko";
+
+    const payload = { keyword, language };
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.setAttribute("aria-busy", "true");
+    }
+    resultsContainer.innerHTML = '<div class="placeholder"><p>생성 중입니다...</p></div>';
+    try {
+      const data = await api("/api/generate/shorts-scenes", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderShortsSceneResults(data);
+    } catch (error) {
+      resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.removeAttribute("aria-busy");
+      }
+    }
+  });
+}
+
 function renderProject(project) {
   state.project = project;
   const container = document.getElementById("project-state");
@@ -42,7 +449,8 @@ function renderProject(project) {
 
   const totalDuration = getTotalDuration(project);
   container.innerHTML = buildProjectMarkup(project, totalDuration);
-  bindProjectHandlers(totalDuration);
+  bindProjectHandlers();
+  highlightHistorySelection(project.project_id);
 }
 
 function buildProjectMarkup(project, totalDuration) {
@@ -65,10 +473,10 @@ function buildProjectMarkup(project, totalDuration) {
       <section>
         <h3>동시 편집 타임라인</h3>
         <div class="timeline-grid">
-          ${renderTimelineRow("자막", project.subtitles, buildSubtitleSegment)}
-          ${renderTimelineRow("음성", project.subtitles, buildAudioSegment)}
-          ${renderTimelineRow("이미지 프롬프트", project.image_prompts, buildImageSegment)}
-          ${renderTimelineRow("영상 프롬프트", project.video_prompts, buildVideoSegment)}
+          ${renderTimelineRow("자막", project.subtitles, buildSubtitleSegment, "subtitle")}
+          ${renderTimelineRow("음성", project.subtitles, buildAudioSegment, "audio")}
+          ${renderTimelineRow("이미지 프롬프트", project.image_prompts, buildImageSegment, "image")}
+          ${renderTimelineRow("영상 프롬프트", project.video_prompts, buildVideoSegment, "video")}
           <div><strong>정렬 미리보기</strong></div>
           <div class="timeline-track overlay" id="overlap-track" data-duration="${totalDuration}">
             ${buildOverlapBars(project, totalDuration)}
@@ -139,45 +547,295 @@ function buildProjectMarkup(project, totalDuration) {
   `;
 }
 
-function renderTimelineRow(label, items, builder) {
+function renderTimelineRow(label, items, builder, key) {
+  const trackId = key ? `${key}-track` : null;
+  const content = items && items.length ? items.map(builder).join("") : '<div class="segment empty">데이터 없음</div>';
+  const attributes = [
+    'class="timeline-track"',
+    `data-label="${label}"`,
+    key ? `data-track="${key}"` : "",
+    trackId ? `id="${trackId}"` : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
   return `
     <div><strong>${label}</strong></div>
-    <div class="timeline-track" data-label="${label}">
-      ${items && items.length ? items.map(builder).join("") : '<div class="segment">데이터 없음</div>'}
+    <div ${attributes}>
+      ${content}
     </div>
   `;
 }
 
 function buildSubtitleSegment(segment) {
-  return `<div class="segment" data-index="${segment.index}" data-start="${segment.start}" data-end="${segment.end}">
-      <span>#${segment.index} (${segment.start.toFixed(1)}s→${segment.end.toFixed(1)}s)</span>
-      <strong>${segment.text}</strong>
-      <small>${segment.scene_tag}</small>
-    </div>`;
+  const text = escapeHtml(segment.text);
+  const scene = escapeHtml(segment.scene_tag);
+  const start = formatTime(segment.start);
+  const end = formatTime(segment.end);
+  return `
+    <div class="segment editable" data-type="subtitle" data-index="${segment.index}">
+      <div class="segment-view">
+        <span>#${segment.index} (${start}s→${end}s)</span>
+        <strong>${text}</strong>
+        <small>${scene}</small>
+      </div>
+      <form class="segment-edit" data-form="subtitle">
+        <label>내용<textarea name="text" rows="2">${text}</textarea></label>
+        <div class="segment-edit-grid">
+          <label>시작(초)<input type="number" step="0.1" name="start" value="${start}" required /></label>
+          <label>종료(초)<input type="number" step="0.1" name="end" value="${end}" required /></label>
+        </div>
+        <div class="segment-edit-actions">
+          <button type="submit" data-action="save">저장</button>
+          <button type="button" data-action="cancel">취소</button>
+        </div>
+      </form>
+      <div class="segment-actions">
+        <button type="button" data-action="edit">수정</button>
+        <button type="button" data-action="delete">삭제</button>
+      </div>
+    </div>
+  `;
 }
 
 function buildAudioSegment(segment) {
-  return `<div class="segment" data-index="${segment.index}" data-start="${segment.start}" data-end="${segment.end}">
-      <span>${segment.start.toFixed(1)}s-${segment.end.toFixed(1)}s</span>
+  const start = formatTime(segment.start);
+  const end = formatTime(segment.end);
+  return `
+    <div class="segment read-only" data-type="audio" data-index="${segment.index}">
+      <span>${start}s-${end}s</span>
       <small>음성 클립</small>
-    </div>`;
+    </div>
+  `;
 }
 
 function buildImageSegment(prompt) {
-  return `<div class="segment scene-segment" data-scene="${prompt.tag}" data-start="${prompt.start ?? 0}" data-end="${prompt.end ?? 0}">
-      <span>${prompt.tag}</span>
-      <small>${prompt.description}</small>
-    </div>`;
+  const tag = escapeHtml(prompt.tag);
+  const description = escapeHtml(prompt.description);
+  const start = formatTime(prompt.start);
+  const end = formatTime(prompt.end);
+  return `
+    <div class="segment editable scene-segment" data-type="image" data-tag="${tag}">
+      <div class="segment-view">
+        <span>${tag}</span>
+        <small>${description}</small>
+        <small>${start || "-"}s → ${end || "-"}s</small>
+      </div>
+      <form class="segment-edit" data-form="image">
+        <label>태그<input type="text" name="tag" value="${tag}" required /></label>
+        <label>설명<textarea name="description" rows="2">${description}</textarea></label>
+        <div class="segment-edit-grid">
+          <label>시작(초)<input type="number" step="0.1" name="start" value="${start}" /></label>
+          <label>종료(초)<input type="number" step="0.1" name="end" value="${end}" /></label>
+        </div>
+        <div class="segment-edit-actions">
+          <button type="submit" data-action="save">저장</button>
+          <button type="button" data-action="cancel">취소</button>
+        </div>
+      </form>
+      <div class="segment-actions">
+        <button type="button" data-action="edit">수정</button>
+        <button type="button" data-action="delete">삭제</button>
+      </div>
+    </div>
+  `;
 }
 
 function buildVideoSegment(prompt) {
-  return `<div class="segment video-segment" data-scene="${prompt.scene_tag}" data-start="${prompt.start ?? 0}" data-end="${prompt.end ?? 0}">
-      <span>${prompt.scene_tag}</span>
-      <small>${prompt.action}</small>
-    </div>`;
+  const sceneTag = escapeHtml(prompt.scene_tag);
+  const camera = escapeHtml(prompt.camera);
+  const action = escapeHtml(prompt.action);
+  const mood = escapeHtml(prompt.mood);
+  const start = formatTime(prompt.start);
+  const end = formatTime(prompt.end);
+  return `
+    <div class="segment editable video-segment" data-type="video" data-scene="${sceneTag}">
+      <div class="segment-view">
+        <span>${sceneTag}</span>
+        <small>${action}</small>
+        <small>${start || "-"}s → ${end || "-"}s</small>
+      </div>
+      <form class="segment-edit" data-form="video">
+        <label>씬 태그<input type="text" name="scene_tag" value="${sceneTag}" required /></label>
+        <label>카메라<input type="text" name="camera" value="${camera}" required /></label>
+        <label>액션<textarea name="action" rows="2">${action}</textarea></label>
+        <label>분위기<input type="text" name="mood" value="${mood}" required /></label>
+        <div class="segment-edit-grid">
+          <label>시작(초)<input type="number" step="0.1" name="start" value="${start}" /></label>
+          <label>종료(초)<input type="number" step="0.1" name="end" value="${end}" /></label>
+        </div>
+        <div class="segment-edit-actions">
+          <button type="submit" data-action="save">저장</button>
+          <button type="button" data-action="cancel">취소</button>
+        </div>
+      </form>
+      <div class="segment-actions">
+        <button type="button" data-action="edit">수정</button>
+        <button type="button" data-action="delete">삭제</button>
+      </div>
+    </div>
+  `;
 }
 
-function bindProjectHandlers(totalDuration) {
+function setupSegmentEditor(segmentEl, { onSave, onDelete, confirmMessage }) {
+  const form = segmentEl.querySelector(".segment-edit");
+  const editButton = segmentEl.querySelector("[data-action='edit']");
+  const cancelButton = segmentEl.querySelector(".segment-edit [data-action='cancel']");
+  const deleteButton = segmentEl.querySelector("[data-action='delete']");
+
+  if (editButton && form) {
+    editButton.addEventListener("click", () => {
+      segmentEl.classList.add("editing");
+      const focusTarget = form.querySelector("input, textarea");
+      if (focusTarget) {
+        focusTarget.focus();
+      }
+    });
+  }
+
+  if (cancelButton && form) {
+    cancelButton.addEventListener("click", () => {
+      form.reset();
+      segmentEl.classList.remove("editing");
+    });
+  }
+
+  if (form) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await onSave(new FormData(form));
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  }
+
+  if (deleteButton) {
+    deleteButton.addEventListener("click", async () => {
+      if (confirmMessage && !confirm(confirmMessage)) return;
+      try {
+        await onDelete();
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  }
+}
+
+function bindTimelineEditors(container) {
+  const projectId = state.project?.project_id;
+  if (!projectId) return;
+
+  container.querySelectorAll(".segment[data-type='subtitle']").forEach((segmentEl) => {
+    const index = segmentEl.dataset.index;
+    if (!index) return;
+    setupSegmentEditor(segmentEl, {
+      confirmMessage: "선택한 자막을 삭제할까요?",
+      onSave: async (formData) => {
+        const payload = {
+          text: String(formData.get("text") || "").trim(),
+          start: Number(formData.get("start")),
+          end: Number(formData.get("end"))
+        };
+        if (!payload.text) {
+          alert("자막 내용을 입력하세요.");
+          return;
+        }
+        const project = await api(`/api/projects/${projectId}/subtitles/${index}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        });
+        renderProject(project);
+      },
+      onDelete: async () => {
+        const project = await api(`/api/projects/${projectId}/subtitles/${index}`, {
+          method: "DELETE"
+        });
+        renderProject(project);
+      }
+    });
+  });
+
+  container.querySelectorAll(".segment[data-type='image']").forEach((segmentEl) => {
+    const originalTag = segmentEl.dataset.tag;
+    if (!originalTag) return;
+    setupSegmentEditor(segmentEl, {
+      confirmMessage: "선택한 이미지 프롬프트를 삭제할까요?",
+      onSave: async (formData) => {
+        const payload = {
+          tag: String(formData.get("tag") || "").trim(),
+          description: String(formData.get("description") || "").trim(),
+          start: toOptionalNumber(formData.get("start")),
+          end: toOptionalNumber(formData.get("end"))
+        };
+        if (!payload.tag || !payload.description) {
+          alert("태그와 설명을 모두 입력하세요.");
+          return;
+        }
+        if (payload.start === null) delete payload.start;
+        if (payload.end === null) delete payload.end;
+        const project = await api(`/api/projects/${projectId}/prompts/image/${encodeURIComponent(originalTag)}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        });
+        renderProject(project);
+      },
+      onDelete: async () => {
+        const project = await api(`/api/projects/${projectId}/prompts/image/${encodeURIComponent(originalTag)}`, {
+          method: "DELETE"
+        });
+        renderProject(project);
+      }
+    });
+
+    segmentEl.addEventListener("click", (event) => {
+      if (event.target.closest(".segment-actions") || event.target.closest(".segment-edit")) return;
+      highlightPrompt(originalTag, "image");
+    });
+  });
+
+  container.querySelectorAll(".segment[data-type='video']").forEach((segmentEl) => {
+    const originalTag = segmentEl.dataset.scene;
+    if (!originalTag) return;
+    setupSegmentEditor(segmentEl, {
+      confirmMessage: "선택한 영상 프롬프트를 삭제할까요?",
+      onSave: async (formData) => {
+        const payload = {
+          scene_tag: String(formData.get("scene_tag") || "").trim(),
+          camera: String(formData.get("camera") || "").trim(),
+          action: String(formData.get("action") || "").trim(),
+          mood: String(formData.get("mood") || "").trim(),
+          start: toOptionalNumber(formData.get("start")),
+          end: toOptionalNumber(formData.get("end"))
+        };
+        if (!payload.scene_tag || !payload.camera || !payload.action || !payload.mood) {
+          alert("씬 태그, 카메라, 액션, 분위기를 모두 입력하세요.");
+          return;
+        }
+        if (payload.start === null) delete payload.start;
+        if (payload.end === null) delete payload.end;
+        const project = await api(`/api/projects/${projectId}/prompts/video/${encodeURIComponent(originalTag)}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        });
+        renderProject(project);
+      },
+      onDelete: async () => {
+        const project = await api(`/api/projects/${projectId}/prompts/video/${encodeURIComponent(originalTag)}`, {
+          method: "DELETE"
+        });
+        renderProject(project);
+      }
+    });
+
+    segmentEl.addEventListener("click", (event) => {
+      if (event.target.closest(".segment-actions") || event.target.closest(".segment-edit")) return;
+      highlightPrompt(originalTag, "video");
+    });
+  });
+}
+
+function bindProjectHandlers() {
   const container = document.getElementById("project-state");
   if (!container) return;
 
@@ -214,53 +872,6 @@ function bindProjectHandlers(totalDuration) {
         alert(error.message);
       }
     });
-  });
-
-  container.querySelectorAll("#subtitle-track .segment").forEach((segmentEl) => {
-    segmentEl.addEventListener("click", async () => {
-      const index = segmentEl.dataset.index;
-      if (!index) return;
-      const currentText = segmentEl.querySelector("strong").textContent;
-      const nextText = prompt("자막 수정", currentText);
-      if (nextText && nextText !== currentText) {
-        try {
-          const project = await api(`/api/projects/${state.project.project_id}/subtitles/${index}`, {
-            method: "PATCH",
-            body: JSON.stringify({ text: nextText })
-          });
-          renderProject(project);
-        } catch (error) {
-          alert(error.message);
-        }
-      }
-    });
-
-    segmentEl.addEventListener("contextmenu", async (event) => {
-      event.preventDefault();
-      const index = segmentEl.dataset.index;
-      if (!index) return;
-      const start = prompt("새 시작 시점(초)", segmentEl.dataset.start || "0");
-      if (start === null) return;
-      const end = prompt("새 종료 시점(초)", segmentEl.dataset.end || "5");
-      if (end === null) return;
-      try {
-        const project = await api(`/api/projects/${state.project.project_id}/subtitles/${index}`, {
-          method: "PATCH",
-          body: JSON.stringify({ start: Number(start), end: Number(end) })
-        });
-        renderProject(project);
-      } catch (error) {
-        alert(error.message);
-      }
-    });
-  });
-
-  container.querySelectorAll("#image-track .scene-segment").forEach((segmentEl) => {
-    segmentEl.addEventListener("click", () => highlightPrompt(segmentEl.dataset.scene, "image"));
-  });
-
-  container.querySelectorAll("#video-track .video-segment").forEach((segmentEl) => {
-    segmentEl.addEventListener("click", () => highlightPrompt(segmentEl.dataset.scene, "video"));
   });
 
   const templateSelector = container.querySelector("#template-selector");
@@ -369,6 +980,8 @@ function bindProjectHandlers(totalDuration) {
       }
     });
   }
+
+  bindTimelineEditors(container);
 }
 
 function getTotalDuration(project) {
@@ -511,6 +1124,11 @@ async function loadProject(projectId, { scrollIntoView = true } = {}) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  initStoryKeywordPage();
+  initImageTitlePage();
+  initShortsScriptPage();
+  initShortsScenesPage();
+
   const form = document.getElementById("project-form");
   if (form) {
     form.addEventListener("submit", async (event) => {

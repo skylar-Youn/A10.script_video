@@ -17,13 +17,7 @@ from keywordimagestory.generators import (
     ShortsSceneGenerator,
     ShortsScriptGenerator,
 )
-from keywordimagestory.models import (
-    ImagePrompt,
-    MediaEffect,
-    StoryProject,
-    TemplateSetting,
-    VideoPrompt,
-)
+from keywordimagestory.models import ImagePrompt, MediaEffect, StoryProject, TemplateSetting, VideoPrompt
 from keywordimagestory.services import editor_service, history_service
 
 logger = logging.getLogger(__name__)
@@ -58,6 +52,28 @@ async def root(request: Request) -> HTMLResponse:
             "request": request,
             "settings": settings.dump(),
             "history": [entry.dict() for entry in history_service.list_history()],
+        },
+    )
+
+
+@app.get("/keywords", response_class=HTMLResponse, name="keywords_ui")
+async def keywords_ui(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "keywords.html",
+        {
+            "request": request,
+            "settings": settings.dump(),
+        },
+    )
+
+
+@app.get("/tools", response_class=HTMLResponse, name="tools_ui")
+async def tools_ui(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "tools.html",
+        {
+            "request": request,
+            "settings": settings.dump(),
         },
     )
 
@@ -125,6 +141,89 @@ async def api_generate_scenes(project_id: str) -> StoryProject:
     editor_service.set_video_prompts(project_id, scenes)
     editor_service.set_subtitles(project_id, project.subtitles + subtitles)
     return _project_or_404(project_id)
+
+
+@app.post("/api/generate/story-keywords")
+async def api_generate_story_keywords(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    keyword = str(payload.get("keyword", "")).strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword is required")
+
+    language = str(payload.get("language", settings.default_language) or settings.default_language)
+    try:
+        requested_count = int(payload.get("count", 30))
+    except (TypeError, ValueError):
+        requested_count = 30
+    count = max(1, min(requested_count, 60))
+
+    context = GenerationContext(keyword=keyword, language=language, duration=settings.default_story_duration)
+    titles = KeywordTitleGenerator().generate(context, count=count)
+    return {
+        "keyword": keyword,
+        "language": language,
+        "count": len(titles),
+        "items": [title.dict() for title in titles],
+    }
+
+
+@app.post("/api/generate/image-titles")
+async def api_generate_image_titles(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    description = str(payload.get("description", "")).strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+
+    keyword = str(payload.get("keyword", "") or "").strip()
+    language = str(payload.get("language", settings.default_language) or settings.default_language)
+    try:
+        requested_count = int(payload.get("count", 30))
+    except (TypeError, ValueError):
+        requested_count = 30
+    count = max(5, min(requested_count, 60))
+
+    context_keyword = keyword or description[:40] or "스토리"
+    context = GenerationContext(keyword=context_keyword, language=language, duration=settings.default_story_duration)
+    titles = ImageTitleGenerator().generate(description, context, count=count)
+    return {
+        "keyword": context_keyword,
+        "language": language,
+        "description": description,
+        "count": len(titles),
+        "items": [title.dict() for title in titles],
+    }
+
+
+@app.post("/api/generate/shorts-script")
+async def api_generate_shorts_script(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    keyword = str(payload.get("keyword", "")).strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword is required")
+
+    language = str(payload.get("language", settings.default_language) or settings.default_language)
+    context = GenerationContext(keyword=keyword, language=language, duration=settings.default_story_duration)
+    subtitles, images = ShortsScriptGenerator().generate(context)
+    return {
+        "keyword": keyword,
+        "language": language,
+        "subtitles": [segment.dict() for segment in subtitles],
+        "images": [prompt.dict() for prompt in images],
+    }
+
+
+@app.post("/api/generate/shorts-scenes")
+async def api_generate_shorts_scenes(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    keyword = str(payload.get("keyword", "")).strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword is required")
+
+    language = str(payload.get("language", settings.default_language) or settings.default_language)
+    context = GenerationContext(keyword=keyword, language=language, duration=settings.default_story_duration)
+    subtitles, scenes = ShortsSceneGenerator().generate(context)
+    return {
+        "keyword": keyword,
+        "language": language,
+        "subtitles": [segment.dict() for segment in subtitles],
+        "scenes": [prompt.dict() for prompt in scenes],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +294,26 @@ async def api_add_image_prompt(project_id: str, payload: dict[str, Any] = Body(.
     return _project_or_404(project_id)
 
 
+@app.patch("/api/projects/{project_id}/prompts/image/{tag}", response_model=StoryProject)
+async def api_update_image_prompt(project_id: str, tag: str, payload: dict[str, Any] = Body(...)) -> StoryProject:
+    try:
+        editor_service.update_image_prompt(project_id, tag, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _project_or_404(project_id)
+
+
+@app.delete("/api/projects/{project_id}/prompts/image/{tag}", response_model=StoryProject)
+async def api_delete_image_prompt(project_id: str, tag: str) -> StoryProject:
+    try:
+        editor_service.delete_image_prompt(project_id, tag)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _project_or_404(project_id)
+
+
 @app.post("/api/projects/{project_id}/prompts/video", response_model=StoryProject)
 async def api_add_video_prompt(project_id: str, payload: dict[str, Any] = Body(...)) -> StoryProject:
     try:
@@ -202,6 +321,26 @@ async def api_add_video_prompt(project_id: str, payload: dict[str, Any] = Body(.
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     editor_service.add_video_prompt(project_id, prompt)
+    return _project_or_404(project_id)
+
+
+@app.patch("/api/projects/{project_id}/prompts/video/{scene_tag}", response_model=StoryProject)
+async def api_update_video_prompt(project_id: str, scene_tag: str, payload: dict[str, Any] = Body(...)) -> StoryProject:
+    try:
+        editor_service.update_video_prompt(project_id, scene_tag, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _project_or_404(project_id)
+
+
+@app.delete("/api/projects/{project_id}/prompts/video/{scene_tag}", response_model=StoryProject)
+async def api_delete_video_prompt(project_id: str, scene_tag: str) -> StoryProject:
+    try:
+        editor_service.delete_video_prompt(project_id, scene_tag)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Video prompt not found") from exc
     return _project_or_404(project_id)
 
 

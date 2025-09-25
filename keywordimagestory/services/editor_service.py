@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from keywordimagestory.config import settings
 from keywordimagestory.generators.story_assembler import StoryAssembler
@@ -116,9 +116,63 @@ def add_image_prompt(project_id: str, prompt: ImagePrompt) -> StoryProject:
     return project
 
 
+def update_image_prompt(project_id: str, original_tag: str, payload: dict[str, Any]) -> StoryProject:
+    project = _get_project(project_id)
+    for index, prompt in enumerate(project.image_prompts):
+        if prompt.tag == original_tag:
+            data = prompt.dict()
+            data.update({k: v for k, v in payload.items() if k in {"tag", "description", "start", "end", "status"}})
+            updated = ImagePrompt.parse_obj(data)
+            project.image_prompts[index] = updated
+            break
+    else:
+        raise KeyError(f"Image prompt {original_tag} not found in project {project_id}")
+    _persist(project)
+    return project
+
+
+def delete_image_prompt(project_id: str, tag: str) -> StoryProject:
+    project = _get_project(project_id)
+    before = len(project.image_prompts)
+    project.image_prompts = [prompt for prompt in project.image_prompts if prompt.tag != tag]
+    if len(project.image_prompts) == before:
+        raise KeyError(f"Image prompt {tag} not found in project {project_id}")
+    _persist(project)
+    return project
+
+
 def add_video_prompt(project_id: str, prompt: VideoPrompt) -> StoryProject:
     project = _get_project(project_id)
     project.video_prompts.append(prompt)
+    _persist(project)
+    return project
+
+
+def update_video_prompt(project_id: str, original_tag: str, payload: dict[str, Any]) -> StoryProject:
+    project = _get_project(project_id)
+    for index, prompt in enumerate(project.video_prompts):
+        if prompt.scene_tag == original_tag:
+            data = prompt.dict()
+            data.update({
+                k: v
+                for k, v in payload.items()
+                if k in {"scene_tag", "camera", "action", "mood", "start", "end", "status"}
+            })
+            updated = VideoPrompt.parse_obj(data)
+            project.video_prompts[index] = updated
+            break
+    else:
+        raise KeyError(f"Video prompt {original_tag} not found in project {project_id}")
+    _persist(project)
+    return project
+
+
+def delete_video_prompt(project_id: str, scene_tag: str) -> StoryProject:
+    project = _get_project(project_id)
+    before = len(project.video_prompts)
+    project.video_prompts = [prompt for prompt in project.video_prompts if prompt.scene_tag != scene_tag]
+    if len(project.video_prompts) == before:
+        raise KeyError(f"Video prompt {scene_tag} not found in project {project_id}")
     _persist(project)
     return project
 
