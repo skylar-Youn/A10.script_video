@@ -1977,78 +1977,245 @@ function getTotalDuration(project) {
 }
 
 function buildOverlapBars(project, totalDuration) {
-  const items = [];
   const safeDuration = totalDuration && totalDuration > 0 ? totalDuration : 60;
-  const clampToDuration = (value) => {
-    const numeric = toOptionalNumber(value);
-    if (numeric === null) return null;
-    return Math.min(Math.max(0, numeric), safeDuration);
-  };
-  const pushItem = (type, label, start, end, order = 0, total = 1) => {
-    const rawStart = clampToDuration(start);
-    const rawEnd = clampToDuration(end);
-    const missingStart = rawStart === null;
-    const missingEnd = rawEnd === null;
-    const slot = total > 0 ? safeDuration / total : safeDuration;
-    const fallbackWidth = Math.min(slot, Math.max(safeDuration * 0.05, slot * 0.6, 0.5));
 
-    let itemStart = missingStart ? null : rawStart;
-    let itemEnd = missingEnd ? null : rawEnd;
-
-    if (missingStart && missingEnd) {
-      itemStart = order * slot;
-      itemEnd = itemStart + fallbackWidth;
-    } else if (missingStart) {
-      itemEnd = rawEnd ?? 0;
-      itemStart = itemEnd - fallbackWidth;
-    } else if (missingEnd) {
-      itemStart = rawStart ?? 0;
-      itemEnd = itemStart + fallbackWidth;
-    }
-
-    if (itemStart === null || itemEnd === null) return;
-
-    itemStart = Math.min(Math.max(0, itemStart), safeDuration);
-    itemEnd = Math.min(Math.max(0, itemEnd), safeDuration);
-    if (itemEnd <= itemStart) {
-      itemEnd = Math.min(safeDuration, itemStart + fallbackWidth);
-    }
-
-    items.push({
-      type,
-      label,
-      start: itemStart,
-      end: itemEnd,
-      missing: missingStart || missingEnd,
-      missingStart,
-      missingEnd
-    });
+  const normaliseRange = (startValue, endValue) => {
+    const start = toOptionalNumber(startValue);
+    const end = toOptionalNumber(endValue);
+    const safeStart = Number.isFinite(start) ? Math.max(0, start) : 0;
+    const tentativeEnd = Number.isFinite(end) ? Math.max(safeStart, end) : safeStart;
+    const safeEnd = tentativeEnd > safeStart ? tentativeEnd : safeStart + Math.max(safeDuration * 0.02, 0.1);
+    return {
+      start: Math.min(safeDuration, safeStart),
+      end: Math.min(safeDuration, safeEnd)
+    };
   };
 
-  project.subtitles.forEach((segment, index, list) => pushItem("subtitle", `#${segment.index}`, segment.start, segment.end, index, list.length || 1));
-  project.subtitles.forEach((segment, index, list) => pushItem("audio", `오디오 ${segment.index}`, segment.start, segment.end, index, list.length || 1));
-  (project.background_music || []).forEach((track, index, list) =>
-    pushItem("music", track.title || track.track_id || `BGM ${index + 1}`, track.start, track.end, index, list.length || 1)
+  const summarise = (value, maxLength = 60) => {
+    if (!value) return "";
+    const text = String(value).trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength - 1)}…`;
+  };
+
+  const formatRange = (start, end) => `${start.toFixed(1)}s → ${end.toFixed(1)}s`;
+
+  const mergeRanges = (ranges) => {
+    const sorted = ranges
+      .map(({ start, end }) => {
+        const normalised = normaliseRange(start, end);
+        return { ...normalised };
+      })
+      .filter((item) => item.end > item.start)
+      .sort((a, b) => a.start - b.start);
+
+    if (!sorted.length) {
+      return [{ start: 0, end: safeDuration }];
+    }
+
+    const merged = [sorted[0]];
+    for (let i = 1; i < sorted.length; i += 1) {
+      const prev = merged[merged.length - 1];
+      const current = sorted[i];
+      if (current.start <= prev.end) {
+        prev.end = Math.max(prev.end, current.end);
+      } else {
+        merged.push({ ...current });
+      }
+    }
+
+    return merged;
+  };
+
+  const chunkSummary = (items, formatter) => {
+    if (!items.length) return "";
+    return items
+      .map((item) => formatter(item))
+      .filter(Boolean)
+      .join("<br />");
+  };
+
+  const collectItemsForRange = (items, range, mapper) => {
+    if (!items || !items.length) return [];
+    return items
+      .filter((item) => {
+        const start = toOptionalNumber(item.start);
+        const end = toOptionalNumber(item.end);
+        const hasOverlap =
+          Number.isFinite(start) && Number.isFinite(end)
+            ? !(end <= range.start || start >= range.end)
+            : Number.isFinite(start)
+            ? start >= range.start && start < range.end
+            : Number.isFinite(end)
+            ? end > range.start && end <= range.end
+            : true;
+        return hasOverlap;
+      })
+      .map(mapper);
+  };
+
+  const subtitleSegments = Array.isArray(project.subtitles) ? project.subtitles : [];
+  const imagePrompts = Array.isArray(project.image_prompts) ? project.image_prompts : [];
+  const videoPrompts = Array.isArray(project.video_prompts) ? project.video_prompts : [];
+  const musicTracks = Array.isArray(project.background_music) ? project.background_music : [];
+
+  const audioColumn = {
+    key: "audio",
+    label: "음성",
+    items: subtitleSegments.map((segment, index) => {
+      const idx = typeof segment.index === "number" ? segment.index : index + 1;
+      return {
+        type: "audio",
+        title: `음성 ${idx}`,
+        subtitle: segment.scene_tag ? `씬 ${segment.scene_tag}` : "",
+        meta: summarise(segment.text, 60),
+        start: segment.start,
+        end: segment.end
+      };
+    })
+  };
+
+  const subtitleColumn = {
+    key: "subtitle",
+    label: "자막",
+    items: subtitleSegments.map((segment, index) => {
+      const idx = typeof segment.index === "number" ? segment.index : index + 1;
+      return {
+        type: "subtitle",
+        title: `자막 ${idx}`,
+        subtitle: summarise(segment.text, 80),
+        meta: segment.scene_tag ? `씬 ${segment.scene_tag}` : "",
+        start: segment.start,
+        end: segment.end
+      };
+    })
+  };
+
+  const imageColumn = {
+    key: "image",
+    label: "이미지",
+    items: imagePrompts.map((prompt, index) => {
+      const tag = prompt.tag || `이미지 ${index + 1}`;
+      return {
+        type: "image",
+        title: tag,
+        subtitle: summarise(prompt.description, 80),
+        meta: prompt.status ? `상태: ${prompt.status}` : "",
+        start: prompt.start,
+        end: prompt.end
+      };
+    })
+  };
+
+  const sceneColumn = {
+    key: "video",
+    label: "영상",
+    items: videoPrompts.map((prompt, index) => {
+      const tag = prompt.scene_tag || `씬 ${index + 1}`;
+      const camera = prompt.camera ? `카메라: ${prompt.camera}` : "";
+      const mood = prompt.mood ? `분위기: ${prompt.mood}` : "";
+      const metaPieces = [camera, mood].filter(Boolean);
+      return {
+        type: "video",
+        title: tag,
+        subtitle: summarise(prompt.action, 80),
+        meta: metaPieces.join(" · "),
+        start: prompt.start,
+        end: prompt.end
+      };
+    })
+  };
+
+  const musicColumn = {
+    key: "music",
+    label: "배경 음악",
+    items: musicTracks.map((track, index) => {
+      const title = track.title || track.track_id || `BGM ${index + 1}`;
+      const volume = typeof track.volume === "number" && !Number.isNaN(track.volume) ? `볼륨 ${Math.round(track.volume * 100)}%` : "";
+      const source = track.source ? `출처 ${track.source}` : "";
+      const metaPieces = [volume, source].filter(Boolean);
+      return {
+        type: "music",
+        title,
+        subtitle: summarise(track.track_id && track.track_id !== title ? track.track_id : ""),
+        meta: metaPieces.join(" · "),
+        start: track.start,
+        end: track.end
+      };
+    })
+  };
+
+  const baseRanges = subtitleSegments.length
+    ? subtitleSegments
+    : [...imagePrompts, ...videoPrompts, ...musicTracks];
+
+  const segmentRanges = mergeRanges(
+    baseRanges.map((item) => ({
+      start: item.start,
+      end: item.end
+    }))
   );
-  project.image_prompts.forEach((prompt, index, list) => pushItem("image", prompt.tag || `이미지 ${index + 1}`, prompt.start, prompt.end, index, list.length || 1));
-  project.video_prompts.forEach((prompt, index, list) => pushItem("video", prompt.scene_tag || `씬 ${index + 1}`, prompt.start, prompt.end, index, list.length || 1));
 
-  items.sort((a, b) => a.start - b.start);
-  let lastEnd = -1;
-  return items
-    .map((item) => {
-      const overlap = item.start < lastEnd;
-      lastEnd = Math.max(lastEnd, item.end);
-      const leftPercent = safeDuration ? (item.start / safeDuration) * 100 : 0;
-      const widthPercent = safeDuration ? ((item.end - item.start) / safeDuration) * 100 || 0.5 : 0;
-      const classes = ["timeline-bar", item.type];
-      if (item.missing) classes.push("missing");
-      if (overlap) classes.push("overlap");
-      const startLabel = item.missingStart ? "-" : item.start.toFixed(1);
-      const endLabel = item.missingEnd ? "-" : item.end.toFixed(1);
-      return `<div class="${classes.join(" ")}" style="left:${leftPercent}%;width:${widthPercent}%">${item.label}<small>${startLabel}s→${endLabel}s</small></div>`;
+  if (!segmentRanges.length) {
+    return '<div class="overlap-empty-message">타임라인 데이터를 생성하면 정렬 미리보기를 확인할 수 있습니다.</div>';
+  }
+
+  const columns = [audioColumn, subtitleColumn, musicColumn, imageColumn, sceneColumn];
+
+  const buildCell = (column, range) => {
+    let content = "";
+    if (column.key === "audio") {
+      const items = collectItemsForRange(subtitleSegments, range, (segment) => {
+        const idx = typeof segment.index === "number" ? segment.index : "-";
+        return `음성 ${idx}`;
+      });
+      content = chunkSummary(items, (value) => value) || "";
+    } else if (column.key === "subtitle") {
+      const items = collectItemsForRange(subtitleSegments, range, (segment) => {
+        const idx = typeof segment.index === "number" ? segment.index : "-";
+        return `자막 ${idx}`;
+      });
+      content = chunkSummary(items, (value) => value) || "";
+    } else if (column.key === "music") {
+      const items = collectItemsForRange(musicTracks, range, (track) => track.title || track.track_id || "BGM");
+      content = chunkSummary(items, (value) => value) || "";
+    } else if (column.key === "image") {
+      const items = collectItemsForRange(imagePrompts, range, (prompt, index) => prompt.tag || `이미지 ${index + 1}`);
+      content = chunkSummary(items, (value) => value) || "";
+    } else if (column.key === "video") {
+      const items = collectItemsForRange(videoPrompts, range, (prompt, index) => prompt.scene_tag || `영상씬 ${index + 1}`);
+      content = chunkSummary(items, (value) => value) || "";
+    }
+    return `<td class="overlap-table-cell" data-type="${column.key}">${content || "-"}</td>`;
+  };
+
+  const headerRow = segmentRanges
+    .map((range, index) => {
+      const label = `${index + 1}. ${formatRange(range.start, range.end)}`;
+      return `<th scope="col">${label}</th>`;
     })
     .join("");
+
+  const bodyRows = columns.map((column) => {
+    const cells = segmentRanges.map((range) => buildCell(column, range)).join("");
+    return `<tr><th scope="row">${column.label}</th>${cells}</tr>`;
+  });
+
+  return `
+    <div class="overlap-table-wrapper">
+      <table class="overlap-table">
+        <thead>
+          <tr>
+            <th aria-hidden="true"></th>
+            ${headerRow}
+          </tr>
+        </thead>
+        <tbody>
+          ${bodyRows.join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function highlightPrompt(tag, type) {
