@@ -75,6 +75,8 @@ const AUDIO_CONTAINER_IDS = {
 
 let pendingRecordSelection = null;
 
+const timelineScrollCleanups = new WeakMap();
+
 const STORAGE_KEY = "kis-selected-record";
 
 function persistSelection(tool, recordId, payload) {
@@ -111,18 +113,84 @@ async function api(path, options = {}) {
   if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  if (headers.size) {
+  if (hasHeaderEntries(headers)) {
     init.headers = headers;
   } else {
     delete init.headers;
   }
+
   const response = await fetch(path, init);
+  const rawBody = await response.text();
+
   if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
-    throw new Error(detail.detail || response.statusText);
+    let payload;
+    if (rawBody) {
+      try {
+        payload = JSON.parse(rawBody);
+      } catch (error) {
+        payload = rawBody;
+      }
+    }
+    const message = extractErrorMessage(payload) || response.statusText || `HTTP ${response.status}`;
+    throw new Error(message);
   }
-  if (response.status === 204) return null;
-  return response.json();
+
+  if (response.status === 204 || rawBody === "") {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawBody);
+  } catch (error) {
+    return rawBody;
+  }
+}
+
+function hasHeaderEntries(headers) {
+  for (const _ of headers.keys()) {
+    return true;
+  }
+  return false;
+}
+
+function extractErrorMessage(detail) {
+  if (detail === null || detail === undefined) {
+    return "";
+  }
+  if (typeof detail === "string") {
+    return detail.trim();
+  }
+  if (typeof detail === "number" || typeof detail === "boolean") {
+    return String(detail);
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => extractErrorMessage(item)).filter(Boolean);
+    return messages.join("\n");
+  }
+  if (typeof detail === "object") {
+    if (detail.detail !== undefined) {
+      return extractErrorMessage(detail.detail);
+    }
+    if (detail.msg) {
+      const location = Array.isArray(detail.loc) && detail.loc.length ? ` (${detail.loc.join(" > ")})` : "";
+      return `${detail.msg}${location}`;
+    }
+    if (detail.message) {
+      return extractErrorMessage(detail.message);
+    }
+    if (detail.error) {
+      return extractErrorMessage(detail.error);
+    }
+    const nested = Object.values(detail)
+      .map((value) => extractErrorMessage(value))
+      .filter(Boolean);
+    return nested.join("\n");
+  }
+  try {
+    return JSON.stringify(detail);
+  } catch (error) {
+    return "";
+  }
 }
 
 function escapeHtml(value) {
@@ -1107,6 +1175,7 @@ function renderProject(project) {
 
   const totalDuration = getTotalDuration(project);
   container.innerHTML = buildProjectMarkup(project, totalDuration);
+  setupTimelineScrollSync(container);
   bindProjectHandlers();
   highlightHistorySelection(project.project_id);
 }
@@ -1122,7 +1191,7 @@ function buildProjectMarkup(project, totalDuration) {
         <div class="command-group">
           <button data-action="generate-titles" class="outline">제목 재생성</button>
           <button data-action="generate-subtitles" class="outline">자막 재생성</button>
-          <button data-action="generate-scenes" class="outline">영상 프롬프트</button>
+          <button data-action="generate-scenes" class="outline">영상 생성</button>
           <button data-action="auto-align" class="outline">AI 자동 정렬</button>
           <button data-action="export" class="contrast">내보내기</button>
         </div>
@@ -1130,15 +1199,20 @@ function buildProjectMarkup(project, totalDuration) {
 
       <section>
         <h3>동시 편집 타임라인</h3>
-        <div class="timeline-grid">
-          ${renderTimelineRow("자막", project.subtitles, buildSubtitleSegment, "subtitle")}
-          ${renderTimelineRow("음성", project.subtitles, buildAudioSegment, "audio")}
-          ${renderTimelineRow("배경 음악", project.background_music || [], buildMusicSegment, "music")}
-          ${renderTimelineRow("이미지 프롬프트", project.image_prompts, buildImageSegment, "image")}
-          ${renderTimelineRow("영상 프롬프트", project.video_prompts, buildVideoSegment, "video")}
-          <div><strong>정렬 미리보기</strong></div>
-          <div class="timeline-track overlay" id="overlap-track" data-duration="${totalDuration}">
-            ${buildOverlapBars(project, totalDuration)}
+        <div class="timeline-wrapper">
+          <div class="timeline-grid">
+            ${renderTimelineRow("자막", project.subtitles, buildSubtitleSegment, "subtitle")}
+            ${renderTimelineRow("음성", project.subtitles, buildAudioSegment, "audio")}
+            ${renderTimelineRow("배경 음악", project.background_music || [], buildMusicSegment, "music")}
+            ${renderTimelineRow("이미지", project.image_prompts, buildImageSegment, "image")}
+            ${renderTimelineRow("영상", project.video_prompts, buildVideoSegment, "video")}
+            <div><strong>정렬 미리보기</strong></div>
+            <div class="timeline-track overlay" id="overlap-track" data-duration="${totalDuration}">
+              ${buildOverlapBars(project, totalDuration)}
+            </div>
+          </div>
+          <div class="timeline-scrollbar">
+            <input type="range" min="0" max="1000" step="1" value="0" aria-label="타임라인 가로 스크롤" />
           </div>
         </div>
       </section>
@@ -1185,13 +1259,13 @@ function buildProjectMarkup(project, totalDuration) {
 
       <section class="grid">
         <div>
-          <h3>이미지 프롬프트 추가</h3>
+          <h3>이미지 추가</h3>
           <form id="image-prompt-form" class="grid">
             <label>태그<input type="text" name="tag" placeholder="이미지 7" required /></label>
             <label>설명<textarea name="description" rows="2" placeholder="장면 설명" required></textarea></label>
             <label>시작(초)<input type="number" step="0.1" name="start" placeholder="0" /></label>
             <label>종료(초)<input type="number" step="0.1" name="end" placeholder="5" /></label>
-            <button type="submit">프롬프트 추가</button>
+            <button type="submit">이미지 추가</button>
           </form>
           <h3>배경 음악 추가</h3>
           <form id="music-track-form" class="grid">
@@ -1207,15 +1281,131 @@ function buildProjectMarkup(project, totalDuration) {
           </form>
         </div>
         <div id="prompt-preview">
-          <h3>프롬프트 프리뷰</h3>
+          <h3>미디어 프리뷰</h3>
           <div class="preview-body">
-            <h4>선택된 프롬프트가 없습니다</h4>
-            <p>타임라인의 이미지/영상 요소를 클릭하면 세부 정보를 확인할 수 있습니다.</p>
+            <h4>선택된 항목이 없습니다</h4>
+            <p>타임라인의 이미지·영상 요소를 클릭하면 세부 정보를 확인할 수 있습니다.</p>
           </div>
         </div>
       </section>
     </article>
   `;
+}
+
+function setupTimelineScrollSync(root) {
+  const previousCleanup = timelineScrollCleanups.get(root);
+  if (previousCleanup) {
+    previousCleanup();
+    timelineScrollCleanups.delete(root);
+  }
+
+  const wrapper = root.querySelector(".timeline-wrapper");
+  if (!wrapper) return;
+
+  const tracks = Array.from(wrapper.querySelectorAll(".timeline-track"));
+  const slider = wrapper.querySelector(".timeline-scrollbar input[type='range']");
+  if (!tracks.length || !slider) return;
+
+  const metrics = new Map();
+  let isSyncing = false;
+
+  const computeMetrics = () => {
+    metrics.clear();
+    tracks.forEach((track) => {
+      const maxOffset = Math.max(0, track.scrollWidth - track.clientWidth);
+      metrics.set(track, maxOffset);
+    });
+    const maxOffset = Math.max(0, ...metrics.values());
+    slider.disabled = maxOffset <= 0;
+    if (maxOffset <= 0) {
+      slider.value = "0";
+    }
+  };
+
+  const syncTracksToRatio = (ratio) => {
+    tracks.forEach((track) => {
+      const maxOffset = metrics.get(track) ?? 0;
+      track.scrollLeft = maxOffset * ratio;
+    });
+  };
+
+  const ratioFromTrack = (track) => {
+    const maxOffset = metrics.get(track) ?? Math.max(0, track.scrollWidth - track.clientWidth);
+    if (!maxOffset) return 0;
+    return Math.min(1, Math.max(0, track.scrollLeft / maxOffset));
+  };
+
+  const updateSliderFromRatio = (ratio) => {
+    slider.value = String(Math.round(ratio * Number(slider.max || 1000)));
+  };
+
+  const handleTrackScroll = (event) => {
+    if (isSyncing) return;
+    isSyncing = true;
+    const source = event.currentTarget;
+    const ratio = ratioFromTrack(source);
+    tracks.forEach((track) => {
+      if (track !== source) {
+        const maxOffset = metrics.get(track) ?? 0;
+        track.scrollLeft = maxOffset * ratio;
+      }
+    });
+    updateSliderFromRatio(ratio);
+    isSyncing = false;
+  };
+
+  const handleSliderInput = () => {
+    if (slider.disabled) return;
+    const maxValue = Number(slider.max || 1000) || 1000;
+    const ratio = Number(slider.value || 0) / maxValue;
+    isSyncing = true;
+    syncTracksToRatio(ratio);
+    isSyncing = false;
+    updateSliderFromRatio(ratio);
+  };
+
+  computeMetrics();
+  updateSliderFromRatio(tracks.length ? ratioFromTrack(tracks[0]) : 0);
+
+  tracks.forEach((track) => {
+    track.addEventListener("scroll", handleTrackScroll, { passive: true });
+  });
+  slider.addEventListener("input", handleSliderInput);
+
+  const resizeObservers = [];
+  const handleResize = () => {
+    computeMetrics();
+    const reference = tracks[0];
+    updateSliderFromRatio(reference ? ratioFromTrack(reference) : 0);
+  };
+
+  if (typeof ResizeObserver === "function") {
+    const observer = new ResizeObserver(handleResize);
+    tracks.forEach((track) => observer.observe(track));
+    resizeObservers.push(observer);
+  } else {
+    window.addEventListener("resize", handleResize);
+  }
+
+  requestAnimationFrame(() => {
+    computeMetrics();
+    updateSliderFromRatio(tracks.length ? ratioFromTrack(tracks[0]) : 0);
+  });
+
+  const cleanup = () => {
+    tracks.forEach((track) => {
+      track.removeEventListener("scroll", handleTrackScroll);
+    });
+    slider.removeEventListener("input", handleSliderInput);
+    if (resizeObservers.length) {
+      resizeObservers.forEach((observer) => observer.disconnect());
+    } else {
+      window.removeEventListener("resize", handleResize);
+    }
+    timelineScrollCleanups.delete(root);
+  };
+
+  timelineScrollCleanups.set(root, cleanup);
 }
 
 function renderTimelineRow(label, items, builder, key) {
@@ -1469,7 +1659,7 @@ function bindTimelineEditors(container) {
     const originalTag = segmentEl.dataset.tag;
     if (!originalTag) return;
     setupSegmentEditor(segmentEl, {
-      confirmMessage: "선택한 이미지 프롬프트를 삭제할까요?",
+      confirmMessage: "선택한 이미지를 삭제할까요?",
       onSave: async (formData) => {
         const payload = {
           tag: String(formData.get("tag") || "").trim(),
@@ -1550,7 +1740,7 @@ function bindTimelineEditors(container) {
     const originalTag = segmentEl.dataset.scene;
     if (!originalTag) return;
     setupSegmentEditor(segmentEl, {
-      confirmMessage: "선택한 영상 프롬프트를 삭제할까요?",
+      confirmMessage: "선택한 영상을 삭제할까요?",
       onSave: async (formData) => {
         const payload = {
           scene_tag: String(formData.get("scene_tag") || "").trim(),

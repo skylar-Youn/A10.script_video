@@ -134,6 +134,12 @@
   gap: 0.5rem;
 }
 
+.timeline-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .timeline-grid {
   display: grid;
   grid-template-columns: 180px 1fr;
@@ -148,6 +154,11 @@
   padding: 0.75rem;
   min-height: var(--timeline-height);
   overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.timeline-track::-webkit-scrollbar {
+  display: none;
 }
 
 .timeline-track.overlay {
@@ -215,6 +226,53 @@
   flex-direction: column;
   gap: 0.35rem;
   font-size: 0.85rem;
+}
+
+.timeline-scrollbar {
+  display: flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  margin-left: 180px;
+  border-radius: 999px;
+  background: var(--card-background-color);
+  border: 1px solid var(--muted-border-color);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.timeline-scrollbar input[type="range"] {
+  flex: 1;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--muted-border-color);
+  outline: none;
+  margin: 0;
+}
+
+.timeline-scrollbar input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--surface-color, #fff);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.timeline-scrollbar input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--surface-color, #fff);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.timeline-scrollbar input[type="range"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .segment-edit input,
