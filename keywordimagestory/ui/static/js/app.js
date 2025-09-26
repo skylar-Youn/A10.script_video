@@ -2059,30 +2059,14 @@ function buildOverlapBars(project, totalDuration) {
   const videoPrompts = Array.isArray(project.video_prompts) ? project.video_prompts : [];
   const musicTracks = Array.isArray(project.background_music) ? project.background_music : [];
 
-  const audioColumn = {
-    key: "audio",
-    label: "음성",
+  const narrationColumn = {
+    key: "narration",
+    label: "음성·자막",
     items: subtitleSegments.map((segment, index) => {
       const idx = typeof segment.index === "number" ? segment.index : index + 1;
       return {
-        type: "audio",
+        type: "narration",
         title: `음성 ${idx}`,
-        subtitle: segment.scene_tag ? `씬 ${segment.scene_tag}` : "",
-        meta: summarise(segment.text, 60),
-        start: segment.start,
-        end: segment.end
-      };
-    })
-  };
-
-  const subtitleColumn = {
-    key: "subtitle",
-    label: "자막",
-    items: subtitleSegments.map((segment, index) => {
-      const idx = typeof segment.index === "number" ? segment.index : index + 1;
-      return {
-        type: "subtitle",
-        title: `자막 ${idx}`,
         subtitle: summarise(segment.text, 80),
         meta: segment.scene_tag ? `씬 ${segment.scene_tag}` : "",
         start: segment.start,
@@ -2160,22 +2144,29 @@ function buildOverlapBars(project, totalDuration) {
     return '<div class="overlap-empty-message">타임라인 데이터를 생성하면 정렬 미리보기를 확인할 수 있습니다.</div>';
   }
 
-  const columns = [audioColumn, subtitleColumn, musicColumn, imageColumn, sceneColumn];
+  const columns = [narrationColumn, musicColumn, imageColumn, sceneColumn];
 
   const buildCell = (column, range) => {
     let content = "";
-    if (column.key === "audio") {
-      const items = collectItemsForRange(subtitleSegments, range, (segment) => {
-        const idx = typeof segment.index === "number" ? segment.index : "-";
-        return `음성 ${idx}`;
+    if (column.key === "narration") {
+      const items = collectItemsForRange(subtitleSegments, range, (segment, idx) => {
+        const index = typeof segment.index === "number" ? segment.index : idx + 1;
+        return {
+          index,
+          text: segment.text || ""
+        };
       });
-      content = chunkSummary(items, (value) => value) || "";
-    } else if (column.key === "subtitle") {
-      const items = collectItemsForRange(subtitleSegments, range, (segment) => {
-        const idx = typeof segment.index === "number" ? segment.index : "-";
-        return `자막 ${idx}`;
-      });
-      content = chunkSummary(items, (value) => value) || "";
+      if (items.length) {
+        const lines = [];
+        items.forEach(({ index, text }) => {
+          const subtitleLine = text ? `자막 ${index}: ${summarise(text, 80)}` : `자막 ${index}`;
+          lines.push(subtitleLine);
+          lines.push(`음성 ${index}`);
+        });
+        content = lines.join("<br />");
+      } else {
+        content = "";
+      }
     } else if (column.key === "music") {
       const items = collectItemsForRange(musicTracks, range, (track) => track.title || track.track_id || "BGM");
       content = chunkSummary(items, (value) => value) || "";

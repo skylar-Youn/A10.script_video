@@ -328,6 +328,10 @@
   background: rgba(99, 102, 241, 0.15);
 }
 
+.overlap-table-cell[data-type="narration"] {
+  background: rgba(79, 70, 229, 0.18);
+}
+
 .overlap-table-cell[data-type="music"] {
   background: rgba(245, 158, 11, 0.18);
 }
