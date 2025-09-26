@@ -1,192 +1,266 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<section>
+<section class="tools-header">
   <hgroup>
-    <h1>스토리 제작 도구 모음</h1>
+    <h1>🛠️ 스토리 제작 도구 모음</h1>
     <p>1~4번 프롬프트 워크플로를 한 페이지에서 실행하세요. 각 섹션은 OpenAI API와 연결되어 바로 결과를 제공합니다.</p>
   </hgroup>
-  <p>
+  <nav class="tools-nav">
     <a href="{{ url_for('root') }}" class="secondary">← 메인 스튜디오로 돌아가기</a>
-  </p>
+  </nav>
 </section>
 
-<section>
-  <article>
-    <header>
-      <h2>1. 스토리를 위한 키워드</h2>
-      <p>간단한 스토리 키워드를 입력하면 30개의 창의적인 제목 후보를 생성합니다.</p>
-    </header>
-    <form id="story-keyword-form" class="grid">
-      <label>
-        스토리 키워드
-        <input type="text" name="keyword" required placeholder="예: 달빛 여행" />
-      </label>
-      <label>
-        언어
-        <select name="language">
-          <option value="ko" selected>한국어</option>
-          <option value="en">English</option>
-          <option value="ja">日本語</option>
-        </select>
-      </label>
-      <label>
-        생성 개수
-        <input type="number" name="count" min="5" max="60" step="5" value="30" />
-      </label>
-      <div class="form-actions">
-        <button type="submit" class="contrast">키워드 생성</button>
-      </div>
-    </form>
-    <div class="section-actions">
-      <button type="button" data-save="story_keywords" class="contrast">결과 저장</button>
-      <button type="button" data-refresh="story_keywords" class="outline">목록 새로고침</button>
-    </div>
-    <section id="story-keyword-results" class="keywords-results">
-      <div class="placeholder">
-        <p>키워드를 입력한 뒤 결과를 확인하세요.</p>
-      </div>
-    </section>
-    <section class="saved-results" id="story-keyword-saved">
-      <h3>저장된 키워드 목록</h3>
-      <div class="saved-body">
-        <div class="placeholder"><p>저장된 결과가 없습니다.</p></div>
-      </div>
-    </section>
-  </article>
-</section>
+<div class="tools-container">
 
-<section>
-  <article>
-    <header>
-      <h2>2. 이미지 기반 제목 &amp; 씬 묘사 생성</h2>
-      <p>이미지를 업로드하거나 설명을 입력하면 서로 다른 제목과 장면용 이미지 묘사를 생성합니다.</p>
-    </header>
-    <form id="image-story-form" class="grid" enctype="multipart/form-data">
-      <label>
-        대표 키워드 (선택)
-        <input type="text" name="keyword" placeholder="예: 달빛 여행">
-      </label>
-      <label>
-        이미지 업로드
-        <input type="file" name="image" accept="image/*">
-      </label>
-      <label>
-        이미지 설명 (선택)
-        <textarea name="image_description" rows="3" placeholder="이미지에서 보이는 요소나 분위기를 설명하세요."></textarea>
-      </label>
-      <label>
-        생성 개수
-        <input type="number" name="count" min="3" max="24" step="1" value="8">
-      </label>
-      <p class="help">※ 이미지 또는 설명 중 하나 이상을 입력하세요. 입력이 없을 경우 키워드만으로 생성됩니다.</p>
-      <div class="form-actions">
-        <button type="submit" class="contrast">제목 &amp; 묘사 생성</button>
-      </div>
-    </form>
-    <div class="section-actions">
-      <button type="button" data-save="image_story" class="contrast">결과 저장</button>
-      <button type="button" data-refresh="image_story" class="outline">목록 새로고침</button>
-    </div>
-    <section id="image-story-results" class="keywords-results">
-      <div class="placeholder"><p>생성 결과가 여기에 표시됩니다.</p></div>
-    </section>
-    <section class="saved-results" id="image-story-saved">
-      <h3>저장된 이미지 스토리</h3>
-      <div class="saved-body">
-        <div class="placeholder"><p>저장된 결과가 없습니다.</p></div>
-      </div>
-    </section>
-  </article>
-</section>
+  <!-- Tool 1: 스토리 키워드 -->
+  <section class="tool-section">
+    <article class="tool-card keyword-tool">
+      <header class="tool-header">
+        <div class="tool-icon">📝</div>
+        <div class="tool-info">
+          <h2>1. 스토리를 위한 키워드</h2>
+          <p>간단한 스토리 키워드를 입력하면 30개의 창의적인 제목 후보를 생성합니다.</p>
+        </div>
+      </header>
 
-<section>
-  <article>
-    <header>
-      <h2>3. 쇼츠용 대본 &amp; 이미지 프롬프트</h2>
-      <p>스토리 키워드로 60초 분량의 SRT 자막과 장면별 이미지 묘사를 생성합니다.</p>
-    </header>
-    <form id="shorts-script-form" class="grid">
-      <label>
-        스토리 키워드
-        <input type="text" name="keyword" required placeholder="예: 빛을 쫓는 도시 사냥꾼">
-      </label>
-      <label>
-        언어
-        <select name="language">
-          <option value="ko" selected>한국어</option>
-          <option value="en">English</option>
-          <option value="ja">日本語</option>
-        </select>
-      </label>
-      <div class="form-actions">
-        <button type="submit" class="contrast">대본 생성</button>
-      </div>
-    </form>
-    <div class="section-actions">
-      <button type="button" data-tts="shorts_script" class="outline">자막 음성 변환</button>
-      <button type="button" data-continue="shorts_script" class="outline">이미지 프롬프트 이어서 생성</button>
-      <button type="button" data-regenerate-all="shorts_script" class="outline">이미지 프롬프트 전체 재생성</button>
-      <button type="button" data-save="shorts_script" class="contrast">결과 저장</button>
-      <button type="button" data-refresh="shorts_script" class="outline">목록 새로고침</button>
-    </div>
-    <section id="shorts-script-results" class="script-results">
-      <div class="placeholder"><p>생성된 SRT 자막과 이미지 프롬프트가 여기에 나타납니다.</p></div>
-    </section>
-    <section id="shorts-script-audio" class="audio-result">
-      <div class="placeholder"><p>자막 음성 변환 결과가 여기에 표시됩니다.</p></div>
-    </section>
-    <section class="saved-results" id="shorts-script-saved">
-      <h3>저장된 쇼츠 대본</h3>
-      <div class="saved-body">
-        <div class="placeholder"><p>저장된 결과가 없습니다.</p></div>
-      </div>
-    </section>
-  </article>
-</section>
+      <div class="tool-content">
+        <form id="story-keyword-form" class="tool-form">
+          <div class="input-group">
+            <label>스토리 키워드
+              <input type="text" name="keyword" required placeholder="예: 달빛 여행" />
+            </label>
+          </div>
+          <div class="form-controls">
+            <label>언어
+              <select name="language">
+                <option value="ko" selected>한국어</option>
+                <option value="en">English</option>
+                <option value="ja">日本語</option>
+              </select>
+            </label>
+            <label>생성 개수
+              <input type="number" name="count" min="5" max="60" step="5" value="30" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="contrast">키워드 생성</button>
+            <button type="button" data-save="story_keywords" class="outline">결과 저장</button>
+            <button type="button" data-refresh="story_keywords" class="secondary">새로고침</button>
+          </div>
+        </form>
 
-<section>
-  <article>
-    <header>
-      <h2>4. 쇼츠용 대본 &amp; 영상 장면 프롬프트</h2>
-      <p>키워드를 기반으로 [씬 #] 태그가 포함된 대본과 카메라/분위기 설명을 제공합니다.</p>
-    </header>
-    <form id="shorts-scenes-form" class="grid">
-      <label>
-        스토리 키워드
-        <input type="text" name="keyword" required placeholder="예: 시간여행 탐정">
-      </label>
-      <label>
-        언어
-        <select name="language">
-          <option value="ko" selected>한국어</option>
-          <option value="en">English</option>
-          <option value="ja">日本語</option>
-        </select>
-      </label>
-      <div class="form-actions">
-        <button type="submit" class="contrast">장면 생성</button>
+        <div class="results-section">
+          <div id="story-keyword-results" class="tool-results">
+            <div class="placeholder">
+              <p>키워드를 입력한 뒤 결과를 확인하세요.</p>
+            </div>
+          </div>
+
+          <div class="saved-results" id="story-keyword-saved">
+            <h3>💾 저장된 키워드 목록</h3>
+            <div class="saved-body">
+              <div class="placeholder"><p>저장된 결과가 없습니다.</p></div>
+            </div>
+          </div>
+        </div>
       </div>
-    </form>
-    <div class="section-actions">
-      <button type="button" data-tts="shorts_scenes" class="outline">자막 음성 변환</button>
-      <button type="button" data-continue="shorts_scenes" class="outline">영상 프롬프트 이어서 생성</button>
-      <button type="button" data-regenerate-all="shorts_scenes" class="outline">영상 프롬프트 전체 재생성</button>
-      <button type="button" data-save="shorts_scenes" class="contrast">결과 저장</button>
-      <button type="button" data-refresh="shorts_scenes" class="outline">목록 새로고침</button>
-    </div>
-    <section id="shorts-scenes-results" class="scene-results">
-      <div class="placeholder"><p>생성된 SRT 대본과 영상 장면 설명이 여기에 표시됩니다.</p></div>
-    </section>
-    <section id="shorts-scenes-audio" class="audio-result">
-      <div class="placeholder"><p>자막 음성 변환 결과가 여기에 표시됩니다.</p></div>
-    </section>
-    <section class="saved-results" id="shorts-scenes-saved">
-      <h3>저장된 영상 장면 프롬프트</h3>
-      <div class="saved-body">
-        <div class="placeholder"><p>저장된 결과가 없습니다.</p></div>
+    </article>
+  </section>
+
+  <!-- Tool 2: 이미지 스토리 -->
+  <section class="tool-section">
+    <article class="tool-card image-tool">
+      <header class="tool-header">
+        <div class="tool-icon">🖼️</div>
+        <div class="tool-info">
+          <h2>2. 이미지 기반 제목 & 씬 묘사 생성</h2>
+          <p>이미지를 업로드하거나 설명을 입력하면 서로 다른 제목과 장면용 이미지 묘사를 생성합니다.</p>
+        </div>
+      </header>
+
+      <div class="tool-content">
+        <form id="image-story-form" class="tool-form" enctype="multipart/form-data">
+          <div class="input-group">
+            <label>대표 키워드 (선택)
+              <input type="text" name="keyword" placeholder="예: 달빛 여행">
+            </label>
+          </div>
+          <div class="upload-section">
+            <label class="file-upload-label">이미지 업로드
+              <input type="file" name="image" accept="image/*">
+              <span class="file-help">📎 이미지 파일을 선택하세요</span>
+            </label>
+            <label>이미지 설명 (선택)
+              <textarea name="image_description" rows="3" placeholder="이미지에서 보이는 요소나 분위기를 설명하세요."></textarea>
+            </label>
+          </div>
+          <div class="form-controls">
+            <label>생성 개수
+              <input type="number" name="count" min="3" max="24" step="1" value="8">
+            </label>
+            <div class="help-text">
+              <small>💡 이미지 또는 설명 중 하나 이상을 입력하세요.</small>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="contrast">제목 & 묘사 생성</button>
+            <button type="button" data-save="image_story" class="outline">결과 저장</button>
+            <button type="button" data-refresh="image_story" class="secondary">새로고침</button>
+          </div>
+        </form>
+
+        <div class="results-section">
+          <div id="image-story-results" class="tool-results">
+            <div class="placeholder"><p>생성 결과가 여기에 표시됩니다.</p></div>
+          </div>
+
+          <div class="saved-results" id="image-story-saved">
+            <h3>💾 저장된 이미지 스토리</h3>
+            <div class="saved-body">
+              <div class="placeholder"><p>저장된 결과가 없습니다.</p></div>
+            </div>
+          </div>
+        </div>
       </div>
-    </section>
-  </article>
-</section>
+    </article>
+  </section>
+
+  <!-- Tool 3: 쇼츠 대본 & 이미지 -->
+  <section class="tool-section">
+    <article class="tool-card script-tool">
+      <header class="tool-header">
+        <div class="tool-icon">🎬</div>
+        <div class="tool-info">
+          <h2>3. 쇼츠용 대본 & 이미지 프롬프트</h2>
+          <p>스토리 키워드로 60초 분량의 SRT 자막과 장면별 이미지 묘사를 생성합니다.</p>
+        </div>
+      </header>
+
+      <div class="tool-content">
+        <form id="shorts-script-form" class="tool-form">
+          <div class="input-group">
+            <label>스토리 키워드
+              <input type="text" name="keyword" required placeholder="예: 빛을 쫓는 도시 사냥꾼">
+            </label>
+          </div>
+          <div class="form-controls">
+            <label>언어
+              <select name="language">
+                <option value="ko" selected>한국어</option>
+                <option value="en">English</option>
+                <option value="ja">日本語</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="contrast">대본 생성</button>
+          </div>
+        </form>
+
+        <div class="advanced-actions">
+          <div class="action-group">
+            <h4>🔧 고급 기능</h4>
+            <div class="action-buttons">
+              <button type="button" data-tts="shorts_script" class="outline">🎤 음성 변환</button>
+              <button type="button" data-continue="shorts_script" class="outline">➕ 이미지 이어서 생성</button>
+            </div>
+          </div>
+          <div class="action-group">
+            <div class="action-buttons">
+              <button type="button" data-save="shorts_script" class="contrast">결과 저장</button>
+              <button type="button" data-refresh="shorts_script" class="secondary">새로고침</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="results-section">
+          <div id="shorts-script-results" class="tool-results script-results">
+            <div class="placeholder"><p>생성된 SRT 자막과 이미지 프롬프트가 여기에 나타납니다.</p></div>
+          </div>
+
+          <div id="shorts-script-audio" class="audio-result">
+            <div class="placeholder"><p>자막 음성 변환 결과가 여기에 표시됩니다.</p></div>
+          </div>
+
+          <div class="saved-results" id="shorts-script-saved">
+            <h3>💾 저장된 쇼츠 대본</h3>
+            <div class="saved-body">
+              <div class="placeholder"><p>저장된 결과가 없습니다.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- Tool 4: 쇼츠 대본 & 영상 -->
+  <section class="tool-section">
+    <article class="tool-card scene-tool">
+      <header class="tool-header">
+        <div class="tool-icon">🎥</div>
+        <div class="tool-info">
+          <h2>4. 쇼츠용 대본 & 영상 장면 프롬프트</h2>
+          <p>키워드를 기반으로 [씬 #] 태그가 포함된 대본과 카메라/분위기 설명을 제공합니다.</p>
+        </div>
+      </header>
+
+      <div class="tool-content">
+        <form id="shorts-scenes-form" class="tool-form">
+          <div class="input-group">
+            <label>스토리 키워드
+              <input type="text" name="keyword" required placeholder="예: 시간여행 탐정">
+            </label>
+          </div>
+          <div class="form-controls">
+            <label>언어
+              <select name="language">
+                <option value="ko" selected>한국어</option>
+                <option value="en">English</option>
+                <option value="ja">日본語</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="contrast">장면 생성</button>
+          </div>
+        </form>
+
+        <div class="advanced-actions">
+          <div class="action-group">
+            <h4>🔧 고급 기능</h4>
+            <div class="action-buttons">
+              <button type="button" data-tts="shorts_scenes" class="outline">🎤 음성 변환</button>
+              <button type="button" data-continue="shorts_scenes" class="outline">➕ 영상 이어서 생성</button>
+            </div>
+          </div>
+          <div class="action-group">
+            <div class="action-buttons">
+              <button type="button" data-save="shorts_scenes" class="contrast">결과 저장</button>
+              <button type="button" data-refresh="shorts_scenes" class="secondary">새로고침</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="results-section">
+          <div id="shorts-scenes-results" class="tool-results scene-results">
+            <div class="placeholder"><p>생성된 SRT 대본과 영상 장면 설명이 여기에 표시됩니다.</p></div>
+          </div>
+
+          <div id="shorts-scenes-audio" class="audio-result">
+            <div class="placeholder"><p>자막 음성 변환 결과가 여기에 표시됩니다.</p></div>
+          </div>
+
+          <div class="saved-results" id="shorts-scenes-saved">
+            <h3>💾 저장된 영상 장면 프롬프트</h3>
+            <div class="saved-body">
+              <div class="placeholder"><p>저장된 결과가 없습니다.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+</div>
 {% endblock %}

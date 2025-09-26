@@ -442,7 +442,6 @@ function renderShortsScriptResults(result) {
           <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
           <p>${description}</p>
           <div class="item-actions">
-            <button type="button" class="outline" data-regenerate-single="shorts_script" data-index="${idx}">이 프롬프트 다시 생성</button>
           </div>
         </li>
       `;
@@ -513,7 +512,6 @@ function renderShortsSceneResults(result) {
           <p>${action}</p>
           <small>카메라: ${camera} · 분위기: ${mood}</small>
           <div class="item-actions">
-            <button type="button" class="outline" data-regenerate-single="shorts_scenes" data-index="${idx}">이 씬 다시 생성</button>
           </div>
         </li>
       `;
@@ -594,9 +592,16 @@ const TOOL_CONFIG = {
 
 function renderSavedRecords(tool, records = state.savedRecords[tool] || []) {
   const config = TOOL_CONFIG[tool];
-  if (!config) return;
+  if (!config) {
+    console.warn(`No config found for tool: ${tool}`);
+    return;
+  }
   const container = document.querySelector(`#${config.savedContainer} .saved-body`);
-  if (!container) return;
+  if (!container) {
+    console.warn(`No container found for tool: ${tool}, selector: #${config.savedContainer} .saved-body`);
+    return;
+  }
+  console.log(`Rendering ${records.length} saved records for tool: ${tool}`);
 
   if (!records.length) {
     container.innerHTML = '<div class="placeholder"><p>저장된 결과가 없습니다.</p></div>';
@@ -634,7 +639,9 @@ function renderSavedRecords(tool, records = state.savedRecords[tool] || []) {
 
 async function loadSavedRecords(tool) {
   try {
+    console.log(`Loading saved records for tool: ${tool}`);
     const records = await api(`/api/tools/${tool}/records`);
+    console.log(`Loaded ${records?.length || 0} records for ${tool}:`, records);
     state.savedRecords[tool] = Array.isArray(records) ? records : [];
     const previous = state.checkedRecords[tool] || new Set();
     const next = new Set();
@@ -984,6 +991,241 @@ async function convertToSpeech(tool) {
   }
 }
 
+async function convertSingleSubtitleToSpeech(project, subtitleIndex) {
+  const subtitles = project.subtitles || [];
+  if (subtitleIndex >= subtitles.length) {
+    alert("자막을 찾을 수 없습니다.");
+    return;
+  }
+
+  const subtitle = subtitles[subtitleIndex];
+  const button = document.querySelector(`[data-subtitle-index="${subtitleIndex}"]`);
+
+  if (button) {
+    button.textContent = "🔄";
+    button.disabled = true;
+  }
+
+  try {
+    const result = await api(`/api/projects/${project.project_id}/speech`, {
+      method: "POST",
+      body: JSON.stringify({
+        subtitle_text: subtitle.text,
+        subtitle_index: subtitleIndex,
+        voice: "alloy",
+        format: "mp3"
+      })
+    });
+
+    // 음성 클립 표시 업데이트
+    const voiceCell = document.querySelector(`tr[data-row-index="${subtitleIndex}"] .voice-content-tl`);
+    if (voiceCell && result.audio_url) {
+      voiceCell.innerHTML = `
+        <div class="audio-clip-controls">
+          <button type="button" class="play-audio-btn secondary small" data-audio-index="${subtitleIndex}" data-audio-url="${result.audio_url}" title="음성 재생">
+            ▶️
+          </button>
+          <audio style="display: none;" data-audio-index="${subtitleIndex}">
+            <source src="${result.audio_url}" type="audio/mpeg">
+          </audio>
+          <small>음성 클립 생성됨</small>
+        </div>
+      `;
+
+      // 재생 버튼 이벤트 리스너 추가
+      const playBtn = voiceCell.querySelector('.play-audio-btn');
+      const audio = voiceCell.querySelector('audio');
+
+      if (playBtn && audio) {
+        playBtn.addEventListener('click', () => {
+          playAudioClip(audio, playBtn);
+        });
+      }
+    }
+
+    showNotification("음성 변환이 완료되었습니다!", "success");
+  } catch (error) {
+    alert(`음성 변환 실패: ${error.message}`);
+  } finally {
+    if (button) {
+      button.textContent = "🎤";
+      button.disabled = false;
+    }
+  }
+}
+
+function bindTTSHandlers(project) {
+  const ttsButtons = document.querySelectorAll('.tts-btn[data-subtitle-index]');
+  ttsButtons.forEach(button => {
+    button.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const subtitleIndex = parseInt(button.dataset.subtitleIndex);
+      await convertSingleSubtitleToSpeech(project, subtitleIndex);
+    });
+  });
+}
+
+// 오디오 클립 재생 관련 함수들
+let currentlyPlayingAudio = null;
+
+function playAudioClip(audio, button) {
+  // 현재 재생 중인 오디오가 있으면 정지
+  if (currentlyPlayingAudio && !currentlyPlayingAudio.paused) {
+    currentlyPlayingAudio.pause();
+    currentlyPlayingAudio.currentTime = 0;
+    // 이전 버튼 상태 복원
+    const prevButton = document.querySelector(`[data-audio-index="${currentlyPlayingAudio.dataset.audioIndex}"]`);
+    if (prevButton) {
+      prevButton.textContent = "▶️";
+      prevButton.disabled = false;
+    }
+  }
+
+  if (audio.paused) {
+    // 재생 시작
+    audio.play().then(() => {
+      button.textContent = "⏸️";
+      currentlyPlayingAudio = audio;
+
+      // 재생 완료 시 버튼 상태 복원
+      audio.addEventListener('ended', () => {
+        button.textContent = "▶️";
+        currentlyPlayingAudio = null;
+      }, { once: true });
+
+    }).catch(error => {
+      console.error('오디오 재생 실패:', error);
+      alert('오디오 재생에 실패했습니다.');
+    });
+  } else {
+    // 재생 중지
+    audio.pause();
+    audio.currentTime = 0;
+    button.textContent = "▶️";
+    currentlyPlayingAudio = null;
+  }
+}
+
+async function playAllAudioClips() {
+  const audioClips = document.querySelectorAll('.audio-clip-controls audio');
+
+  if (audioClips.length === 0) {
+    alert('재생할 음성 클립이 없습니다.');
+    return;
+  }
+
+  // 현재 재생 중인 오디오 정지
+  if (currentlyPlayingAudio) {
+    currentlyPlayingAudio.pause();
+    currentlyPlayingAudio.currentTime = 0;
+    currentlyPlayingAudio = null;
+  }
+
+  const playAllButton = document.getElementById('play-all-audio');
+  if (playAllButton) {
+    playAllButton.textContent = "⏸️ 전체 정지";
+    playAllButton.disabled = true;
+  }
+
+  try {
+    for (let i = 0; i < audioClips.length; i++) {
+      const audio = audioClips[i];
+      const button = document.querySelector(`[data-audio-index="${audio.dataset.audioIndex}"]`);
+
+      if (audio.src && button) {
+        button.textContent = "⏸️";
+        currentlyPlayingAudio = audio;
+
+        // 오디오 재생 및 완료 대기
+        await new Promise((resolve, reject) => {
+          audio.play().then(() => {
+            audio.addEventListener('ended', resolve, { once: true });
+            audio.addEventListener('error', reject, { once: true });
+          }).catch(reject);
+        });
+
+        button.textContent = "▶️";
+        currentlyPlayingAudio = null;
+      }
+    }
+  } catch (error) {
+    console.error('전체 재생 중 오류:', error);
+    alert('전체 재생 중 오류가 발생했습니다.');
+  } finally {
+    if (playAllButton) {
+      playAllButton.textContent = "🔊 전체 재생";
+      playAllButton.disabled = false;
+    }
+    currentlyPlayingAudio = null;
+  }
+}
+
+function updateTemplatePreview(templateCard) {
+  if (!templateCard) return;
+
+  const preview = document.getElementById("template-preview");
+  const titleBox = document.getElementById("preview-title");
+  const subtitleBox = document.getElementById("preview-subtitle");
+
+  if (!preview || !titleBox || !subtitleBox) return;
+
+  // 템플릿 데이터 가져오기
+  const titleX = parseFloat(templateCard.dataset.titleX);
+  const titleY = parseFloat(templateCard.dataset.titleY);
+  const subtitleX = parseFloat(templateCard.dataset.subtitleX);
+  const subtitleY = parseFloat(templateCard.dataset.subtitleY);
+  const templateId = templateCard.dataset.template;
+
+  // 위치 업데이트 (상대적 위치를 %로 변환) - !important 사용하여 CSS 오버라이드
+  titleBox.style.setProperty('left', `${titleX * 100}%`, 'important');
+  titleBox.style.setProperty('top', `${titleY * 100}%`, 'important');
+  subtitleBox.style.setProperty('left', `${subtitleX * 100}%`, 'important');
+  subtitleBox.style.setProperty('top', `${subtitleY * 100}%`, 'important');
+
+  // 크기 조정 - 사용자 지정 크기로 설정
+  titleBox.style.setProperty('font-size', '36px', 'important');
+  subtitleBox.style.setProperty('font-size', '24px', 'important');
+
+  // 템플릿별 스타일 적용
+  preview.className = `template-preview template-${templateId}`;
+
+  // 텍스트 효과도 적용
+  applyTextEffects();
+}
+
+function applyTextEffects() {
+  const titleBox = document.getElementById("preview-title");
+  const subtitleBox = document.getElementById("preview-subtitle");
+  const staticEffectSelect = document.getElementById("static-effect");
+  const dynamicEffectSelect = document.getElementById("dynamic-effect");
+
+  if (!titleBox || !subtitleBox || !staticEffectSelect || !dynamicEffectSelect) return;
+
+  const staticEffect = staticEffectSelect.value;
+  const dynamicEffect = dynamicEffectSelect.value;
+
+  // 기존 효과 클래스 제거
+  titleBox.className = titleBox.className.replace(/effect-\w+/g, '').replace(/static-\w+/g, '').replace(/dynamic-\w+/g, '').trim();
+  subtitleBox.className = subtitleBox.className.replace(/effect-\w+/g, '').replace(/static-\w+/g, '').replace(/dynamic-\w+/g, '').trim();
+
+  // 정적 효과 적용
+  if (staticEffect && staticEffect !== 'none') {
+    titleBox.classList.add(`static-${staticEffect}`);
+    subtitleBox.classList.add(`static-${staticEffect}`);
+  }
+
+  // 동적 효과 적용
+  if (dynamicEffect && dynamicEffect !== 'none') {
+    titleBox.classList.add(`dynamic-${dynamicEffect}`);
+    subtitleBox.classList.add(`dynamic-${dynamicEffect}`);
+  }
+
+  // 효과 적용 후에도 폰트 크기 유지
+  titleBox.style.setProperty('font-size', '36px', 'important');
+  subtitleBox.style.setProperty('font-size', '24px', 'important');
+}
+
 function initStoryKeywordPage() {
   const form = document.getElementById("story-keyword-form");
   const resultsContainer = document.getElementById("story-keyword-results");
@@ -1177,6 +1419,7 @@ function renderProject(project) {
   container.innerHTML = buildProjectMarkup(project, totalDuration);
   setupTimelineScrollSync(container);
   bindProjectHandlers();
+  bindTTSHandlers(project);
   highlightHistorySelection(project.project_id);
 }
 
@@ -1189,104 +1432,369 @@ function buildProjectMarkup(project, totalDuration) {
           <p>프로젝트 ID: <code>${project.project_id}</code></p>
         </div>
         <div class="command-group">
-          <button data-action="generate-titles" class="outline">제목 재생성</button>
-          <button data-action="generate-subtitles" class="outline">자막 재생성</button>
-          <button data-action="generate-scenes" class="outline">영상 생성</button>
           <button data-action="auto-align" class="outline">AI 자동 정렬</button>
           <button data-action="export" class="contrast">내보내기</button>
         </div>
       </header>
 
       <section>
-        <h3>동시 편집 타임라인</h3>
-        <div class="timeline-wrapper">
-          <div class="timeline-grid">
-            ${renderTimelineRow("자막", project.subtitles, buildSubtitleSegment, "subtitle")}
-            ${renderTimelineRow("음성", project.subtitles, buildAudioSegment, "audio")}
-            ${renderTimelineRow("배경 음악", project.background_music || [], buildMusicSegment, "music")}
-            ${renderTimelineRow("이미지", project.image_prompts, buildImageSegment, "image")}
-            ${renderTimelineRow("영상", project.video_prompts, buildVideoSegment, "video")}
-            <div><strong>정렬 미리보기</strong></div>
-            <div class="timeline-track overlay" id="overlap-track" data-duration="${totalDuration}">
-              ${buildOverlapBars(project, totalDuration)}
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="margin: 0;">동시 편집 타임라인</h3>
+          <button id="play-all-audio" type="button" class="secondary" onclick="playAllAudioClips()" title="모든 음성 클립을 순서대로 재생">
+            🔊 전체 재생
+          </button>
+        </div>
+        <div class="timeline-table-container">
+          <table class="timeline-table">
+            <thead>
+              <tr>
+                <th>시간</th>
+                <th>음성·자막</th>
+                <th>🎵</th>
+                <th>🖼️</th>
+                <th>🎬</th>
+                <th>⚙️</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderTimelineTableRows(project)}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 화면 템플릿 섹션 -->
+        <section class="template-section">
+          <div class="template-grid-container">
+            <h3>화면 템플릿</h3>
+            <div class="template-cards-grid">
+              ${state.templates
+                .map(
+                  (template, index) => `<div class="template-card ${index === 0 ? 'active' : ''}"
+                    data-template="${template.id}"
+                    data-title-x="${template.title[0]}"
+                    data-title-y="${template.title[1]}"
+                    data-subtitle-x="${template.subtitle[0]}"
+                    data-subtitle-y="${template.subtitle[1]}">
+                      <div class="template-icon">${['🎬', '📢', '🎭', '💬', '📱'][index] || '🎯'}</div>
+                      <div class="template-name">${template.name}</div>
+                    </div>`
+                )
+                .join("")}
             </div>
           </div>
-          <div class="timeline-scrollbar">
-            <input type="range" min="0" max="1000" step="1" value="0" aria-label="타임라인 가로 스크롤" />
-          </div>
-        </div>
-      </section>
 
-      <section class="grid">
-        <div>
-          <h3>화면 템플릿</h3>
-          <div class="grid" id="template-selector">
-            ${state.templates
-              .map(
-                (template) => `<button class="outline" data-template="${template.id}" data-title-x="${template.title[0]}" data-title-y="${template.title[1]}" data-subtitle-x="${template.subtitle[0]}" data-subtitle-y="${template.subtitle[1]}">${template.name}</button>`
-              )
-              .join("")}
-          </div>
-        </div>
-        <div>
-          <h3>실시간 템플릿 프리뷰</h3>
-          <div class="template-preview" id="template-preview">
-            <div class="title-box" id="preview-title">${project.keyword}</div>
-            <div class="subtitle-box" id="preview-subtitle">${project.subtitles[0]?.text || "자막 미리보기"}</div>
-          </div>
-          <label>제목 크기<input type="range" id="title-size" min="24" max="72" value="48" /></label>
-          <label>자막 크기<input type="range" id="subtitle-size" min="16" max="48" value="28" /></label>
-          <label>텍스트 효과<select id="text-effect">${state.textEffects.map((effect) => `<option value="${effect}">${effect}</option>`).join("")}</select></label>
-        </div>
-      </section>
+          <div class="template-preview-container">
+            <h3>실시간 템플릿 프리뷰</h3>
+            <div class="preview-screen-wrapper">
+              <div class="template-preview" id="template-preview">
+                <div class="video-area" id="video-placeholder">
+                  <div class="video-indicator">📹 영상 영역</div>
+                </div>
+                <div class="title-box" id="preview-title">${project.keyword}</div>
+                <div class="subtitle-box" id="preview-subtitle">${project.subtitles[0]?.text || "자막 미리보기"}</div>
+              </div>
+              <div class="preview-controls">
 
-      <section>
-        <h3>영상 효과</h3>
-        <form id="effect-form" class="grid">
-          <label>효과 선택<select name="effect_id">${state.effects.map((effect) => `<option value="${effect.id}">${effect.name}</option>`).join("")}</select></label>
-          <label>시작 (초)<input type="number" step="0.1" name="start_time" value="0" /></label>
-          <label>종료 (초)<input type="number" step="0.1" name="end_time" value="5" /></label>
-          <button type="submit">효과 적용</button>
-        </form>
-        <div class="effect-list">
-          ${project.applied_effects
-            .map(
-              (effect) => `<span class="effect-badge" data-effect="${effect.effect_id}">${effect.name} (${effect.start_time.toFixed(1)}-${effect.end_time.toFixed(1)}s)<button type="button" data-remove-effect="${effect.effect_id}" class="outline">×</button></span>`
-            )
-            .join(" ")}
-        </div>
-      </section>
+                <!-- 설정 저장/불러오기 -->
+                <div class="settings-controls">
+                  <div class="save-settings-group">
+                    <input type="text" id="settings-filename" class="settings-filename-input" placeholder="설정 파일명 (예: 내_설정_1)" />
+                    <button type="button" class="settings-btn save-settings">💾 저장</button>
+                  </div>
+                  <div class="load-settings-group">
+                    <select id="saved-settings-list" class="settings-list-select">
+                      <option value="">저장된 설정을 선택하세요</option>
+                    </select>
+                    <button type="button" class="settings-btn load-settings">📂 불러오기</button>
+                    <button type="button" class="settings-btn delete-settings">🗑️ 삭제</button>
+                  </div>
+                </div>
 
-      <section class="grid">
-        <div>
-          <h3>이미지 추가</h3>
-          <form id="image-prompt-form" class="grid">
-            <label>태그<input type="text" name="tag" placeholder="이미지 7" required /></label>
-            <label>설명<textarea name="description" rows="2" placeholder="장면 설명" required></textarea></label>
-            <label>시작(초)<input type="number" step="0.1" name="start" placeholder="0" /></label>
-            <label>종료(초)<input type="number" step="0.1" name="end" placeholder="5" /></label>
-            <button type="submit">이미지 추가</button>
-          </form>
-          <h3>배경 음악 추가</h3>
-          <form id="music-track-form" class="grid">
-            <label>트랙 ID<input type="text" name="track_id" placeholder="bgm-main" required /></label>
-            <label>제목<input type="text" name="title" placeholder="메인 테마" required /></label>
-            <label>출처/파일<input type="text" name="source" placeholder="bgm/main-theme.mp3" /></label>
-            <div class="segment-edit-grid">
-              <label>시작(초)<input type="number" step="0.1" name="start" placeholder="0" /></label>
-              <label>종료(초)<input type="number" step="0.1" name="end" placeholder="60" /></label>
+                <!-- 영역 크기 및 위치 조절 컨트롤 -->
+                <div class="area-controls-container">
+                  <div class="video-area-section">
+                    <!-- 영상 영역 컨트롤 -->
+                    <div class="area-control-group">
+                      <h4 class="area-title">📹 영상 영역</h4>
+                      <button type="button" class="auto-adjust-btn" data-area="video">⚡ 자동조정</button>
+                      <div class="control-group">
+                        <label class="control-label">크기</label>
+                        <input type="range" id="video-area-size" min="50" max="100" value="80" class="control-slider" />
+                        <div class="size-display">80%</div>
+                        <div class="size-bar">
+                          <div class="size-bar-fill" style="width: 80%"></div>
+                        </div>
+                      </div>
+                      <div class="position-controls">
+                        <div class="position-row">
+                          <label class="control-label">좌우</label>
+                          <input type="range" id="video-area-x" min="0" max="100" value="50" class="control-slider" />
+                          <div class="size-display">50%</div>
+                        </div>
+                        <div class="position-row">
+                          <label class="control-label">상하</label>
+                          <input type="range" id="video-area-y" min="0" max="100" value="50" class="control-slider" />
+                          <div class="size-display">50%</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 영상 효과 컨트롤 -->
+                    <div class="video-effects-control">
+                      <h4 class="area-title">🎬 영상 효과</h4>
+                      <p>비디오에 특수 효과를 적용하세요</p>
+                      <form id="effect-form" class="effect-form">
+                        <div class="form-row">
+                          <label>효과 선택
+                            <select name="effect_id">
+                              ${state.effects.map((effect) => `<option value="${effect.id}">${effect.name}</option>`).join("")}
+                            </select>
+                          </label>
+                        </div>
+                        <div class="time-inputs">
+                          <label>시작 시간 (초)
+                            <input type="number" step="0.1" name="start_time" value="0" min="0" />
+                          </label>
+                          <label>종료 시간 (초)
+                            <input type="number" step="0.1" name="end_time" value="5" min="0" />
+                          </label>
+                        </div>
+                        <button type="submit" class="contrast">효과 적용</button>
+                      </form>
+                      <div class="applied-effects">
+                        <h4>적용된 효과</h4>
+                        <div class="effect-list">
+                          ${project.applied_effects
+                            .map(
+                              (effect) => `
+                              <div class="effect-item">
+                                <span class="effect-name">${effect.name}</span>
+                                <span class="effect-time">${effect.start_time.toFixed(1)}-${effect.end_time.toFixed(1)}초</span>
+                                <button type="button" data-remove-effect="${effect.effect_id}" class="outline small">삭제</button>
+                              </div>`
+                            )
+                            .join("")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="area-controls-grid">
+                    <!-- 제목 영역 컨트롤 -->
+                    <div class="area-control-group">
+                      <h4 class="area-title">📝 제목 영역</h4>
+                      <button type="button" class="auto-adjust-btn" data-area="title">⚡ 자동조정</button>
+                      <div class="control-group">
+                        <label class="control-label">폰트 크기</label>
+                        <input type="range" id="title-size" min="24" max="60" value="36" class="control-slider" />
+                        <div class="size-display">36px</div>
+                        <div class="size-bar">
+                          <div class="size-bar-fill" style="width: 33.3%"></div>
+                        </div>
+                      </div>
+                      <div class="control-group">
+                        <label class="control-label">영역 크기</label>
+                        <input type="range" id="title-area-size" min="60" max="120" value="100" class="control-slider" />
+                        <div class="size-display">100%</div>
+                        <div class="size-bar">
+                          <div class="size-bar-fill" style="width: 66.7%"></div>
+                        </div>
+                      </div>
+                      <div class="position-controls">
+                        <div class="position-row">
+                          <label class="control-label">좌우</label>
+                          <input type="range" id="title-area-x" min="0" max="100" value="50" class="control-slider" />
+                          <div class="size-display">50%</div>
+                        </div>
+                        <div class="position-row">
+                          <label class="control-label">상하</label>
+                          <input type="range" id="title-area-y" min="0" max="100" value="50" class="control-slider" />
+                          <div class="size-display">50%</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 자막 영역 컨트롤 -->
+                    <div class="area-control-group">
+                      <h4 class="area-title">💬 자막 영역</h4>
+                      <button type="button" class="auto-adjust-btn" data-area="subtitle">⚡ 자동조정</button>
+                      <div class="control-group">
+                        <label class="control-label">폰트 크기</label>
+                        <input type="range" id="subtitle-size" min="16" max="48" value="24" class="control-slider" />
+                        <div class="size-display">24px</div>
+                        <div class="size-bar">
+                          <div class="size-bar-fill" style="width: 25%"></div>
+                        </div>
+                      </div>
+                      <div class="control-group">
+                        <label class="control-label">영역 크기</label>
+                        <input type="range" id="subtitle-area-size" min="60" max="120" value="100" class="control-slider" />
+                        <div class="size-display">100%</div>
+                        <div class="size-bar">
+                          <div class="size-bar-fill" style="width: 66.7%"></div>
+                        </div>
+                      </div>
+                      <div class="position-controls">
+                        <div class="position-row">
+                          <label class="control-label">좌우</label>
+                          <input type="range" id="subtitle-area-x" min="0" max="100" value="50" class="control-slider" />
+                          <div class="size-display">50%</div>
+                        </div>
+                        <div class="position-row">
+                          <label class="control-label">상하</label>
+                          <input type="range" id="subtitle-area-y" min="0" max="100" value="80" class="control-slider" />
+                          <div class="size-display">80%</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 텍스트 효과 컨트롤 -->
+                  <div class="text-effects-section">
+                    <h3>🎨 텍스트 효과</h3>
+                    <div class="effects-grid">
+                      <div class="control-group">
+                        <label class="control-label">정적 효과 (스타일)</label>
+                        <select id="static-effect" class="control-select">
+                          <option value="none">없음</option>
+                          <option value="outline">외곽선</option>
+                          <option value="shadow">그림자</option>
+                          <option value="glow">글로우</option>
+                          <option value="gradient">그라데이션</option>
+                          <option value="neon">네온</option>
+                        </select>
+                      </div>
+                      <div class="control-group">
+                        <label class="control-label">동적 효과 (모션)</label>
+                        <select id="dynamic-effect" class="control-select">
+                          <option value="none">없음</option>
+                          <option value="typewriter">타이핑</option>
+                          <option value="wave">웨이브</option>
+                          <option value="pulse">펄스</option>
+                          <option value="shake">떨림</option>
+                          <option value="fade">페이드</option>
+                          <option value="bounce">바운스</option>
+                          <option value="flip">회전</option>
+                          <option value="slide">슬라이드</option>
+                          <option value="zoom">줌</option>
+                          <option value="rotate">회전</option>
+                          <option value="glitch">글리치</option>
+                          <option value="matrix">매트릭스</option>
+                          <option value="fire">불꽃</option>
+                          <option value="rainbow">무지개</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <label>볼륨(0-1)<input type="number" step="0.05" min="0" max="1" name="volume" value="0.8" /></label>
-            <button type="submit">배경 음악 추가</button>
-          </form>
-        </div>
-        <div id="prompt-preview">
-          <h3>미디어 프리뷰</h3>
-          <div class="preview-body">
-            <h4>선택된 항목이 없습니다</h4>
-            <p>타임라인의 이미지·영상 요소를 클릭하면 세부 정보를 확인할 수 있습니다.</p>
           </div>
+        </section>
+
+        <!-- 미디어 추가 버튼들 -->
+        <div class="media-add-buttons">
+          <button type="button" class="media-add-btn image-add" data-media="image">
+            🖼️ 이미지 추가
+          </button>
+          <button type="button" class="media-add-btn music-add" data-media="music">
+            🎵 배경 음악 추가
+          </button>
+          <button type="button" class="media-add-btn video-add" data-media="video">
+            🎬 영상 추가
+          </button>
         </div>
+
+        <!-- 미디어 추가 폼들 -->
+        <div class="media-forms-container">
+          <!-- 이미지 추가 패널 -->
+          <article class="image-panel media-form-panel" style="display: none;">
+            <header>
+              <h3>🖼️ 이미지 추가</h3>
+              <p>타임라인에 이미지를 삽입하세요</p>
+            </header>
+            <form id="image-prompt-form" class="image-form">
+              <label>이미지 태그
+                <input type="text" name="tag" placeholder="예: 이미지 7" required />
+              </label>
+              <label>이미지 설명
+                <textarea name="description" rows="3" placeholder="장면에 대한 상세 설명을 입력하세요..." required></textarea>
+              </label>
+              <div class="time-inputs">
+                <label>시작 시간 (초)
+                  <input type="number" step="0.1" name="start" placeholder="0" min="0" />
+                </label>
+                <label>종료 시간 (초)
+                  <input type="number" step="0.1" name="end" placeholder="5" min="0" />
+                </label>
+              </div>
+              <button type="submit" class="contrast">이미지 추가</button>
+            </form>
+          </article>
+
+          <!-- 배경 음악 추가 패널 -->
+          <article class="music-panel media-form-panel" style="display: none;">
+            <header>
+              <h3>🎵 배경 음악 추가</h3>
+              <p>프로젝트에 배경 음악을 추가하세요</p>
+            </header>
+            <form id="music-track-form" class="music-form">
+              <div class="music-info">
+                <label>트랙 ID
+                  <input type="text" name="track_id" placeholder="예: bgm-main" required />
+                </label>
+                <label>음악 제목
+                  <input type="text" name="title" placeholder="예: 메인 테마" required />
+                </label>
+                <label>파일 경로
+                  <input type="text" name="source" placeholder="예: bgm/main-theme.mp3" />
+                </label>
+              </div>
+              <div class="time-inputs">
+                <label>시작 시간 (초)
+                  <input type="number" step="0.1" name="start" placeholder="0" min="0" />
+                </label>
+                <label>종료 시간 (초)
+                  <input type="number" step="0.1" name="end" placeholder="60" min="0" />
+                </label>
+              </div>
+              <label>음량 (0.0 - 1.0)
+                <input type="range" name="volume" min="0" max="1" step="0.05" value="0.8" />
+                <output>0.8</output>
+              </label>
+              <button type="submit" class="contrast">배경 음악 추가</button>
+            </form>
+          </article>
+
+          <!-- 영상 추가 패널 -->
+          <article class="video-panel media-form-panel" style="display: none;">
+            <header>
+              <h3>🎬 영상 추가</h3>
+              <p>타임라인에 영상을 삽입하세요</p>
+            </header>
+            <form id="video-prompt-form" class="video-form">
+              <label>영상 태그
+                <input type="text" name="scene_tag" placeholder="예: 씬 1" required />
+              </label>
+              <label>영상 설명
+                <textarea name="description" rows="3" placeholder="영상 장면에 대한 상세 설명을 입력하세요..." required></textarea>
+              </label>
+              <div class="time-inputs">
+                <label>시작 시간 (초)
+                  <input type="number" step="0.1" name="start" placeholder="0" min="0" />
+                </label>
+                <label>종료 시간 (초)
+                  <input type="number" step="0.1" name="end" placeholder="10" min="0" />
+                </label>
+              </div>
+              <button type="submit" class="contrast">영상 추가</button>
+            </form>
+          </article>
+        </div>
+
+      </section>
+
+
       </section>
     </article>
   `;
@@ -1816,15 +2324,22 @@ function bindProjectHandlers() {
     });
   });
 
-  const templateSelector = container.querySelector("#template-selector");
+  const templateSelector = container.querySelector(".template-cards-grid");
   if (templateSelector) {
-    templateSelector.querySelectorAll("button[data-template]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const templateId = btn.dataset.template;
+    templateSelector.querySelectorAll(".template-card[data-template]").forEach((card) => {
+      card.addEventListener("click", async () => {
+        // 활성 상태 변경
+        templateSelector.querySelectorAll(".template-card").forEach(c => c.classList.remove("active"));
+        card.classList.add("active");
+
+        // 실시간 미리보기 업데이트
+        updateTemplatePreview(card);
+
+        const templateId = card.dataset.template;
         const payload = {
           template_id: templateId,
-          title_position: [parseFloat(btn.dataset.titleX), parseFloat(btn.dataset.titleY)],
-          subtitle_position: [parseFloat(btn.dataset.subtitleX), parseFloat(btn.dataset.subtitleY)],
+          title_position: [parseFloat(card.dataset.titleX), parseFloat(card.dataset.titleY)],
+          subtitle_position: [parseFloat(card.dataset.subtitleX), parseFloat(card.dataset.subtitleY)],
           title_style: { effect: document.getElementById("text-effect").value },
           subtitle_style: { effect: document.getElementById("text-effect").value }
         };
@@ -1888,8 +2403,22 @@ function bindProjectHandlers() {
   const previewSubtitle = container.querySelector("#preview-subtitle");
 
   const refreshPreview = () => {
-    previewTitle.style.fontSize = `${titleSize.value}px`;
-    previewSubtitle.style.fontSize = `${subtitleSize.value}px`;
+    if (previewTitle && titleSize) {
+      previewTitle.style.fontSize = `${titleSize.value}px`;
+      // 크기 표시 업데이트
+      const titleSizeDisplay = titleSize.parentNode.querySelector(".size-display");
+      if (titleSizeDisplay) {
+        titleSizeDisplay.textContent = `${titleSize.value}px`;
+      }
+    }
+    if (previewSubtitle && subtitleSize) {
+      previewSubtitle.style.fontSize = `${subtitleSize.value}px`;
+      // 크기 표시 업데이트
+      const subtitleSizeDisplay = subtitleSize.parentNode.querySelector(".size-display");
+      if (subtitleSizeDisplay) {
+        subtitleSizeDisplay.textContent = `${subtitleSize.value}px`;
+      }
+    }
   };
 
   if (titleSize && subtitleSize) {
@@ -1960,7 +2489,495 @@ function bindProjectHandlers() {
     });
   }
 
+  // 템플릿 미리보기 컨트롤 이벤트 바인딩
+  bindTemplateControls(container);
+
   bindTimelineEditors(container);
+}
+
+function bindTemplateControls(container) {
+
+  // 정적 효과 선택
+  const staticEffectSelect = container.querySelector('#static-effect');
+  if (staticEffectSelect) {
+    staticEffectSelect.addEventListener('change', applyTextEffects);
+  }
+
+  // 동적 효과 선택
+  const dynamicEffectSelect = container.querySelector('#dynamic-effect');
+  if (dynamicEffectSelect) {
+    dynamicEffectSelect.addEventListener('change', applyTextEffects);
+  }
+
+  // 영역 크기 조절 컨트롤
+  const videoAreaSizeSlider = container.querySelector('#video-area-size');
+  if (videoAreaSizeSlider) {
+    videoAreaSizeSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      // size-bar 업데이트
+      const sizeBar = this.nextElementSibling.nextElementSibling.querySelector('.size-bar-fill');
+      if (sizeBar) {
+        sizeBar.style.width = value;
+      }
+      const videoArea = document.getElementById('video-placeholder');
+      if (videoArea) {
+        videoArea.style.setProperty('width', value, 'important');
+        // 비율에 맞게 높이도 조절
+        const heightValue = (this.value * 0.5) + '%'; // 50% 기준으로 조절
+        videoArea.style.setProperty('height', heightValue, 'important');
+      }
+    });
+  }
+
+  const titleAreaSizeSlider = container.querySelector('#title-area-size');
+  if (titleAreaSizeSlider) {
+    titleAreaSizeSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      // size-bar 업데이트 (60-120 범위를 0-100%로 변환)
+      const barPercentage = ((this.value - 60) / (120 - 60)) * 100;
+      const sizeBar = this.nextElementSibling.nextElementSibling.querySelector('.size-bar-fill');
+      if (sizeBar) {
+        sizeBar.style.width = barPercentage + '%';
+      }
+      const titleBox = document.getElementById('preview-title');
+      if (titleBox) {
+        const scale = this.value / 100;
+        titleBox.style.setProperty('transform', `scale(${scale})`, 'important');
+        titleBox.style.setProperty('transform-origin', 'center', 'important');
+      }
+    });
+  }
+
+  const subtitleAreaSizeSlider = container.querySelector('#subtitle-area-size');
+  if (subtitleAreaSizeSlider) {
+    subtitleAreaSizeSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      // size-bar 업데이트 (60-120 범위를 0-100%로 변환)
+      const barPercentage = ((this.value - 60) / (120 - 60)) * 100;
+      const sizeBar = this.nextElementSibling.nextElementSibling.querySelector('.size-bar-fill');
+      if (sizeBar) {
+        sizeBar.style.width = barPercentage + '%';
+      }
+      const subtitleBox = document.getElementById('preview-subtitle');
+      if (subtitleBox) {
+        const scale = this.value / 100;
+        subtitleBox.style.setProperty('transform', `scale(${scale})`, 'important');
+        subtitleBox.style.setProperty('transform-origin', 'center', 'important');
+      }
+    });
+  }
+
+  // 영상 영역 위치 조절
+  const videoAreaXSlider = container.querySelector('#video-area-x');
+  if (videoAreaXSlider) {
+    videoAreaXSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      const videoArea = document.getElementById('video-placeholder');
+      if (videoArea) {
+        videoArea.style.setProperty('left', value, 'important');
+        videoArea.style.setProperty('transform', `translate(-50%, -50%)`, 'important');
+      }
+    });
+  }
+
+  const videoAreaYSlider = container.querySelector('#video-area-y');
+  if (videoAreaYSlider) {
+    videoAreaYSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      const videoArea = document.getElementById('video-placeholder');
+      if (videoArea) {
+        videoArea.style.setProperty('top', value, 'important');
+        videoArea.style.setProperty('transform', `translate(-50%, -50%)`, 'important');
+      }
+    });
+  }
+
+  // 제목 영역 위치 조절
+  const titleAreaXSlider = container.querySelector('#title-area-x');
+  if (titleAreaXSlider) {
+    titleAreaXSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      const titleBox = document.getElementById('preview-title');
+      if (titleBox) {
+        titleBox.style.setProperty('left', value, 'important');
+        titleBox.style.setProperty('position', 'absolute', 'important');
+        titleBox.style.setProperty('transform', 'translateX(-50%)', 'important');
+      }
+    });
+  }
+
+  const titleAreaYSlider = container.querySelector('#title-area-y');
+  if (titleAreaYSlider) {
+    titleAreaYSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      const titleBox = document.getElementById('preview-title');
+      if (titleBox) {
+        titleBox.style.setProperty('top', value, 'important');
+        titleBox.style.setProperty('position', 'absolute', 'important');
+        titleBox.style.setProperty('transform', 'translateX(-50%)', 'important');
+      }
+    });
+  }
+
+  // 자막 영역 위치 조절
+  const subtitleAreaXSlider = container.querySelector('#subtitle-area-x');
+  if (subtitleAreaXSlider) {
+    subtitleAreaXSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      const subtitleBox = document.getElementById('preview-subtitle');
+      if (subtitleBox) {
+        subtitleBox.style.setProperty('left', value, 'important');
+        subtitleBox.style.setProperty('position', 'absolute', 'important');
+        subtitleBox.style.setProperty('transform', 'translateX(-50%)', 'important');
+      }
+    });
+  }
+
+  const subtitleAreaYSlider = container.querySelector('#subtitle-area-y');
+  if (subtitleAreaYSlider) {
+    subtitleAreaYSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      const subtitleBox = document.getElementById('preview-subtitle');
+      if (subtitleBox) {
+        subtitleBox.style.setProperty('top', value, 'important');
+        subtitleBox.style.setProperty('position', 'absolute', 'important');
+        subtitleBox.style.setProperty('transform', 'translateX(-50%)', 'important');
+      }
+    });
+  }
+
+  // 자동조정 버튼 이벤트
+  const autoAdjustButtons = container.querySelectorAll('.auto-adjust-btn');
+  autoAdjustButtons.forEach(button => {
+    button.addEventListener('click', function() {
+      const area = this.dataset.area;
+      autoAdjustArea(area);
+    });
+  });
+
+  // 설정 저장/불러오기 버튼 이벤트
+  const saveSettingsBtn = container.querySelector('.save-settings');
+  if (saveSettingsBtn) {
+    saveSettingsBtn.addEventListener('click', saveCurrentSettings);
+  }
+
+  const loadSettingsBtn = container.querySelector('.load-settings');
+  if (loadSettingsBtn) {
+    loadSettingsBtn.addEventListener('click', loadSelectedSettings);
+  }
+
+  const deleteSettingsBtn = container.querySelector('.delete-settings');
+  if (deleteSettingsBtn) {
+    deleteSettingsBtn.addEventListener('click', deleteSelectedSettings);
+  }
+
+  // 저장된 설정 목록 로드
+  loadSettingsList();
+
+  // 제목 크기 슬라이더
+  const titleSizeSlider = container.querySelector('#title-size');
+  if (titleSizeSlider) {
+    titleSizeSlider.addEventListener('input', function() {
+      const value = this.value + 'px';
+      this.nextElementSibling.textContent = value;
+      // size-bar 업데이트 (24-60 범위를 0-100%로 변환)
+      const barPercentage = ((this.value - 24) / (60 - 24)) * 100;
+      const sizeBar = this.nextElementSibling.nextElementSibling.querySelector('.size-bar-fill');
+      if (sizeBar) {
+        sizeBar.style.width = barPercentage + '%';
+      }
+      const titleBox = document.getElementById('preview-title');
+      if (titleBox) {
+        titleBox.style.setProperty('font-size', value, 'important');
+      }
+    });
+  }
+
+  // 자막 크기 슬라이더
+  const subtitleSizeSlider = container.querySelector('#subtitle-size');
+  if (subtitleSizeSlider) {
+    subtitleSizeSlider.addEventListener('input', function() {
+      const value = this.value + 'px';
+      this.nextElementSibling.textContent = value;
+      // size-bar 업데이트 (16-40 범위를 0-100%로 변환)
+      const barPercentage = ((this.value - 16) / (40 - 16)) * 100;
+      const sizeBar = this.nextElementSibling.nextElementSibling.querySelector('.size-bar-fill');
+      if (sizeBar) {
+        sizeBar.style.width = barPercentage + '%';
+      }
+      const subtitleBox = document.getElementById('preview-subtitle');
+      if (subtitleBox) {
+        subtitleBox.style.setProperty('font-size', value, 'important');
+      }
+    });
+  }
+
+  // 미디어 추가 버튼 이벤트
+  const mediaAddButtons = container.querySelectorAll('.media-add-btn');
+  mediaAddButtons.forEach(button => {
+    button.addEventListener('click', function() {
+      const mediaType = this.dataset.media;
+      handleMediaAdd(mediaType);
+    });
+  });
+}
+
+function handleMediaAdd(mediaType) {
+  // 모든 미디어 폼 패널을 숨김
+  const allPanels = document.querySelectorAll('.media-form-panel');
+  allPanels.forEach(panel => {
+    panel.style.display = 'none';
+  });
+
+  // 선택된 패널만 보이기
+  let targetPanel = null;
+  if (mediaType === 'image') {
+    targetPanel = document.querySelector('.image-panel');
+  } else if (mediaType === 'music') {
+    targetPanel = document.querySelector('.music-panel');
+  } else if (mediaType === 'video') {
+    targetPanel = document.querySelector('.video-panel');
+  }
+
+  if (targetPanel) {
+    // 패널이 이미 보이는 상태면 숨기고, 숨겨진 상태면 보이기
+    if (targetPanel.style.display === 'block') {
+      targetPanel.style.display = 'none';
+    } else {
+      targetPanel.style.display = 'block';
+      // 부드러운 스크롤과 강조 효과
+      setTimeout(() => {
+        targetPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        targetPanel.style.animation = 'pulse 1s';
+        setTimeout(() => {
+          targetPanel.style.animation = '';
+        }, 1000);
+      }, 100);
+    }
+  }
+
+  // 영상 버튼의 경우 영상 효과 패널도 강조
+  if (mediaType === 'video') {
+    const videoEffectsPanel = document.querySelector('.video-effects-section .effect-panel');
+    if (videoEffectsPanel) {
+      setTimeout(() => {
+        videoEffectsPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        videoEffectsPanel.style.animation = 'pulse 1s';
+        setTimeout(() => {
+          videoEffectsPanel.style.animation = '';
+        }, 1000);
+      }, 1500);
+    }
+  }
+}
+
+function autoAdjustArea(area) {
+  if (area === 'video') {
+    // 영상 영역 자동조정: 중앙에 80% 크기로 배치
+    const sizeSlider = document.getElementById('video-area-size');
+    const xSlider = document.getElementById('video-area-x');
+    const ySlider = document.getElementById('video-area-y');
+
+    if (sizeSlider) {
+      sizeSlider.value = 80;
+      sizeSlider.dispatchEvent(new Event('input'));
+    }
+    if (xSlider) {
+      xSlider.value = 50;
+      xSlider.dispatchEvent(new Event('input'));
+    }
+    if (ySlider) {
+      ySlider.value = 50;
+      ySlider.dispatchEvent(new Event('input'));
+    }
+  } else if (area === 'title') {
+    // 제목 영역 자동조정: 상단 중앙에 100% 크기로 배치
+    const sizeSlider = document.getElementById('title-area-size');
+    const xSlider = document.getElementById('title-area-x');
+    const ySlider = document.getElementById('title-area-y');
+
+    if (sizeSlider) {
+      sizeSlider.value = 100;
+      sizeSlider.dispatchEvent(new Event('input'));
+    }
+    if (xSlider) {
+      xSlider.value = 50;
+      xSlider.dispatchEvent(new Event('input'));
+    }
+    if (ySlider) {
+      ySlider.value = 20;
+      ySlider.dispatchEvent(new Event('input'));
+    }
+  } else if (area === 'subtitle') {
+    // 자막 영역 자동조정: 하단 중앙에 100% 크기로 배치
+    const sizeSlider = document.getElementById('subtitle-area-size');
+    const xSlider = document.getElementById('subtitle-area-x');
+    const ySlider = document.getElementById('subtitle-area-y');
+
+    if (sizeSlider) {
+      sizeSlider.value = 100;
+      sizeSlider.dispatchEvent(new Event('input'));
+    }
+    if (xSlider) {
+      xSlider.value = 50;
+      xSlider.dispatchEvent(new Event('input'));
+    }
+    if (ySlider) {
+      ySlider.value = 80;
+      ySlider.dispatchEvent(new Event('input'));
+    }
+  }
+}
+
+function saveCurrentSettings() {
+  const filenameInput = document.getElementById('settings-filename');
+  const filename = filenameInput?.value?.trim();
+
+  if (!filename) {
+    alert('설정 파일명을 입력해주세요.');
+    return;
+  }
+
+  // 특수문자 제거
+  const cleanFilename = filename.replace(/[^\w\s-가-힣]/g, '').trim();
+  if (!cleanFilename) {
+    alert('올바른 파일명을 입력해주세요.');
+    return;
+  }
+
+  const settings = {
+    name: cleanFilename,
+    timestamp: new Date().toISOString(),
+    data: {
+      titleSize: document.getElementById('title-size')?.value || 36,
+      titleVerticalPosition: document.getElementById('title-vertical')?.value || 50,
+      subtitleSize: document.getElementById('subtitle-size')?.value || 24,
+      subtitleVerticalPosition: document.getElementById('subtitle-vertical')?.value || 80,
+      staticEffect: document.getElementById('static-effect')?.value || 'none',
+      dynamicEffect: document.getElementById('dynamic-effect')?.value || 'none',
+      videoAreaSize: document.getElementById('video-area-size')?.value || 80,
+      videoAreaX: document.getElementById('video-area-x')?.value || 50,
+      videoAreaY: document.getElementById('video-area-y')?.value || 50,
+      titleAreaSize: document.getElementById('title-area-size')?.value || 100,
+      titleAreaX: document.getElementById('title-area-x')?.value || 50,
+      titleAreaY: document.getElementById('title-area-y')?.value || 20,
+      subtitleAreaSize: document.getElementById('subtitle-area-size')?.value || 100,
+      subtitleAreaX: document.getElementById('subtitle-area-x')?.value || 50,
+      subtitleAreaY: document.getElementById('subtitle-area-y')?.value || 80
+    }
+  };
+
+  // 기존 설정 목록 가져오기
+  const savedSettingsList = JSON.parse(localStorage.getItem('template-settings-list') || '{}');
+
+  // 새 설정 추가
+  savedSettingsList[cleanFilename] = settings;
+
+  // 저장
+  localStorage.setItem('template-settings-list', JSON.stringify(savedSettingsList));
+
+  // 파일명 입력창 비우기
+  if (filenameInput) {
+    filenameInput.value = '';
+  }
+
+  // 목록 새로고침
+  loadSettingsList();
+
+  alert(`설정이 "${cleanFilename}"로 저장되었습니다.`);
+}
+
+function loadSettingsList() {
+  const settingsSelect = document.getElementById('saved-settings-list');
+  if (!settingsSelect) return;
+
+  const savedSettingsList = JSON.parse(localStorage.getItem('template-settings-list') || '{}');
+
+  // 기존 옵션들 제거 (첫 번째 기본 옵션 제외)
+  settingsSelect.innerHTML = '<option value="">저장된 설정을 선택하세요</option>';
+
+  // 설정 목록을 시간순으로 정렬해서 추가
+  const sortedSettings = Object.entries(savedSettingsList)
+    .sort(([,a], [,b]) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  sortedSettings.forEach(([filename, settings]) => {
+    const option = document.createElement('option');
+    option.value = filename;
+    const date = new Date(settings.timestamp).toLocaleDateString('ko-KR');
+    const time = new Date(settings.timestamp).toLocaleTimeString('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    option.textContent = `${settings.name} (${date} ${time})`;
+    settingsSelect.appendChild(option);
+  });
+}
+
+function loadSelectedSettings() {
+  const settingsSelect = document.getElementById('saved-settings-list');
+  const selectedFilename = settingsSelect?.value;
+
+  if (!selectedFilename) {
+    alert('불러올 설정을 선택해주세요.');
+    return;
+  }
+
+  const savedSettingsList = JSON.parse(localStorage.getItem('template-settings-list') || '{}');
+  const selectedSettings = savedSettingsList[selectedFilename];
+
+  if (!selectedSettings) {
+    alert('선택된 설정을 찾을 수 없습니다.');
+    return;
+  }
+
+  // 모든 설정값 적용
+  Object.entries(selectedSettings.data).forEach(([key, value]) => {
+    const elementId = key.replace(/([A-Z])/g, '-$1').toLowerCase();
+    const element = document.getElementById(elementId);
+    if (element) {
+      element.value = value;
+      element.dispatchEvent(new Event('input'));
+    }
+  });
+
+  alert(`"${selectedSettings.name}" 설정이 불러와졌습니다.`);
+}
+
+function deleteSelectedSettings() {
+  const settingsSelect = document.getElementById('saved-settings-list');
+  const selectedFilename = settingsSelect?.value;
+
+  if (!selectedFilename) {
+    alert('삭제할 설정을 선택해주세요.');
+    return;
+  }
+
+  const savedSettingsList = JSON.parse(localStorage.getItem('template-settings-list') || '{}');
+  const selectedSettings = savedSettingsList[selectedFilename];
+
+  if (!selectedSettings) {
+    alert('선택된 설정을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (confirm(`"${selectedSettings.name}" 설정을 삭제하시겠습니까?`)) {
+    delete savedSettingsList[selectedFilename];
+    localStorage.setItem('template-settings-list', JSON.stringify(savedSettingsList));
+
+    // 목록 새로고침
+    loadSettingsList();
+
+    alert(`"${selectedSettings.name}" 설정이 삭제되었습니다.`);
+  }
 }
 
 function getTotalDuration(project) {
@@ -2253,59 +3270,111 @@ function highlightPrompt(tag, type) {
 }
 
 function highlightHistorySelection(projectId) {
-  const historyTable = document.getElementById("project-history-table");
-  if (!historyTable) return;
-  historyTable.querySelectorAll("tbody tr[data-project-id]").forEach((row) => {
-    if (row.dataset.projectId === projectId) {
-      row.classList.add("active");
+  const historyContainer = document.querySelector(".history-container");
+  if (!historyContainer) return;
+  historyContainer.querySelectorAll(".history-card[data-project-id]").forEach((card) => {
+    if (card.dataset.projectId === projectId) {
+      card.classList.add("active");
     } else {
-      row.classList.remove("active");
+      card.classList.remove("active");
     }
   });
 }
 
-function updateHistoryEmptyState(table) {
-  const tbody = table.querySelector("tbody");
-  if (!tbody) return;
-  const hasDataRow = Boolean(tbody.querySelector("tr[data-project-id]"));
-  if (hasDataRow) {
-    const emptyRow = tbody.querySelector("tr.empty");
-    if (emptyRow) emptyRow.remove();
-    return;
-  }
 
-  tbody.innerHTML = '<tr class="empty"><td colspan="5">기록이 없습니다.</td></tr>';
-}
+function bindHistoryCards(container) {
+  const cards = Array.from(container.querySelectorAll(".history-card[data-project-id]"));
 
-function bindHistoryTable(table) {
-  updateHistoryEmptyState(table);
+  cards.forEach((card) => {
+    // 카드 클릭으로 프로젝트 로드
+    const openBtn = card.querySelector(".open-project-btn");
+    if (openBtn) {
+      openBtn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const projectId = card.dataset.projectId;
+          const project = await api(`/api/projects/${projectId}`);
+          renderProject(project);
+          highlightHistorySelection(projectId);
 
-  const rows = Array.from(table.querySelectorAll("tbody tr[data-project-id]"));
-  rows.forEach((row) => {
-    row.addEventListener("click", () => {
-      loadProject(row.dataset.projectId);
-    });
-  });
+          const projectSection = document.getElementById("project-state");
+          if (projectSection) {
+            projectSection.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
 
-  const deleteButtons = Array.from(table.querySelectorAll("button[data-delete-history]"));
-  deleteButtons.forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const row = button.closest("tr[data-project-id]");
-      if (!row) return;
-      const projectId = row.dataset.projectId;
-      const version = row.dataset.version;
-      const confirmDelete = confirm("선택한 내보내기 기록을 삭제할까요?");
-      if (!confirmDelete) return;
-      try {
-        await api(`/api/history/${projectId}/${version}`, { method: "DELETE" });
-        row.remove();
-        updateHistoryEmptyState(table);
-      } catch (error) {
-        alert(error.message);
-      }
-    });
+          const url = new URL(window.location.href);
+          url.searchParams.set("project", projectId);
+          url.hash = `project-${projectId}`;
+          window.history.replaceState({}, "", url);
+        } catch (error) {
+          console.error("Failed to load project:", error);
+          alert("프로젝트를 불러오는데 실패했습니다: " + error.message);
+        }
+      });
+    }
+
+    // 다시 열기 버튼
+    const reloadBtn = card.querySelector(".reload-btn");
+    if (reloadBtn) {
+      reloadBtn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const projectId = card.dataset.projectId;
+          const project = await api(`/api/projects/${projectId}`);
+          renderProject(project);
+          highlightHistorySelection(projectId);
+
+          const projectSection = document.getElementById("project-state");
+          if (projectSection) {
+            projectSection.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+
+          const url = new URL(window.location.href);
+          url.searchParams.set("project", projectId);
+          url.hash = `project-${projectId}`;
+          window.history.replaceState({}, "", url);
+        } catch (error) {
+          console.error("Failed to load project:", error);
+          alert("프로젝트를 불러오는데 실패했습니다: " + error.message);
+        }
+      });
+    }
+
+    // 삭제 버튼
+    const deleteBtn = card.querySelector(".delete-btn[data-delete-history]");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const projectId = card.dataset.projectId;
+        const version = card.dataset.version;
+        const confirmDelete = confirm("선택한 프로젝트 기록을 삭제할까요?");
+        if (!confirmDelete) return;
+        try {
+          await api(`/api/history/${projectId}/${version}`, { method: "DELETE" });
+          card.remove();
+          // 카드가 모두 사라지면 empty state 표시
+          const remainingCards = container.querySelectorAll(".history-card[data-project-id]");
+          if (remainingCards.length === 0) {
+            const historyGrid = container.querySelector(".history-grid");
+            if (historyGrid) {
+              historyGrid.innerHTML = `
+                <div class="empty-state">
+                  <div class="empty-icon">📝</div>
+                  <h3>아직 작업 내역이 없습니다</h3>
+                  <p>새 프로젝트를 생성하면 여기에 표시됩니다.</p>
+                  <a href="${window.location.origin}/tools" class="contrast">첫 프로젝트 만들기 →</a>
+                </div>
+              `;
+            }
+          }
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+    }
   });
 }
 
@@ -2367,35 +3436,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  document.querySelectorAll("[data-regenerate-all]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const tool = button.getAttribute("data-regenerate-all");
-      if (!tool) return;
-      regenerateAll(tool);
-    });
-  });
-
-  const scriptResults = document.getElementById("shorts-script-results");
-  if (scriptResults) {
-    scriptResults.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-regenerate-single='shorts_script']");
-      if (!button) return;
-      const index = Number(button.dataset.index || 0);
-      if (Number.isNaN(index)) return;
-      regenerateSingle(TOOL_KEYS.SCRIPT, index);
-    });
-  }
-
-  const sceneResults = document.getElementById("shorts-scenes-results");
-  if (sceneResults) {
-    sceneResults.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-regenerate-single='shorts_scenes']");
-      if (!button) return;
-      const index = Number(button.dataset.index || 0);
-      if (Number.isNaN(index)) return;
-      regenerateSingle(TOOL_KEYS.SCENES, index);
-    });
-  }
 
   Object.keys(TOOL_CONFIG).forEach((tool) => {
     const section = document.getElementById(TOOL_CONFIG[tool].savedContainer);
@@ -2403,6 +3443,27 @@ document.addEventListener("DOMContentLoaded", () => {
       section.addEventListener("click", handleSavedSectionClick);
     }
     loadSavedRecords(tool);
+  });
+
+  // 타임라인 테이블 편집 기능 이벤트 핸들러
+  document.addEventListener('click', function(event) {
+    // 수정 버튼 클릭
+    if (event.target.classList.contains('edit-row')) {
+      const rowIndex = parseInt(event.target.dataset.row);
+      enableRowEdit(rowIndex);
+    }
+
+    // 삭제 버튼 클릭
+    if (event.target.classList.contains('delete-row')) {
+      const rowIndex = parseInt(event.target.dataset.row);
+      deleteTimelineRow(rowIndex);
+    }
+
+    // 저장 버튼 클릭
+    if (event.target.classList.contains('save-row')) {
+      const rowIndex = parseInt(event.target.dataset.row);
+      saveTimelineRow(rowIndex);
+    }
   });
 
   const persistedSelection = loadPersistedSelection();
@@ -2512,9 +3573,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  const historyTable = document.getElementById("project-history-table");
-  if (historyTable) {
-    bindHistoryTable(historyTable);
+  const historyContainer = document.querySelector(".history-container");
+  if (historyContainer) {
+    bindHistoryCards(historyContainer);
   }
 
   const url = new URL(window.location.href);
@@ -2523,3 +3584,166 @@ document.addEventListener("DOMContentLoaded", () => {
     loadProject(initialProjectId, { scrollIntoView: false });
   }
 });
+
+// 새로운 테이블 렌더링 함수들
+function renderTimelineTableRows(project) {
+  const subtitles = project.subtitles || [];
+  const backgroundMusic = project.background_music || [];
+  const imagePrompts = project.image_prompts || [];
+  const videoPrompts = project.video_prompts || [];
+
+  return subtitles.map((subtitle, index) => {
+    const timeLabel = `#${index + 1}<br/>${formatTime(subtitle.start)}s→${formatTime(subtitle.end)}s`;
+    const music = backgroundMusic.length > 0 ? '🎵' : '❌';
+    const image = imagePrompts[index] ? '🖼️' : '❌';
+    const video = videoPrompts[index] ? '🎬' : '❌';
+
+    return `
+      <tr ${index > 0 ? 'class="section-divide-tl"' : ''} data-row-index="${index}">
+        <td rowspan="2" class="time-column-tl">${timeLabel}</td>
+        <td class="content-column-tl subtitle-content-tl" data-field="subtitle">
+          <div class="subtitle-with-tts">
+            <span class="subtitle-text">${escapeHtml(subtitle.text)}</span>
+            <button type="button" class="tts-btn secondary small" data-subtitle-index="${index}" title="음성 변환">🎤</button>
+          </div>
+        </td>
+        <td rowspan="2" class="bgmusic-column-tl" data-field="music">${music}</td>
+        <td rowspan="2" class="image-column-tl" data-field="image">${image}</td>
+        <td rowspan="2" class="video-column-tl" data-field="video">${video}</td>
+        <td rowspan="2" class="actions-column-tl">
+          <div class="row-actions">
+            <button type="button" class="edit-row outline small" data-row="${index}" title="수정">✏️</button>
+            <button type="button" class="delete-row outline small" data-row="${index}" title="삭제">🗑️</button>
+            <button type="button" class="save-row contrast small" data-row="${index}" title="저장" style="display: none;">💾</button>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="content-column-tl voice-content-tl" data-field="voice">
+          <div class="audio-clip-controls">
+            <button type="button" class="play-audio-btn secondary small" data-audio-index="${index}" title="음성 재생" disabled>
+              ▶️
+            </button>
+            <small>음성 클립</small>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// 타임라인 테이블 편집 기능들
+function enableRowEdit(rowIndex) {
+  const rows = document.querySelectorAll(`tr[data-row-index="${rowIndex}"]`);
+  if (rows.length === 0) return;
+
+  rows.forEach(row => {
+    const editableCells = row.querySelectorAll('td[data-field]');
+    editableCells.forEach(cell => {
+      const field = cell.dataset.field;
+      const currentText = cell.textContent.trim();
+
+      if (field === 'subtitle') {
+        // 자막 셀의 경우 TTS 버튼을 고려해서 텍스트만 추출
+        const subtitleText = cell.querySelector('.subtitle-text');
+        const actualText = subtitleText ? subtitleText.textContent.trim() : currentText;
+        cell.innerHTML = `<input type="text" class="inline-edit" value="${escapeHtml(actualText)}" />`;
+      } else if (field === 'voice') {
+        cell.innerHTML = `<input type="text" class="inline-edit" value="${escapeHtml(currentText)}" />`;
+      } else if (field === 'music' || field === 'image' || field === 'video') {
+        cell.innerHTML = `<textarea class="inline-edit" rows="2">${escapeHtml(currentText)}</textarea>`;
+      }
+    });
+
+    // 버튼 상태 변경
+    const editBtn = row.querySelector('.edit-row');
+    const saveBtn = row.querySelector('.save-row');
+    if (editBtn) editBtn.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'inline-block';
+  });
+}
+
+function saveTimelineRow(rowIndex) {
+  const rows = document.querySelectorAll(`tr[data-row-index="${rowIndex}"]`);
+  if (rows.length === 0) return;
+
+  const updatedData = {};
+
+  rows.forEach(row => {
+    const editableCells = row.querySelectorAll('td[data-field]');
+    editableCells.forEach(cell => {
+      const field = cell.dataset.field;
+      const input = cell.querySelector('.inline-edit');
+      if (input) {
+        updatedData[field] = input.value.trim();
+
+        if (field === 'subtitle') {
+          // 자막 필드는 TTS 버튼과 함께 복원
+          cell.innerHTML = `
+            <div class="subtitle-with-tts">
+              <span class="subtitle-text">${escapeHtml(input.value.trim())}</span>
+              <button type="button" class="tts-btn secondary small" data-subtitle-index="${rowIndex}" title="음성 변환">🎤</button>
+            </div>
+          `;
+        } else {
+          cell.textContent = input.value.trim();
+        }
+      }
+    });
+
+    // 버튼 상태 복원
+    const editBtn = row.querySelector('.edit-row');
+    const saveBtn = row.querySelector('.save-row');
+    if (editBtn) editBtn.style.display = 'inline-block';
+    if (saveBtn) saveBtn.style.display = 'none';
+  });
+
+  // TTS 버튼 이벤트 다시 바인딩
+  if (state.project && updatedData.subtitle) {
+    bindTTSHandlers(state.project);
+  }
+
+  // 실제 데이터 업데이트 (여기서는 메모리에만)
+  console.log(`Row ${rowIndex} updated:`, updatedData);
+
+  // 성공 메시지
+  showNotification('타임라인이 수정되었습니다.', 'success');
+}
+
+function deleteTimelineRow(rowIndex) {
+  if (!confirm('이 타임라인 항목을 삭제하시겠습니까?')) return;
+
+  const rows = document.querySelectorAll(`tr[data-row-index="${rowIndex}"]`);
+  rows.forEach(row => row.remove());
+
+  // 실제 데이터에서도 제거 (여기서는 메모리에만)
+  console.log(`Row ${rowIndex} deleted`);
+
+  showNotification('타임라인 항목이 삭제되었습니다.', 'info');
+}
+
+function showNotification(message, type = 'info') {
+  const notification = document.createElement('div');
+  notification.className = `notification ${type}`;
+  notification.textContent = message;
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 12px 20px;
+    background: ${type === 'success' ? '#28a745' : type === 'error' ? '#dc3545' : '#17a2b8'};
+    color: white;
+    border-radius: 4px;
+    z-index: 1000;
+    animation: slideIn 0.3s ease;
+  `;
+
+  document.body.appendChild(notification);
+
+  setTimeout(() => {
+    notification.remove();
+  }, 3000);
+}
+
+
+

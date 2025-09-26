@@ -38,25 +38,65 @@
   </div>
 </section>
 
-<section>
-  <details open>
-    <summary>최근 작업 내역</summary>
-    <table id="project-history-table">
-      <thead>
-        <tr><th>프로젝트</th><th>버전</th><th>설명</th><th>시간</th><th>삭제</th></tr>
-      </thead>
-      <tbody>
+<section class="history-section">
+  <div class="history-header">
+    <h2>📚 최근 작업 내역</h2>
+    <p>이전에 작업한 프로젝트들을 확인하고 다시 불러올 수 있습니다.</p>
+  </div>
+
+  <div class="history-container">
+    {% if history %}
+      <div class="history-grid">
         {% for item in history %}
-        <tr data-project-id="{{ item.project_id }}" data-version="{{ item.version }}" title="클릭하여 프로젝트를 다시 열기">
-          <td>{{ item.project_id }}</td>
-          <td>{{ item.version }}</td>
-          <td>{{ item.summary }}</td>
-          <td>{{ item.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-          <td><button type="button" class="outline" data-delete-history>삭제</button></td>
-        </tr>
+        <article class="history-card" data-project-id="{{ item.project_id }}" data-version="{{ item.version }}">
+          <header class="history-card-header">
+            <div class="project-info">
+              <h3 class="project-title">{{ item.project_id }}</h3>
+              <span class="project-version">v{{ item.version }}</span>
+            </div>
+            <div class="card-actions">
+              <button type="button" class="action-btn reload-btn" title="프로젝트 다시 열기">
+                🔄
+              </button>
+              <button type="button" class="action-btn delete-btn" data-delete-history title="삭제">
+                🗑️
+              </button>
+            </div>
+          </header>
+
+          <div class="history-card-body">
+            <p class="project-description">{{ item.summary or '설명 없음' }}</p>
+            <div class="project-meta">
+              <div class="meta-item">
+                <span class="meta-icon">⏰</span>
+                <span class="meta-text">{{ item.timestamp.strftime('%m월 %d일 %H:%M') }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-icon">📅</span>
+                <span class="meta-text">{{ item.timestamp.strftime('%Y년') }}</span>
+              </div>
+            </div>
+          </div>
+
+          <footer class="history-card-footer">
+            <div class="project-tags">
+              <span class="project-tag">프로젝트</span>
+            </div>
+            <button type="button" class="open-project-btn contrast" title="프로젝트 열기">
+              열기 →
+            </button>
+          </footer>
+        </article>
         {% endfor %}
-      </tbody>
-    </table>
-  </details>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">📝</div>
+        <h3>아직 작업 내역이 없습니다</h3>
+        <p>새 프로젝트를 생성하면 여기에 표시됩니다.</p>
+        <a href="{{ url_for('tools_ui') }}" class="contrast">첫 프로젝트 만들기 →</a>
+      </div>
+    {% endif %}
+  </div>
 </section>
 {% endblock %}
