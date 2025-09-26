@@ -1161,8 +1161,8 @@ async function playAllAudioClips() {
   }
 }
 
-function updateTemplatePreview(templateCard) {
-  if (!templateCard) return;
+function updateTemplatePreview(templateOption) {
+  if (!templateOption) return;
 
   const preview = document.getElementById("template-preview");
   const titleBox = document.getElementById("preview-title");
@@ -1171,11 +1171,11 @@ function updateTemplatePreview(templateCard) {
   if (!preview || !titleBox || !subtitleBox) return;
 
   // 템플릿 데이터 가져오기
-  const titleX = parseFloat(templateCard.dataset.titleX);
-  const titleY = parseFloat(templateCard.dataset.titleY);
-  const subtitleX = parseFloat(templateCard.dataset.subtitleX);
-  const subtitleY = parseFloat(templateCard.dataset.subtitleY);
-  const templateId = templateCard.dataset.template;
+  const titleX = parseFloat(templateOption.dataset.titleX);
+  const titleY = parseFloat(templateOption.dataset.titleY);
+  const subtitleX = parseFloat(templateOption.dataset.subtitleX);
+  const subtitleY = parseFloat(templateOption.dataset.subtitleY);
+  const templateId = templateOption.value;
 
   // 위치 업데이트 (상대적 위치를 %로 변환) - !important 사용하여 CSS 오버라이드
   titleBox.style.setProperty('left', `${titleX * 100}%`, 'important');
@@ -1437,7 +1437,8 @@ function buildProjectMarkup(project, totalDuration) {
         </div>
       </header>
 
-      <section>
+      <!-- 동시 편집 타임라인 섹션 -->
+      <section class="timeline-section">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
           <h3 style="margin: 0;">동시 편집 타임라인</h3>
           <button id="play-all-audio" type="button" class="secondary" onclick="playAllAudioClips()" title="모든 음성 클립을 순서대로 재생">
@@ -1461,58 +1462,80 @@ function buildProjectMarkup(project, totalDuration) {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <!-- 미디어 추가 섹션 -->
+      <section class="media-add-section">
+        <h3>미디어 추가</h3>
+        <div class="media-add-buttons">
+          <button type="button" class="media-add-btn image-add" data-media="image">
+            🖼️ 이미지 추가
+          </button>
+          <button type="button" class="media-add-btn music-add" data-media="music">
+            🎵 배경 음악 추가
+          </button>
+          <button type="button" class="media-add-btn video-add" data-media="video">
+            📹 영상 추가
+          </button>
+        </div>
+      </section>
 
         <!-- 화면 템플릿 섹션 -->
         <section class="template-section">
           <div class="template-grid-container">
-            <h3>화면 템플릿</h3>
-            <div class="template-cards-grid">
-              ${state.templates
-                .map(
-                  (template, index) => `<div class="template-card ${index === 0 ? 'active' : ''}"
-                    data-template="${template.id}"
-                    data-title-x="${template.title[0]}"
-                    data-title-y="${template.title[1]}"
-                    data-subtitle-x="${template.subtitle[0]}"
-                    data-subtitle-y="${template.subtitle[1]}">
-                      <div class="template-icon">${['🎬', '📢', '🎭', '💬', '📱'][index] || '🎯'}</div>
-                      <div class="template-name">${template.name}</div>
-                    </div>`
-                )
-                .join("")}
+            <div class="control-group">
+              <label class="control-label">화면 템플릿</label>
+              <select id="template-selection" class="control-select">
+                ${state.templates
+                  .map(
+                    (template, index) => `<option value="${template.id}" ${index === 0 ? 'selected' : ''}
+                      data-title-x="${template.title[0]}"
+                      data-title-y="${template.title[1]}"
+                      data-subtitle-x="${template.subtitle[0]}"
+                      data-subtitle-y="${template.subtitle[1]}">${template.name}</option>`
+                  )
+                  .join("")}
+              </select>
             </div>
           </div>
 
-          <div class="template-preview-container">
-            <h3>실시간 템플릿 프리뷰</h3>
-            <div class="preview-screen-wrapper">
-              <div class="template-preview" id="template-preview">
-                <div class="video-area" id="video-placeholder">
-                  <div class="video-indicator">📹 영상 영역</div>
+          <!-- 설정 관리 섹션 -->
+          <div class="settings-management-section">
+            <div class="settings-controls">
+              <h3>⚙️ 설정 관리</h3>
+              <div class="settings-buttons-row">
+                <div class="save-settings-group">
+                  <input type="text" id="settings-filename" class="settings-filename-input" placeholder="설정 파일명 (예: 내_설정_1)" />
+                  <button type="button" class="settings-btn save-settings">💾 저장</button>
                 </div>
-                <div class="title-box" id="preview-title">${project.keyword}</div>
-                <div class="subtitle-box" id="preview-subtitle">${project.subtitles[0]?.text || "자막 미리보기"}</div>
+                <div class="load-settings-group">
+                  <select id="saved-settings-list" class="settings-list-select">
+                    <option value="">저장된 설정을 선택하세요</option>
+                  </select>
+                  <button type="button" class="settings-btn load-settings">📂 불러오기</button>
+                  <button type="button" class="settings-btn delete-settings">🗑️ 삭제</button>
+                </div>
               </div>
-              <div class="preview-controls">
+            </div>
+          </div>
 
-                <!-- 설정 저장/불러오기 -->
-                <div class="settings-controls">
-                  <div class="save-settings-group">
-                    <input type="text" id="settings-filename" class="settings-filename-input" placeholder="설정 파일명 (예: 내_설정_1)" />
-                    <button type="button" class="settings-btn save-settings">💾 저장</button>
-                  </div>
-                  <div class="load-settings-group">
-                    <select id="saved-settings-list" class="settings-list-select">
-                      <option value="">저장된 설정을 선택하세요</option>
-                    </select>
-                    <button type="button" class="settings-btn load-settings">📂 불러오기</button>
-                    <button type="button" class="settings-btn delete-settings">🗑️ 삭제</button>
-                  </div>
-                </div>
+          <!-- 실시간 템플릿 프리뷰 섹션 -->
+          <div class="template-preview-section">
+            <h3>실시간 템플릿 프리뷰</h3>
+            <div class="template-preview" id="template-preview">
+              <div class="video-area" id="video-placeholder">
+                <div class="video-indicator">📹 영상 영역</div>
+              </div>
+              <div class="title-box" id="preview-title">${project.keyword}</div>
+              <div class="subtitle-box" id="preview-subtitle">${project.subtitles[0]?.text || "자막 미리보기"}</div>
+            </div>
+          </div>
+
+          <div class="area-controls-wrapper">
 
                 <!-- 영역 크기 및 위치 조절 컨트롤 -->
                 <div class="area-controls-container">
-                  <div class="video-area-section">
+                  <div class="area-controls-grid">
                     <!-- 영상 영역 컨트롤 -->
                     <div class="area-control-group">
                       <h4 class="area-title">📹 영상 영역</h4>
@@ -1539,47 +1562,6 @@ function buildProjectMarkup(project, totalDuration) {
                       </div>
                     </div>
 
-                    <!-- 영상 효과 컨트롤 -->
-                    <div class="video-effects-control">
-                      <h4 class="area-title">🎬 영상 효과</h4>
-                      <p>비디오에 특수 효과를 적용하세요</p>
-                      <form id="effect-form" class="effect-form">
-                        <div class="form-row">
-                          <label>효과 선택
-                            <select name="effect_id">
-                              ${state.effects.map((effect) => `<option value="${effect.id}">${effect.name}</option>`).join("")}
-                            </select>
-                          </label>
-                        </div>
-                        <div class="time-inputs">
-                          <label>시작 시간 (초)
-                            <input type="number" step="0.1" name="start_time" value="0" min="0" />
-                          </label>
-                          <label>종료 시간 (초)
-                            <input type="number" step="0.1" name="end_time" value="5" min="0" />
-                          </label>
-                        </div>
-                        <button type="submit" class="contrast">효과 적용</button>
-                      </form>
-                      <div class="applied-effects">
-                        <h4>적용된 효과</h4>
-                        <div class="effect-list">
-                          ${project.applied_effects
-                            .map(
-                              (effect) => `
-                              <div class="effect-item">
-                                <span class="effect-name">${effect.name}</span>
-                                <span class="effect-time">${effect.start_time.toFixed(1)}-${effect.end_time.toFixed(1)}초</span>
-                                <button type="button" data-remove-effect="${effect.effect_id}" class="outline small">삭제</button>
-                              </div>`
-                            )
-                            .join("")}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="area-controls-grid">
                     <!-- 제목 영역 컨트롤 -->
                     <div class="area-control-group">
                       <h4 class="area-title">📝 제목 영역</h4>
@@ -1627,8 +1609,16 @@ function buildProjectMarkup(project, totalDuration) {
                         </div>
                       </div>
                       <div class="control-group">
-                        <label class="control-label">영역 크기</label>
-                        <input type="range" id="subtitle-area-size" min="60" max="120" value="100" class="control-slider" />
+                        <label class="control-label">상하 크기</label>
+                        <input type="range" id="subtitle-height-size" min="60" max="120" value="100" class="control-slider" />
+                        <div class="size-display">100%</div>
+                        <div class="size-bar">
+                          <div class="size-bar-fill" style="width: 66.7%"></div>
+                        </div>
+                      </div>
+                      <div class="control-group">
+                        <label class="control-label">좌우 크기</label>
+                        <input type="range" id="subtitle-width-size" min="60" max="120" value="100" class="control-slider" />
                         <div class="size-display">100%</div>
                         <div class="size-bar">
                           <div class="size-bar-fill" style="width: 66.7%"></div>
@@ -1642,47 +1632,91 @@ function buildProjectMarkup(project, totalDuration) {
                         </div>
                         <div class="position-row">
                           <label class="control-label">상하</label>
-                          <input type="range" id="subtitle-area-y" min="0" max="100" value="80" class="control-slider" />
-                          <div class="size-display">80%</div>
+                          <input type="range" id="subtitle-area-y" min="0" max="100" value="95" class="control-slider" />
+                          <div class="size-display">95%</div>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  <!-- 텍스트 효과 컨트롤 -->
-                  <div class="text-effects-section">
-                    <h3>🎨 텍스트 효과</h3>
-                    <div class="effects-grid">
-                      <div class="control-group">
-                        <label class="control-label">정적 효과 (스타일)</label>
-                        <select id="static-effect" class="control-select">
-                          <option value="none">없음</option>
-                          <option value="outline">외곽선</option>
-                          <option value="shadow">그림자</option>
-                          <option value="glow">글로우</option>
-                          <option value="gradient">그라데이션</option>
-                          <option value="neon">네온</option>
-                        </select>
+                  <!-- 효과 컨트롤 섹션 -->
+                  <div class="effects-section">
+                    <div class="effects-grid-container">
+                      <!-- 영상 효과 컨트롤 -->
+                      <div class="video-effects-control">
+                        <h4 class="area-title">🎬 영상 효과</h4>
+                        <p>비디오에 특수 효과를 적용하세요</p>
+                        <form id="effect-form" class="effect-form">
+                          <div class="form-row">
+                            <label>효과 선택
+                              <select name="effect_id">
+                                ${state.effects.map((effect) => `<option value="${effect.id}">${effect.name}</option>`).join("")}
+                              </select>
+                            </label>
+                          </div>
+                          <div class="time-inputs">
+                            <label>시작 시간 (초)
+                              <input type="number" step="0.1" name="start_time" value="0" min="0" />
+                            </label>
+                            <label>종료 시간 (초)
+                              <input type="number" step="0.1" name="end_time" value="5" min="0" />
+                            </label>
+                          </div>
+                          <button type="submit" class="contrast">효과 적용</button>
+                        </form>
+                        <div class="applied-effects">
+                          <h4>적용된 효과</h4>
+                          <div class="effect-list">
+                            ${project.applied_effects
+                              .map(
+                                (effect) => `
+                                <div class="effect-item">
+                                  <span class="effect-name">${effect.name}</span>
+                                  <span class="effect-time">${effect.start_time.toFixed(1)}-${effect.end_time.toFixed(1)}초</span>
+                                  <button type="button" data-remove-effect="${effect.effect_id}" class="outline small">삭제</button>
+                                </div>`
+                              )
+                              .join("")}
+                          </div>
+                        </div>
                       </div>
-                      <div class="control-group">
-                        <label class="control-label">동적 효과 (모션)</label>
-                        <select id="dynamic-effect" class="control-select">
-                          <option value="none">없음</option>
-                          <option value="typewriter">타이핑</option>
-                          <option value="wave">웨이브</option>
-                          <option value="pulse">펄스</option>
-                          <option value="shake">떨림</option>
-                          <option value="fade">페이드</option>
-                          <option value="bounce">바운스</option>
-                          <option value="flip">회전</option>
-                          <option value="slide">슬라이드</option>
-                          <option value="zoom">줌</option>
-                          <option value="rotate">회전</option>
-                          <option value="glitch">글리치</option>
-                          <option value="matrix">매트릭스</option>
-                          <option value="fire">불꽃</option>
-                          <option value="rainbow">무지개</option>
-                        </select>
+
+                      <!-- 텍스트 효과 컨트롤 -->
+                      <div class="text-effects-control">
+                        <h4 class="area-title">🎨 텍스트 효과</h4>
+                        <div class="effects-controls">
+                          <div class="control-group">
+                            <label class="control-label">정적 효과 (스타일)</label>
+                            <select id="static-effect" class="control-select">
+                              <option value="none">없음</option>
+                              <option value="outline">외곽선</option>
+                              <option value="shadow">그림자</option>
+                              <option value="glow">글로우</option>
+                              <option value="gradient">그라데이션</option>
+                              <option value="neon">네온</option>
+                            </select>
+                          </div>
+                          <div class="control-group">
+                            <label class="control-label">동적 효과 (모션)</label>
+                            <select id="dynamic-effect" class="control-select">
+                              <option value="none">없음</option>
+                              <option value="typewriter">타이핑</option>
+                              <option value="wave">웨이브</option>
+                              <option value="pulse">펄스</option>
+                              <option value="shake">떨림</option>
+                              <option value="fade">페이드</option>
+                              <option value="bounce">바운스</option>
+                              <option value="flip">회전</option>
+                              <option value="slide">슬라이드</option>
+                              <option value="zoom">줌</option>
+                              <option value="rotate">회전</option>
+                              <option value="glitch">글리치</option>
+                              <option value="matrix">매트릭스</option>
+                              <option value="fire">불꽃</option>
+                              <option value="rainbow">무지개</option>
+                            </select>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1691,19 +1725,6 @@ function buildProjectMarkup(project, totalDuration) {
             </div>
           </div>
         </section>
-
-        <!-- 미디어 추가 버튼들 -->
-        <div class="media-add-buttons">
-          <button type="button" class="media-add-btn image-add" data-media="image">
-            🖼️ 이미지 추가
-          </button>
-          <button type="button" class="media-add-btn music-add" data-media="music">
-            🎵 배경 음악 추가
-          </button>
-          <button type="button" class="media-add-btn video-add" data-media="video">
-            🎬 영상 추가
-          </button>
-        </div>
 
         <!-- 미디어 추가 폼들 -->
         <div class="media-forms-container">
@@ -2324,22 +2345,19 @@ function bindProjectHandlers() {
     });
   });
 
-  const templateSelector = container.querySelector(".template-cards-grid");
+  const templateSelector = container.querySelector("#template-selection");
   if (templateSelector) {
-    templateSelector.querySelectorAll(".template-card[data-template]").forEach((card) => {
-      card.addEventListener("click", async () => {
-        // 활성 상태 변경
-        templateSelector.querySelectorAll(".template-card").forEach(c => c.classList.remove("active"));
-        card.classList.add("active");
+    templateSelector.addEventListener("change", async () => {
+      const selectedOption = templateSelector.selectedOptions[0];
 
-        // 실시간 미리보기 업데이트
-        updateTemplatePreview(card);
+      // 실시간 미리보기 업데이트
+      updateTemplatePreview(selectedOption);
 
-        const templateId = card.dataset.template;
-        const payload = {
-          template_id: templateId,
-          title_position: [parseFloat(card.dataset.titleX), parseFloat(card.dataset.titleY)],
-          subtitle_position: [parseFloat(card.dataset.subtitleX), parseFloat(card.dataset.subtitleY)],
+      const templateId = selectedOption.value;
+      const payload = {
+        template_id: templateId,
+        title_position: [parseFloat(selectedOption.dataset.titleX), parseFloat(selectedOption.dataset.titleY)],
+        subtitle_position: [parseFloat(selectedOption.dataset.subtitleX), parseFloat(selectedOption.dataset.subtitleY)],
           title_style: { effect: document.getElementById("text-effect").value },
           subtitle_style: { effect: document.getElementById("text-effect").value }
         };
@@ -2550,9 +2568,10 @@ function bindTemplateControls(container) {
     });
   }
 
-  const subtitleAreaSizeSlider = container.querySelector('#subtitle-area-size');
-  if (subtitleAreaSizeSlider) {
-    subtitleAreaSizeSlider.addEventListener('input', function() {
+  // 자막 상하 크기 슬라이더
+  const subtitleHeightSizeSlider = container.querySelector('#subtitle-height-size');
+  if (subtitleHeightSizeSlider) {
+    subtitleHeightSizeSlider.addEventListener('input', function() {
       const value = this.value + '%';
       this.nextElementSibling.textContent = value;
       // size-bar 업데이트 (60-120 범위를 0-100%로 변환)
@@ -2561,13 +2580,38 @@ function bindTemplateControls(container) {
       if (sizeBar) {
         sizeBar.style.width = barPercentage + '%';
       }
-      const subtitleBox = document.getElementById('preview-subtitle');
-      if (subtitleBox) {
-        const scale = this.value / 100;
-        subtitleBox.style.setProperty('transform', `scale(${scale})`, 'important');
-        subtitleBox.style.setProperty('transform-origin', 'center', 'important');
-      }
+      updateSubtitleSize();
     });
+  }
+
+  // 자막 좌우 크기 슬라이더
+  const subtitleWidthSizeSlider = container.querySelector('#subtitle-width-size');
+  if (subtitleWidthSizeSlider) {
+    subtitleWidthSizeSlider.addEventListener('input', function() {
+      const value = this.value + '%';
+      this.nextElementSibling.textContent = value;
+      // size-bar 업데이트 (60-120 범위를 0-100%로 변환)
+      const barPercentage = ((this.value - 60) / (120 - 60)) * 100;
+      const sizeBar = this.nextElementSibling.nextElementSibling.querySelector('.size-bar-fill');
+      if (sizeBar) {
+        sizeBar.style.width = barPercentage + '%';
+      }
+      updateSubtitleSize();
+    });
+  }
+
+  function updateSubtitleSize() {
+    const subtitleBox = document.getElementById('preview-subtitle');
+    if (subtitleBox) {
+      const heightValue = subtitleHeightSizeSlider?.value || 100;
+      const widthValue = subtitleWidthSizeSlider?.value || 100;
+
+      const scaleX = widthValue / 100;
+      const scaleY = heightValue / 100;
+
+      subtitleBox.style.setProperty('transform', `scaleX(${scaleX}) scaleY(${scaleY})`, 'important');
+      subtitleBox.style.setProperty('transform-origin', 'center', 'important');
+    }
   }
 
   // 영상 영역 위치 조절
@@ -2819,20 +2863,25 @@ function autoAdjustArea(area) {
     }
   } else if (area === 'subtitle') {
     // 자막 영역 자동조정: 하단 중앙에 100% 크기로 배치
-    const sizeSlider = document.getElementById('subtitle-area-size');
+    const heightSlider = document.getElementById('subtitle-height-size');
+    const widthSlider = document.getElementById('subtitle-width-size');
     const xSlider = document.getElementById('subtitle-area-x');
     const ySlider = document.getElementById('subtitle-area-y');
 
-    if (sizeSlider) {
-      sizeSlider.value = 100;
-      sizeSlider.dispatchEvent(new Event('input'));
+    if (heightSlider) {
+      heightSlider.value = 100;
+      heightSlider.dispatchEvent(new Event('input'));
+    }
+    if (widthSlider) {
+      widthSlider.value = 100;
+      widthSlider.dispatchEvent(new Event('input'));
     }
     if (xSlider) {
       xSlider.value = 50;
       xSlider.dispatchEvent(new Event('input'));
     }
     if (ySlider) {
-      ySlider.value = 80;
+      ySlider.value = 95;
       ySlider.dispatchEvent(new Event('input'));
     }
   }
@@ -2870,9 +2919,10 @@ function saveCurrentSettings() {
       titleAreaSize: document.getElementById('title-area-size')?.value || 100,
       titleAreaX: document.getElementById('title-area-x')?.value || 50,
       titleAreaY: document.getElementById('title-area-y')?.value || 20,
-      subtitleAreaSize: document.getElementById('subtitle-area-size')?.value || 100,
+      subtitleHeightSize: document.getElementById('subtitle-height-size')?.value || 100,
+      subtitleWidthSize: document.getElementById('subtitle-width-size')?.value || 100,
       subtitleAreaX: document.getElementById('subtitle-area-x')?.value || 50,
-      subtitleAreaY: document.getElementById('subtitle-area-y')?.value || 80
+      subtitleAreaY: document.getElementById('subtitle-area-y')?.value || 95
     }
   };
 
