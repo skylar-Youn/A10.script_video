@@ -727,6 +727,7 @@ const TOOL_CONFIG = {
 
 function renderSavedRecords(tool, records = state.savedRecords[tool] || []) {
   const config = TOOL_CONFIG[tool];
+  console.log(`renderSavedRecords called for tool: ${tool}, records count: ${records.length}`);
   if (!config) {
     console.warn(`No config found for tool: ${tool}`);
     return;
@@ -778,6 +779,7 @@ async function loadSavedRecords(tool) {
     const records = await api(`/api/tools/${tool}/records`);
     console.log(`Loaded ${records?.length || 0} records for ${tool}:`, records);
     state.savedRecords[tool] = Array.isArray(records) ? records : [];
+    console.log(`State updated. state.savedRecords[${tool}] now has ${state.savedRecords[tool].length} records`);
     const previous = state.checkedRecords[tool] || new Set();
     const next = new Set();
     state.savedRecords[tool].forEach((record) => {
@@ -3938,12 +3940,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Tool selection dropdown change event listener
-  const toolSelect = document.getElementById("tool-selection");
-  if (toolSelect) {
-    toolSelect.addEventListener("change", updateRecordSelectOptions);
-  }
-
   Object.keys(TOOL_CONFIG).forEach((tool) => {
     const section = document.getElementById(TOOL_CONFIG[tool].savedContainer);
     if (section) {
@@ -3975,8 +3971,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const persistedSelection = loadPersistedSelection();
   const toolSelect = document.getElementById("tool-selection");
-  if (toolSelect && persistedSelection?.tool) {
-    toolSelect.value = persistedSelection.tool;
+  if (toolSelect) {
+    // Add change event listener for dropdown functionality
+    toolSelect.addEventListener("change", updateRecordSelectOptions);
+
+    if (persistedSelection?.tool) {
+      toolSelect.value = persistedSelection.tool;
+    }
   }
   if (persistedSelection?.tool) {
     state.activeRecords[persistedSelection.tool] = persistedSelection.recordId || null;
