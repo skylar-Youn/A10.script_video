@@ -26,6 +26,14 @@
 
       <div class="tool-content">
         <form id="story-keyword-form" class="tool-form">
+          <div class="mode-selection">
+            <label>실행 모드
+              <select name="mode" id="keyword-mode">
+                <option value="api" selected>API 모드 (서버에서 직접 처리)</option>
+                <option value="chatgpt">ChatGPT 창 모드 (새 창에서 ChatGPT 실행)</option>
+              </select>
+            </label>
+          </div>
           <div class="input-group">
             <label>스토리 키워드
               <input type="text" name="keyword" required placeholder="예: 달빛 여행" />
@@ -36,7 +44,7 @@
               <select name="language">
                 <option value="ko" selected>한국어</option>
                 <option value="en">English</option>
-                <option value="ja">日本語</option>
+                <option value="ja">日본語</option>
               </select>
             </label>
             <label>생성 개수
@@ -81,6 +89,14 @@
 
       <div class="tool-content">
         <form id="image-story-form" class="tool-form" enctype="multipart/form-data">
+          <div class="mode-selection">
+            <label>실행 모드
+              <select name="mode" id="image-mode">
+                <option value="api" selected>API 모드 (서버에서 직접 처리)</option>
+                <option value="chatgpt">ChatGPT 창 모드 (새 창에서 ChatGPT 실행)</option>
+              </select>
+            </label>
+          </div>
           <div class="input-group">
             <label>대표 키워드 (선택)
               <input type="text" name="keyword" placeholder="예: 달빛 여행">
@@ -139,9 +155,17 @@
 
       <div class="tool-content">
         <form id="shorts-script-form" class="tool-form">
+          <div class="mode-selection">
+            <label>실행 모드
+              <select name="mode" id="shorts-mode">
+                <option value="api" selected>API 모드 (서버에서 직접 처리)</option>
+                <option value="chatgpt">ChatGPT 창 모드 (새 창에서 ChatGPT 실행)</option>
+              </select>
+            </label>
+          </div>
           <div class="input-group">
             <label>스토리 키워드
-              <input type="text" name="keyword" required placeholder="예: 빛을 쫓는 도시 사냥꾼">
+              <input type="text" name="shorts_keyword" required placeholder="예: 빛을 쫓는 도시 사냥꾼">
             </label>
           </div>
           <div class="form-controls">
@@ -207,9 +231,17 @@
 
       <div class="tool-content">
         <form id="shorts-scenes-form" class="tool-form">
+          <div class="mode-selection">
+            <label>실행 모드
+              <select name="mode" id="scenes-mode">
+                <option value="api" selected>API 모드 (서버에서 직접 처리)</option>
+                <option value="chatgpt">ChatGPT 창 모드 (새 창에서 ChatGPT 실행)</option>
+              </select>
+            </label>
+          </div>
           <div class="input-group">
             <label>스토리 키워드
-              <input type="text" name="keyword" required placeholder="예: 시간여행 탐정">
+              <input type="text" name="scenes_keyword" required placeholder="예: 시간여행 탐정">
             </label>
           </div>
           <div class="form-controls">

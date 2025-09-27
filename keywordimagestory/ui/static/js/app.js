@@ -291,6 +291,7 @@ function updateRecordSelectOptions() {
   if (!toolSelect || !recordSelect) return;
 
   const selectedTool = toolSelect.value;
+  console.log("updateRecordSelectOptions called with tool:", selectedTool);
   recordSelect.innerHTML = '<option value="">선택하세요</option>';
 
   if (!selectedTool) {
@@ -300,11 +301,13 @@ function updateRecordSelectOptions() {
   }
 
   const records = state.savedRecords[selectedTool] || [];
+  console.log("Records for", selectedTool, ":", records.length, records);
   const optionMarkup = records
     .map((record) => `<option value="${record.id}">${escapeHtml(record.title || record.id)}</option>`)
     .join("");
   recordSelect.insertAdjacentHTML("beforeend", optionMarkup);
   recordSelect.disabled = records.length === 0;
+  console.log("Dropdown updated. Options count:", recordSelect.options.length, "Disabled:", recordSelect.disabled);
 
   const persisted = loadPersistedSelection();
   const targetRecordId = pendingRecordSelection || (persisted && persisted.tool === selectedTool ? persisted.recordId : "");
@@ -317,11 +320,144 @@ function updateRecordSelectOptions() {
   }
 }
 
+function parseChatGPTResult(text) {
+  const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+  const items = [];
+
+  for (const line of lines) {
+    // 숫자로 시작하는 줄을 찾아서 제목으로 추출
+    const match = line.match(/^(\d+)\.?\s*(.+)/);
+    if (match) {
+      const [, index, title] = match;
+      items.push({
+        index: parseInt(index),
+        text: title.trim()
+      });
+    }
+  }
+
+  // 만약 번호가 없는 경우, 각 줄을 제목으로 처리
+  if (items.length === 0) {
+    lines.forEach((line, i) => {
+      if (line.length > 0) {
+        items.push({
+          index: i + 1,
+          text: line
+        });
+      }
+    });
+  }
+
+  return items;
+}
+
+function parseChatGPTImageResult(text) {
+  // 이미지 결과도 동일한 파싱 로직 사용
+  return parseChatGPTResult(text);
+}
+
+function parseChatGPTShortsResult(text) {
+  const subtitles = [];
+  const images = [];
+
+  // 먼저 [SRT 자막] 섹션 찾기 (여러 형태 지원)
+  let srtText = "";
+  const srtMatch1 = text.match(/\*\*\[SRT 자막\]\*\*([\s\S]*?)(?=\*\*\[이미지 장면 묘사\]\*\*|$)/);
+  const srtMatch2 = text.match(/\[SRT 자막\]([\s\S]*?)(?=\[이미지 장면 묘사\]|$)/);
+
+  if (srtMatch1) {
+    srtText = srtMatch1[1];
+  } else if (srtMatch2) {
+    srtText = srtMatch2[1];
+  } else {
+    // 섹션 헤더가 없으면 전체 텍스트에서 SRT 형식 찾기
+    srtText = text;
+  }
+
+  // SRT 형식 파싱: 번호, 타임코드, 텍스트를 각각의 블록으로 분리
+  const lines = srtText.split('\n');
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i].trim();
+
+    // 번호가 있는 라인 찾기
+    if (/^\d+$/.test(line)) {
+      const index = parseInt(line);
+      i++;
+
+      // 다음 라인이 타임코드인지 확인
+      if (i < lines.length) {
+        const timeLine = lines[i].trim();
+        const timeMatch = timeLine.match(/(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})/);
+
+        if (timeMatch) {
+          i++;
+
+          // 텍스트 라인들 수집 (빈 라인이 나올 때까지)
+          const textLines = [];
+          while (i < lines.length && lines[i].trim() !== '') {
+            textLines.push(lines[i].trim());
+            i++;
+          }
+
+          const fullText = textLines.join(' ');
+
+          // [이미지 #] 태그 추출
+          const imageTagMatch = fullText.match(/\[이미지\s*(\d+)\]/);
+          const cleanText = fullText.replace(/\[이미지\s*\d+\]/, '').trim();
+
+          subtitles.push({
+            index: index,
+            start: timeMatch[1],
+            end: timeMatch[2],
+            text: cleanText,
+            scene_tag: imageTagMatch ? `[이미지 ${imageTagMatch[1]}]` : ""
+          });
+        }
+      }
+    }
+    i++;
+  }
+
+  // 이미지 장면 묘사 부분 추출 (여러 형태 지원)
+  let imageText = "";
+  const imageMatch1 = text.match(/\*\*\[이미지 장면 묘사\]\*\*([\s\S]*?)$/);
+  const imageMatch2 = text.match(/\[이미지 장면 묘사\]([\s\S]*?)$/);
+
+  if (imageMatch1) {
+    imageText = imageMatch1[1];
+  } else if (imageMatch2) {
+    imageText = imageMatch2[1];
+  }
+
+  if (imageText) {
+    const imageLines = imageText.split('\n').filter(line => line.trim().match(/^\-?\s*\[이미지\s*\d+\]/));
+
+    imageLines.forEach((line, idx) => {
+      const match = line.match(/^\-?\s*\[이미지\s*(\d+)\]\s*(.+)/);
+      if (match) {
+        const imageNum = parseInt(match[1]);
+        const description = match[2].trim();
+
+        images.push({
+          tag: `이미지 ${imageNum}`,
+          description: description,
+          start: null,
+          end: null
+        });
+      }
+    });
+  }
+
+  return { subtitles, images };
+}
+
 function renderStoryKeywordResults(result) {
   const container = document.getElementById("story-keyword-results");
   if (!container) return;
 
-  const items = Array.isArray(result?.items) ? result.items : [];
+  const items = Array.isArray(result?.items) ? result.items : (Array.isArray(result?.titles) ? result.titles : []);
   if (!items.length) {
     container.innerHTML = '<div class="placeholder"><p>생성된 항목이 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
     return;
@@ -329,9 +465,8 @@ function renderStoryKeywordResults(result) {
 
   const listMarkup = items
     .map((item, index) => {
-      const label = typeof item.index === "number" ? item.index : index + 1;
       const text = escapeHtml(item.text ?? "");
-      return `<li><strong>${label}.</strong> ${text}</li>`;
+      return `<li>${text}</li>`;
     })
     .join("");
 
@@ -1236,6 +1371,8 @@ function initStoryKeywordPage() {
     event.preventDefault();
     const formData = new FormData(form);
     const keyword = String(formData.get("keyword") || "").trim();
+    const mode = String(formData.get("mode") || "api");
+
     if (!keyword) {
       alert("키워드를 입력하세요.");
       return;
@@ -1247,6 +1384,57 @@ function initStoryKeywordPage() {
       count = 30;
     }
 
+    // ChatGPT 창 모드 처리
+    if (mode === "chatgpt") {
+      const languageMap = { ko: "한국어", en: "영어", ja: "일본어" };
+      const langText = languageMap[language] || "한국어";
+      const prompt = `"${keyword}"라는 키워드로 ${count}개의 창의적인 스토리 제목을 ${langText}로 생성해줘. 각 제목은 흥미롭고 독창적이어야 하며, 번호를 매겨서 목록 형태로 제시해줘.`;
+
+      const chatgptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+      window.open(chatgptUrl, '_blank', 'width=1200,height=800');
+
+      resultsContainer.innerHTML = `
+        <div class="chatgpt-result-section">
+          <div class="placeholder">
+            <p>ChatGPT 창에서 "${keyword}" 키워드로 ${count}개의 제목을 생성하고 있습니다...</p>
+            <p>💡 결과가 나오면 아래 텍스트 영역에 복사해서 붙여넣으세요.</p>
+          </div>
+          <div class="result-input-section" style="margin-top: 20px;">
+            <label>ChatGPT 결과 붙여넣기:
+              <textarea id="chatgpt-result-input" placeholder="ChatGPT에서 생성된 결과를 여기에 붙여넣으세요..." style="width: 100%; height: 200px; margin-top: 10px;"></textarea>
+            </label>
+            <button type="button" id="process-chatgpt-result" style="margin-top: 10px;">결과 처리하기</button>
+          </div>
+        </div>
+      `;
+
+      // ChatGPT 결과 처리 버튼 이벤트
+      const processBtn = document.getElementById('process-chatgpt-result');
+      const textarea = document.getElementById('chatgpt-result-input');
+
+      processBtn.addEventListener('click', () => {
+        const chatgptResult = textarea.value.trim();
+        if (!chatgptResult) {
+          alert('ChatGPT 결과를 입력해주세요.');
+          return;
+        }
+
+        // ChatGPT 결과를 파싱하여 표시
+        const data = {
+          titles: parseChatGPTResult(chatgptResult),
+          keyword: keyword,
+          language: language,
+          count: count
+        };
+
+        state.latestResults[TOOL_KEYS.STORY] = data;
+        renderStoryKeywordResults(data);
+      });
+
+      return;
+    }
+
+    // API 모드 처리 (기존 로직)
     const payload = { keyword, language, count };
     if (submitButton) {
       submitButton.disabled = true;
@@ -1282,18 +1470,92 @@ function initImageStoryPage() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
+    const mode = String(formData.get("mode") || "api");
     const keyword = String(formData.get("keyword") || "").trim();
     const description = String(formData.get("image_description") || "").trim();
     const imageFile = formData.get("image");
     const hasImage = imageFile instanceof File && imageFile.size > 0;
+
     if (!hasImage && !description && !keyword) {
       alert("이미지 또는 키워드/설명 중 하나는 입력해야 합니다.");
       return;
     }
+
     let count = Number(formData.get("count") || 8);
     if (!Number.isFinite(count)) {
       count = 8;
     }
+
+    // ChatGPT 창 모드 처리
+    if (mode === "chatgpt") {
+      let imageContext = "";
+      if (hasImage) {
+        imageContext = "업로드된 이미지";
+      }
+      if (description) {
+        imageContext = imageContext ? `${imageContext}와 다음 설명: "${description}"` : `이미지 설명: "${description}"`;
+      }
+      if (keyword) {
+        imageContext = imageContext ? `${imageContext}, 키워드: "${keyword}"` : `키워드: "${keyword}"`;
+      }
+
+      const prompt = `당신은 창의적인 스토리텔러입니다.
+${imageContext}을 기반으로 스토리 제목 ${count}개를 생성하세요.
+
+요구사항:
+- 모든 제목은 10~20자 이내
+- 장르 다양하게 (스릴러, 코미디, 드라마, SF, 미스터리 등)
+- 긴박감·코믹함·반전 요소를 골고루 반영
+- 중복 없이 ${count}개
+- 번호 매기기 형식으로 출력
+
+${hasImage ? "※ 이미지를 함께 업로드해서 분석해주세요." : ""}`;
+
+      const chatgptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+      window.open(chatgptUrl, '_blank', 'width=1200,height=800');
+
+      resultsContainer.innerHTML = `
+        <div class="chatgpt-result-section">
+          <div class="placeholder">
+            <p>ChatGPT 창에서 이미지 기반 제목 ${count}개를 생성하고 있습니다...</p>
+            <p>💡 ${hasImage ? "이미지를 업로드하고 " : ""}결과가 나오면 아래 텍스트 영역에 복사해서 붙여넣으세요.</p>
+          </div>
+          <div class="result-input-section" style="margin-top: 20px;">
+            <label>ChatGPT 결과 붙여넣기:
+              <textarea id="chatgpt-image-result-input" placeholder="ChatGPT에서 생성된 결과를 여기에 붙여넣으세요..." style="width: 100%; height: 200px; margin-top: 10px;"></textarea>
+            </label>
+            <button type="button" id="process-chatgpt-image-result" style="margin-top: 10px;">결과 처리하기</button>
+          </div>
+        </div>
+      `;
+
+      // ChatGPT 결과 처리 버튼 이벤트
+      const processBtn = document.getElementById('process-chatgpt-image-result');
+      const textarea = document.getElementById('chatgpt-image-result-input');
+
+      processBtn.addEventListener('click', () => {
+        const chatgptResult = textarea.value.trim();
+        if (!chatgptResult) {
+          alert('ChatGPT 결과를 입력해주세요.');
+          return;
+        }
+
+        // ChatGPT 결과를 파싱하여 표시
+        const data = {
+          items: parseChatGPTImageResult(chatgptResult),
+          keyword: keyword,
+          image_description: description,
+          count: count
+        };
+
+        state.latestResults[TOOL_KEYS.IMAGE_STORY] = data;
+        renderImageStoryResults(data);
+      });
+
+      return;
+    }
+
+    // API 모드 처리 (기존 로직)
     formData.set("keyword", keyword);
     formData.set("image_description", description);
     formData.set("count", String(count));
@@ -1331,13 +1593,114 @@ function initShortsScriptPage() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
-    const keyword = String(formData.get("keyword") || "").trim();
+    const mode = String(formData.get("mode") || "api");
+    const keyword = String(formData.get("shorts_keyword") || "").trim();
     if (!keyword) {
       alert("스토리 키워드를 입력하세요.");
       return;
     }
     const language = String(formData.get("language") || "ko") || "ko";
 
+    // ChatGPT 창 모드 처리
+    if (mode === "chatgpt") {
+      const languageMap = { ko: "한국어", en: "영어", ja: "일본어" };
+      const langText = languageMap[language] || "한국어";
+
+      const prompt = `입력받은 "${keyword}"라는 스토리 키워드를 바탕으로, 아래 기준에 따라 유튜브 Shorts용 60초 분량의 자막과 이미지 장면 묘사를 ${langText}로 생성하세요.
+
+### 출력 규칙
+
+1. 60초 분량 자막을 **SRT 형식**으로 작성하세요.
+    - 각 자막 항목은 다음 요소를 포함해야 합니다:
+        - 자막 번호
+        - 타임스탬프 (형식: 00:00:00,000 --> 00:00:05,000)
+        - 대사(내레이션 또는 인물 대사)
+    - 각 대사 마지막에 반드시 [이미지 #] 태그를 붙여 해당 장면에 들어갈 이미지를 명확하게 지정하세요.
+    - 전체 길이가 약 60초가 되도록, 6~10개의 자막으로 구성하세요.
+
+2. **이미지 장면 묘사**를 모두 작성한 후, 마지막에 구분하여 정리하세요.
+    - 각 이미지 번호([이미지 1]~[이미지 N])별로 1~2문장으로 구체적으로 묘사하세요.
+    - 색감, 배경, 인물/사물의 액션, 상황 분위기를 최대한 생생하게 표현하세요.
+
+# 출력 형식
+
+**[SRT 자막]**
+(각 자막 항목별로 번호, 타임스탬프, 대사 [이미지 #])
+
+[빈 줄]
+
+**[이미지 장면 묘사]**
+- [이미지 1] XXX
+- [이미지 2] XXX
+- … (최종 자막에 등장한 이미지 번호 모두)
+
+스토리 키워드: "${keyword}"`;
+
+      const chatgptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+      window.open(chatgptUrl, '_blank', 'width=1200,height=800');
+
+      resultsContainer.innerHTML = `
+        <div class="chatgpt-result-section">
+          <div class="placeholder">
+            <p>ChatGPT 창에서 "${keyword}" 키워드로 쇼츠용 대본과 이미지 프롬프트를 생성하고 있습니다...</p>
+            <p>💡 결과가 나오면 아래 텍스트 영역에 복사해서 붙여넣으세요.</p>
+          </div>
+          <div class="result-input-section" style="margin-top: 20px;">
+            <label>ChatGPT 결과 붙여넣기:
+              <textarea id="chatgpt-shorts-result-input" placeholder="ChatGPT에서 생성된 SRT 자막과 이미지 묘사를 여기에 붙여넣으세요..." style="width: 100%; height: 300px; margin-top: 10px;"></textarea>
+            </label>
+            <button type="button" id="process-chatgpt-shorts-result" style="margin-top: 10px;">결과 처리하기</button>
+          </div>
+        </div>
+      `;
+
+      // ChatGPT 결과 처리 버튼 이벤트
+      const processBtn = document.getElementById('process-chatgpt-shorts-result');
+      const textarea = document.getElementById('chatgpt-shorts-result-input');
+
+      processBtn.addEventListener('click', () => {
+        const chatgptResult = textarea.value.trim();
+        if (!chatgptResult) {
+          alert('ChatGPT 결과를 입력해주세요.');
+          return;
+        }
+
+        // ChatGPT 결과를 파싱하여 표시
+        console.log('원본 텍스트:', chatgptResult);
+        const parsed = parseChatGPTShortsResult(chatgptResult);
+        console.log('파싱 결과:', parsed);
+
+        // 파싱이 실패한 경우 원본 텍스트를 표시
+        if (parsed.subtitles.length === 0 && parsed.images.length === 0) {
+          resultsContainer.innerHTML = `
+            <article>
+              <header>
+                <h3>ChatGPT 결과 (원본)</h3>
+                <p>키워드: <strong>${escapeHtml(keyword)}</strong></p>
+              </header>
+              <div style="white-space: pre-wrap; font-family: monospace; background: #f5f5f5; padding: 1rem; border-radius: 4px;">
+                ${escapeHtml(chatgptResult)}
+              </div>
+            </article>
+          `;
+          return;
+        }
+
+        const data = {
+          subtitles: parsed.subtitles,
+          images: parsed.images,
+          keyword: keyword,
+          language: language
+        };
+
+        state.latestResults[TOOL_KEYS.SCRIPT] = data;
+        renderShortsScriptResults(data);
+      });
+
+      return;
+    }
+
+    // API 모드 처리 (기존 로직)
     const payload = { keyword, language };
     state.lastRequests[TOOL_KEYS.SCRIPT] = { ...payload };
     if (submitButton) {
@@ -1375,13 +1738,103 @@ function initShortsScenesPage() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
-    const keyword = String(formData.get("keyword") || "").trim();
+    const mode = String(formData.get("mode") || "api");
+    const keyword = String(formData.get("scenes_keyword") || "").trim();
     if (!keyword) {
       alert("스토리 키워드를 입력하세요.");
       return;
     }
     const language = String(formData.get("language") || "ko") || "ko";
 
+    // ChatGPT 창 모드 처리
+    if (mode === "chatgpt") {
+      const languageMap = { ko: "한국어", en: "영어", ja: "일본어" };
+      const langText = languageMap[language] || "한국어";
+
+      const prompt = `입력받은 "${keyword}"라는 스토리 키워드를 바탕으로, 아래 기준에 따라 유튜브 Shorts용 60초 분량의 영상 장면 대본과 카메라/촬영 지시사항을 ${langText}로 생성하세요.
+
+### 출력 규칙
+
+1. 60초 분량 대본을 **씬별 형식**으로 작성하세요.
+    - 각 씬은 다음 요소를 포함해야 합니다:
+        - [씬 #] 태그
+        - 타임스탬프 (형식: 00:00:00,000 --> 00:00:05,000)
+        - 대사/내레이션
+        - 카메라 동작 및 촬영 지시사항
+    - 전체 길이가 약 60초가 되도록, 6~10개의 씬으로 구성하세요.
+
+2. **영상 장면 촬영 지시사항**을 각 씬별로 작성하세요.
+    - 카메라 앵글 (클로즈업, 와이드샷, 미디엄샷 등)
+    - 카메라 움직임 (팬, 틸트, 줌인/아웃, 트래킹 등)
+    - 조명 및 색감 톤
+    - 배경과 소품 설명
+    - 인물/오브젝트 액션과 표정 연출
+
+# 출력 형식
+
+**[영상 씬 대본]**
+
+[씬 1] 00:00:00,000 --> 00:00:06,000
+대사: XXX
+카메라: XXX
+
+[씬 2] 00:00:06,000 --> 00:00:12,000
+대사: XXX
+카메라: XXX
+
+...
+
+**[촬영 지시사항]**
+- [씬 1] 카메라 앵글, 조명, 연출 등 구체적 지시사항
+- [씬 2] 카메라 앵글, 조명, 연출 등 구체적 지시사항
+- ...
+
+스토리 키워드: "${keyword}"`;
+
+      const chatgptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+      window.open(chatgptUrl, '_blank', 'width=1200,height=800');
+
+      resultsContainer.innerHTML = `
+        <div class="chatgpt-result-section">
+          <div class="placeholder">
+            <p>ChatGPT 창에서 "${keyword}" 키워드로 영상 장면 대본과 촬영 지시사항을 생성하고 있습니다...</p>
+            <p>💡 결과가 나오면 아래 텍스트 영역에 복사해서 붙여넣으세요.</p>
+          </div>
+          <div class="result-input-section" style="margin-top: 20px;">
+            <label>ChatGPT 결과 붙여넣기:
+              <textarea id="chatgpt-scenes-result-input" placeholder="ChatGPT에서 생성된 영상 씬 대본과 촬영 지시사항을 여기에 붙여넣으세요..." style="width: 100%; height: 300px; margin-top: 10px;"></textarea>
+            </label>
+            <button type="button" id="process-chatgpt-scenes-result" style="margin-top: 10px;">결과 처리하기</button>
+          </div>
+        </div>
+      `;
+
+      // ChatGPT 결과 처리 버튼 이벤트
+      const processBtn = document.getElementById('process-chatgpt-scenes-result');
+      const textarea = document.getElementById('chatgpt-scenes-result-input');
+
+      processBtn.addEventListener('click', () => {
+        const chatgptResult = textarea.value.trim();
+        if (!chatgptResult) {
+          alert('ChatGPT 결과를 입력해주세요.');
+          return;
+        }
+
+        // ChatGPT 결과를 파싱하여 표시
+        const data = {
+          script: chatgptResult,
+          keyword: keyword,
+          language: language
+        };
+
+        state.latestResults[TOOL_KEYS.SCENES] = data;
+        renderShortsSceneResults(data);
+      });
+
+      return;
+    }
+
+    // API 모드 처리 (기존 로직)
     const payload = { keyword, language };
     state.lastRequests[TOOL_KEYS.SCENES] = { ...payload };
     if (submitButton) {
@@ -2358,19 +2811,18 @@ function bindProjectHandlers() {
         template_id: templateId,
         title_position: [parseFloat(selectedOption.dataset.titleX), parseFloat(selectedOption.dataset.titleY)],
         subtitle_position: [parseFloat(selectedOption.dataset.subtitleX), parseFloat(selectedOption.dataset.subtitleY)],
-          title_style: { effect: document.getElementById("text-effect").value },
-          subtitle_style: { effect: document.getElementById("text-effect").value }
-        };
-        try {
-          const project = await api(`/api/projects/${state.project.project_id}/template`, {
-            method: "POST",
-            body: JSON.stringify(payload)
-          });
-          renderProject(project);
-        } catch (error) {
-          alert(error.message);
-        }
-      });
+        title_style: { effect: document.getElementById("text-effect").value },
+        subtitle_style: { effect: document.getElementById("text-effect").value }
+      };
+      try {
+        const project = await api(`/api/projects/${state.project.project_id}/template`, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        renderProject(project);
+      } catch (error) {
+        alert(error.message);
+      }
     });
   }
 
@@ -3486,6 +3938,11 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  // Tool selection dropdown change event listener
+  const toolSelect = document.getElementById("tool-selection");
+  if (toolSelect) {
+    toolSelect.addEventListener("change", updateRecordSelectOptions);
+  }
 
   Object.keys(TOOL_CONFIG).forEach((tool) => {
     const section = document.getElementById(TOOL_CONFIG[tool].savedContainer);

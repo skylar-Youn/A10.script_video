@@ -1,6 +1,7 @@
 """OpenAI client wrapper with graceful degradation for offline development."""
 from __future__ import annotations
 
+import base64
 import io
 import logging
 import wave
@@ -22,17 +23,21 @@ class OpenAIClient:
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or settings.openai_api_key
         self._client: Any | None = None
+
+        logger.info(f"Initializing OpenAI client. API key present: {bool(self.api_key)}, OpenAI module: {OpenAI is not None}")
+
         if self.api_key and OpenAI is not None:
             try:
                 self._client = OpenAI(api_key=self.api_key)
+                logger.info("OpenAI client initialized successfully")
             except Exception as exc:  # pragma: no cover - network failure
                 logger.warning("Failed to initialise OpenAI client: %s", exc)
                 self._client = None
         else:
             if not self.api_key:
-                logger.info("OpenAI API key not configured – using deterministic mock responses")
+                logger.warning("OpenAI API key not configured – using deterministic mock responses")
             if OpenAI is None:
-                logger.info("openai package not installed – using deterministic mock responses")
+                logger.warning("openai package not installed – using deterministic mock responses")
 
     # ------------------------------------------------------------------
     # High-level helpers
@@ -61,43 +66,69 @@ class OpenAIClient:
             return self._mock_list(prompt, count)
 
     def generate_structured(self, instructions: str, content: str) -> str:
-        """Return structured text output using the Responses API if available."""
+        """Return structured text output using the Chat API."""
 
         if self._client is None:
             return self._mock_structured(instructions, content)
 
         try:
-            response = self._client.responses.create(
+            messages = [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": content},
+            ]
+            response = self._client.chat.completions.create(
                 model="gpt-4o-mini",
-                input=[
-                    {
-                        "role": "developer",
-                        "content": [
-                            {"type": "input_text", "text": instructions},
-                        ],
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": content},
-                        ],
-                    },
-                ],
-                text={"format": {"type": "text"}},
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
             )
-            if hasattr(response, "output_text") and response.output_text:
-                return response.output_text
-            # Fallback: attempt to read from response.output sequence
-            outputs: Iterable[Any] = getattr(response, "output", [])
-            for item in outputs:
-                if getattr(item, "type", None) == "message":
-                    for block in getattr(item, "content", []):
-                        if getattr(block, "type", None) == "output_text":
-                            return block.text  # type: ignore[no-any-return]
-            return str(response)
+            return response.choices[0].message.content or ""
         except Exception as exc:  # pragma: no cover
             logger.error("OpenAI structured generation failed: %s", exc)
             return self._mock_structured(instructions, content)
+
+    def analyze_image(self, image_data: bytes, prompt: str) -> str:
+        """Analyze image using Vision API and return description."""
+
+        logger.info(f"analyze_image called. Client available: {self._client is not None}, Image size: {len(image_data)} bytes")
+
+        if self._client is None:
+            logger.warning("No OpenAI client available, using mock response")
+            return self._mock_image_analysis(prompt)
+
+        try:
+            # Convert image to base64
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+            logger.info(f"Image converted to base64, length: {len(base64_image)}")
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ]
+
+            logger.info("Making OpenAI Vision API call...")
+            response = self._client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
+            )
+            result = response.choices[0].message.content or ""
+            logger.info(f"OpenAI Vision API response received, length: {len(result)}")
+            return result
+        except Exception as exc:  # pragma: no cover
+            logger.error("OpenAI image analysis failed: %s", exc)
+            return self._mock_image_analysis(prompt)
 
     def synthesize_speech(
         self,
@@ -159,6 +190,10 @@ class OpenAIClient:
             f"Instructions: {instructions[:60]}...\n"
             f"Content: {content[:60]}...\n"
         )
+
+    def _mock_image_analysis(self, prompt: str) -> str:
+        """Create a mock image analysis response."""
+        return f"Mock 이미지 분석 결과: {prompt[:50]}..."
 
     def _mock_audio(self) -> Tuple[bytes, str]:
         """Create a single second of silence as a WAV fallback."""

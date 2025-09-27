@@ -196,14 +196,16 @@ async def api_generate_image_story(
     context_lines: list[str] = []
     image_filename: str | None = None
     image_size: int | None = None
+    image_data: bytes | None = None
 
     if image is not None:
         image_filename = image.filename
         try:
-            data = await image.read()
-            image_size = len(data)
+            image_data = await image.read()
+            image_size = len(image_data)
         except Exception:
             image_size = None
+            image_data = None
         finally:
             try:
                 await image.close()
@@ -222,7 +224,7 @@ async def api_generate_image_story(
 
     context_keyword = keyword or (image_description[:30] if image_description else "이미지 스토리")
     context = GenerationContext(keyword=context_keyword, language=language, duration=settings.default_story_duration)
-    story_items = ImageStoryGenerator().generate(context, "\n".join(context_lines), count=count)
+    story_items = ImageStoryGenerator().generate(context, "\n".join(context_lines), count=count, image_data=image_data)
 
     return {
         "keyword": context_keyword,
