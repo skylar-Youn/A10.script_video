@@ -803,8 +803,8 @@ async function loadSavedRecords(tool) {
           const saved = state.savedRecords[tool].find((record) => record.id === persisted.recordId);
           if (saved) {
             state.latestResults[tool] = saved.payload;
-            if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES) {
-              const keyword = saved.payload?.keyword;
+            if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES || tool === TOOL_KEYS.VIDEO_IMPORT) {
+              const keyword = saved.payload?.keyword || saved.title;
               const language = saved.payload?.language || "ko";
               if (keyword) {
                 state.lastRequests[tool] = { keyword, language };
@@ -3988,6 +3988,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const persistedSelection = loadPersistedSelection();
   const toolSelect = document.getElementById("tool-selection");
+  const recordSelect = document.getElementById("record-selection");
+
   if (toolSelect) {
     // Add change event listener for dropdown functionality
     toolSelect.addEventListener("change", updateRecordSelectOptions);
@@ -3996,8 +3998,40 @@ document.addEventListener("DOMContentLoaded", () => {
       toolSelect.value = persistedSelection.tool;
     }
 
-    // 페이지 로드 시 모든 기록 로드
-    loadAllToolRecords();
+    // 페이지 로드 시 모든 기록 로드 후 선택 복원
+    loadAllToolRecords().then(() => {
+      // 기록 로드 완료 후 드롭다운 업데이트
+      updateRecordSelectOptions();
+
+      // 저장된 선택 복원
+      if (persistedSelection?.tool && persistedSelection?.recordId) {
+        const recordSelect = document.getElementById("record-selection");
+        if (recordSelect) {
+          recordSelect.value = persistedSelection.recordId;
+        }
+      }
+    });
+  }
+
+  // 저장된 결과 선택 이벤트 리스너 추가
+  if (recordSelect) {
+    recordSelect.addEventListener("change", function() {
+      const selectedTool = toolSelect?.value;
+      const selectedRecordId = this.value;
+
+      if (selectedTool && selectedRecordId) {
+        state.activeRecords[selectedTool] = selectedRecordId;
+        // 선택사항을 localStorage에 저장
+        const records = state.savedRecords[selectedTool] || [];
+        const record = records.find(r => r.id === selectedRecordId);
+        if (record) {
+          persistSelection(selectedTool, selectedRecordId, record.payload);
+        }
+      } else if (selectedTool) {
+        state.activeRecords[selectedTool] = null;
+        clearPersistedSelection();
+      }
+    });
   }
   if (persistedSelection?.tool) {
     state.activeRecords[persistedSelection.tool] = persistedSelection.recordId || null;
@@ -4099,12 +4133,25 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }
 
+        if (tool === TOOL_KEYS.VIDEO_IMPORT) {
+          if (Array.isArray(payload.subtitles)) {
+            currentProject.subtitles = payload.subtitles;
+          }
+          // video_import의 경우 keyword가 없으므로 record title을 사용
+          if (record?.title && !payload.keyword) {
+            payload.keyword = record.title;
+          }
+        }
+
         if (payload.keyword) {
           state.lastRequests[tool] = {
             keyword: toSafeString(payload.keyword),
             language: toSafeString(payload.language, "ko")
           };
         }
+
+        // 프로젝트에 tool 정보 추가
+        currentProject.tool = tool;
 
         renderProject(currentProject);
         const activeId = state.activeRecords[tool] || recordId || (persisted?.tool === tool ? persisted.recordId : null);
@@ -4135,17 +4182,39 @@ function renderTimelineTableRows(project) {
   const videoPrompts = project.video_prompts || [];
 
   return subtitles.map((subtitle, index) => {
-    const timeLabel = `#${index + 1}<br/>${formatTime(subtitle.start)}s→${formatTime(subtitle.end)}s`;
+    // video_import는 start_time/end_time(문자열), 다른 것들은 start/end(숫자) 사용
+    const startTime = subtitle.start_time || subtitle.start;
+    const endTime = subtitle.end_time || subtitle.end;
+
+    // 시간 표시: 문자열이면 그대로, 숫자면 formatTime 사용
+    let timeDisplay;
+    if (typeof startTime === 'string' && typeof endTime === 'string') {
+      timeDisplay = `${startTime}→${endTime}`;
+    } else {
+      timeDisplay = `${formatTime(startTime)}s→${formatTime(endTime)}s`;
+    }
+
+    const timeLabel = `#${index + 1}<br/>${timeDisplay}`;
     const music = backgroundMusic.length > 0 ? '🎵' : '❌';
     const image = imagePrompts[index] ? '🖼️' : '❌';
-    const video = videoPrompts[index] ? '🎬' : '❌';
+
+    // video_import 타입의 경우 모든 행에 V1 표시, 그 외에는 기존 로직
+    let video;
+    const toolSelect = document.getElementById('tool-selection');
+    const currentTool = toolSelect ? toolSelect.value : null;
+
+    if (project.tool === 'video_import' || currentTool === 'video_import') {
+      video = 'V1';
+    } else {
+      video = videoPrompts[index] ? '🎬' : '❌';
+    }
 
     return `
       <tr ${index > 0 ? 'class="section-divide-tl"' : ''} data-row-index="${index}">
         <td rowspan="2" class="time-column-tl">${timeLabel}</td>
         <td class="content-column-tl subtitle-content-tl" data-field="subtitle">
           <div class="subtitle-with-tts">
-            <span class="subtitle-text">${escapeHtml(subtitle.text)}</span>
+            <span class="subtitle-text">${escapeHtml(subtitle.text.replace('>> ', '').replace('>>', ''))}</span>
             <button type="button" class="tts-btn secondary small" data-subtitle-index="${index}" title="음성 변환">🎤</button>
           </div>
         </td>

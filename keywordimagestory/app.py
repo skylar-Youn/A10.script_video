@@ -644,7 +644,7 @@ async def api_import_video(
                         "index": len(subtitles) + 1,
                         "start_time": start_time.strip(),
                         "end_time": end_time.strip(),
-                        "text": text.strip(),
+                        "text": text.strip().replace('>> ', '').replace('>>', ''),
                         "scene_tag": f"[씬 {len(subtitles) + 1}]",
                         "status": "imported"
                     })
