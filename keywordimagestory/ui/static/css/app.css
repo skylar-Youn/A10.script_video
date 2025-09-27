@@ -2183,6 +2183,7 @@ textarea.inline-edit {
   font-size: 11px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   background: white;
+  color: #000000 !important;
 }
 
 .timeline-table th {
@@ -2192,6 +2193,7 @@ textarea.inline-edit {
   text-align: center;
   font-weight: bold;
   font-size: 12px;
+  color: #000000 !important;
 }
 
 .timeline-table td {
@@ -2200,6 +2202,7 @@ textarea.inline-edit {
   text-align: center;
   font-size: 11px;
   line-height: 1.4;
+  color: #000000 !important;
 }
 
 .time-column-tl {
@@ -2207,10 +2210,12 @@ textarea.inline-edit {
   font-weight: bold;
   vertical-align: middle;
   width: 15%;
+  color: #000000 !important;
 }
 
 .content-column-tl {
   width: 25%;
+  color: #000000 !important;
 }
 
 .bgmusic-column-tl {
@@ -2218,6 +2223,7 @@ textarea.inline-edit {
   vertical-align: middle;
   width: 6%;
   text-align: center;
+  color: #000000 !important;
 }
 
 .image-column-tl {
@@ -2225,6 +2231,7 @@ textarea.inline-edit {
   vertical-align: middle;
   width: 6%;
   text-align: center;
+  color: #000000 !important;
 }
 
 .video-column-tl {
@@ -2232,14 +2239,71 @@ textarea.inline-edit {
   vertical-align: middle;
   width: 6%;
   text-align: center;
+  color: #000000 !important;
+}
+
+.narration-check-column-tl {
+  background-color: #e6f7ff;
+  vertical-align: middle;
+  width: 5%;
+  text-align: center;
+  color: #000000 !important;
+  padding: 4px;
+}
+
+.narration-checkbox-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.narration-checkbox {
+  display: none;
+}
+
+.narration-label {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  background: rgba(255, 255, 255, 0.8);
+  border: 2px solid #ddd;
+}
+
+.narration-label:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: #3b82f6;
+  transform: scale(1.05);
+}
+
+.narration-checkbox:checked + .narration-label {
+  background: linear-gradient(135deg, #ff6600, #ff8800);
+  border-color: #ff4400;
+  color: white;
+}
+
+.checkbox-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.narration-checkbox:checked + .narration-label .checkbox-icon {
+  filter: none;
 }
 
 .voice-content-tl {
   background-color: #ffe0cc;
+  color: #000000 !important;
 }
 
 .subtitle-content-tl {
   background-color: #cceeff;
+  color: #000000 !important;
 }
 
 .section-divide-tl {
@@ -2379,6 +2443,26 @@ textarea.inline-edit {
 .subtitle-text {
   flex: 1;
   word-break: break-word;
+}
+
+/* 해설 스타일 */
+.subtitle-text.narration {
+  font-style: italic;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #ff6600, #ff8800);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 2px solid #ff4400;
+  box-shadow: 0 2px 6px rgba(255, 102, 0, 0.3);
+  font-weight: 600;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.subtitle-text.narration::before {
+  content: "🗣️ 해설: ";
+  font-weight: bold;
+  color: #ffdd44;
+  margin-right: 4px;
 }
 
 .tts-btn {
@@ -3129,4 +3213,244 @@ textarea.inline-edit {
 #video-import-saved .saved-item-title,
 #video-import-saved .saved-item-meta {
   color: #000000 !important;
+}
+
+/* 타임라인 알림 스타일 */
+.timeline-notification {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  animation: slideInDown 0.3s ease;
+}
+
+.notification-success {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.notification-error {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.notification-info {
+  background: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 파일명 입력 모달 스타일 */
+.filename-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.filename-modal-content {
+  background: white;
+  border-radius: 8px;
+  padding: 2rem;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.filename-modal h3 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.filename-input-group {
+  margin-bottom: 1.5rem;
+}
+
+.filename-input-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #555;
+  font-weight: 500;
+}
+
+.filename-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.filename-input:focus {
+  border-color: #007bff;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.filename-modal-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+}
+
+.filename-modal-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.filename-modal-btn.primary {
+  background: #007bff;
+  color: white;
+}
+
+.filename-modal-btn.primary:hover {
+  background: #0056b3;
+}
+
+.filename-modal-btn.secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.filename-modal-btn.secondary:hover {
+  background: #545b62;
+}
+
+/* 위험 버튼 스타일 */
+.danger {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+}
+
+.danger:hover {
+  background: #c82333;
+}
+
+.danger:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+/* AI 버튼 스타일 */
+.ai-btn {
+  background: #f8f9fa;
+  color: #495057;
+  border: 1px solid #dee2e6;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.ai-btn:hover {
+  background: #e9ecef;
+  border-color: #adb5bd;
+  transform: translateY(-1px);
+}
+
+.ai-btn:active {
+  transform: translateY(0);
+}
+
+.ai-btn.small {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.7rem;
+}
+
+/* 특정 AI 버튼 색상 */
+.reinterpret-btn {
+  background: #e3f2fd;
+  color: #1976d2;
+  border-color: #bbdefb;
+}
+
+.reinterpret-btn:hover {
+  background: #bbdefb;
+  border-color: #90caf9;
+}
+
+.translate-jp-btn {
+  background: #fce4ec;
+  color: #c2185b;
+  border-color: #f8bbd9;
+}
+
+.translate-jp-btn:hover {
+  background: #f8bbd9;
+  border-color: #f48fb1;
+}
+
+.backtranslate-kr-btn {
+  background: #f3e5f5;
+  color: #7b1fa2;
+  border-color: #e1bee7;
+}
+
+.backtranslate-kr-btn:hover {
+  background: #e1bee7;
+  border-color: #ce93d8;
+}
+
+/* AI 버튼 로딩 상태 */
+.ai-btn.loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+  position: relative;
+}
+
+.ai-btn.loading::after {
+  content: "⏳";
+  position: absolute;
+  right: 0.25rem;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

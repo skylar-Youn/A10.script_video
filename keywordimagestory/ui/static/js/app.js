@@ -1902,15 +1902,31 @@ function buildProjectMarkup(project, totalDuration) {
       <section class="timeline-section">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
           <h3 style="margin: 0;">동시 편집 타임라인</h3>
-          <button id="play-all-audio" type="button" class="secondary" onclick="playAllAudioClips()" title="모든 음성 클립을 순서대로 재생">
-            🔊 전체 재생
-          </button>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button id="play-all-audio" type="button" class="secondary" title="모든 음성 클립을 순서대로 재생">
+              🔊 전체 재생
+            </button>
+            <button id="save-all-timeline" type="button" class="primary" title="현재 타임라인 상태를 모두 저장">
+              💾 전체 저장
+            </button>
+            <button id="save-as-timeline" type="button" class="secondary" title="현재 타임라인을 다른 이름으로 저장">
+              📝 다른 이름 저장
+            </button>
+            <button id="load-timeline" type="button" class="secondary" title="저장된 타임라인 불러오기">
+              📂 불러오기
+            </button>
+            <button id="delete-timeline" type="button" class="danger" title="저장된 타임라인 삭제">
+              🗑️ 삭제
+            </button>
+            <span id="autosave-indicator" style="font-size: 0.8rem; color: #666; margin-left: 1rem; min-width: 80px;"></span>
+          </div>
         </div>
         <div class="timeline-table-container">
           <table class="timeline-table">
             <thead>
               <tr>
                 <th>시간</th>
+                <th>유형</th>
                 <th>음성·자막</th>
                 <th>🎵</th>
                 <th>🖼️</th>
@@ -3914,6 +3930,19 @@ document.addEventListener("DOMContentLoaded", () => {
   initShortsScriptPage();
   initShortsScenesPage();
 
+  // 자동 저장 시스템 초기화
+  setupAutoSave();
+
+  // 타임라인 버튼들을 나중에 바인딩 (DOM이 완전히 준비된 후)
+  setTimeout(() => {
+    setupTimelineButtons();
+  }, 2000);
+
+  // 페이지 로드 시 이전 편집 내용 복원 시도
+  setTimeout(() => {
+    loadTimelineFromLocalStorage();
+  }, 1000); // DOM이 완전히 로드된 후 1초 뒤에 복원
+
   document.querySelectorAll("[data-save]").forEach((button) => {
     button.addEventListener("click", () => {
       const tool = button.getAttribute("data-save");
@@ -4209,13 +4238,28 @@ function renderTimelineTableRows(project) {
       video = videoPrompts[index] ? '🎬' : '❌';
     }
 
+    const isNarration = subtitle.text.startsWith('>>') || subtitle.text.startsWith('>> ');
+
     return `
       <tr ${index > 0 ? 'class="section-divide-tl"' : ''} data-row-index="${index}">
         <td rowspan="2" class="time-column-tl">${timeLabel}</td>
+        <td rowspan="2" class="narration-check-column-tl">
+          <div class="narration-checkbox-wrapper">
+            <input type="checkbox" id="narration-${index}" class="narration-checkbox" data-row="${index}" ${isNarration ? 'checked' : ''}>
+            <label for="narration-${index}" class="narration-label" title="해설 여부 체크">
+              <span class="checkbox-icon">${isNarration ? '🗣️' : '💬'}</span>
+            </label>
+          </div>
+        </td>
         <td class="content-column-tl subtitle-content-tl" data-field="subtitle">
           <div class="subtitle-with-tts">
-            <span class="subtitle-text">${escapeHtml(subtitle.text.replace('>> ', '').replace('>>', ''))}</span>
-            <button type="button" class="tts-btn secondary small" data-subtitle-index="${index}" title="음성 변환">🎤</button>
+            <span class="subtitle-text${isNarration ? ' narration' : ''}">${escapeHtml(subtitle.text.replace('>> ', '').replace('>>', ''))}</span>
+            <div class="ai-buttons-row" style="margin-top: 0.5rem; display: flex; gap: 0.25rem; flex-wrap: wrap; align-items: center;">
+              <button type="button" class="ai-btn reinterpret-btn small" data-row-index="${index}" title="텍스트를 다시 해석해주는 AI">🔄 재해석</button>
+              <button type="button" class="ai-btn translate-jp-btn small" data-row-index="${index}" title="일본어로 번역">🇯🇵 일본어</button>
+              <button type="button" class="ai-btn backtranslate-kr-btn small" data-row-index="${index}" title="일본어를 한국어로 역번역">🔙 역번역</button>
+              <button type="button" class="tts-btn secondary small" data-subtitle-index="${index}" title="음성 변환">🎤 음성</button>
+            </div>
           </div>
         </td>
         <td rowspan="2" class="bgmusic-column-tl" data-field="music">${music}</td>
@@ -4241,6 +4285,811 @@ function renderTimelineTableRows(project) {
       </tr>
     `;
   }).join('');
+
+  // 타임라인 테이블이 렌더링된 후 체크박스 이벤트 리스너 설정
+  setTimeout(() => {
+    setupNarrationCheckboxListeners();
+  }, 100);
+}
+
+// 전체 타임라인 저장 함수
+// 파일명 입력 모달 생성 함수
+function createFilenameModal() {
+  const modal = document.createElement('div');
+  modal.className = 'filename-modal';
+  modal.innerHTML = `
+    <div class="filename-modal-content">
+      <h3>📁 타임라인 저장</h3>
+      <div class="filename-input-group">
+        <label for="timeline-filename">파일명을 입력하세요:</label>
+        <input type="text" id="timeline-filename" class="filename-input"
+               placeholder="예: 북극성_4,5화_타임라인"
+               value="">
+      </div>
+      <div class="filename-modal-buttons">
+        <button type="button" class="filename-modal-btn secondary" id="filename-cancel">취소</button>
+        <button type="button" class="filename-modal-btn primary" id="filename-save">💾 저장</button>
+      </div>
+    </div>
+  `;
+  return modal;
+}
+
+// 수정된 저장 함수 - 파일명 입력 모달 포함
+async function saveAllTimelineChanges() {
+  console.log('전체 저장 버튼 클릭됨');
+
+  // 파일명 입력 모달 표시
+  const modal = createFilenameModal();
+  document.body.appendChild(modal);
+
+  const filenameInput = modal.querySelector('#timeline-filename');
+  const cancelBtn = modal.querySelector('#filename-cancel');
+  const saveBtn = modal.querySelector('#filename-save');
+
+  // 기본 파일명 설정 (현재 날짜/시간 기반)
+  const now = new Date();
+  const defaultFilename = `타임라인_${now.getFullYear()}-${(now.getMonth()+1).toString().padStart(2,'0')}-${now.getDate().toString().padStart(2,'0')}_${now.getHours().toString().padStart(2,'0')}-${now.getMinutes().toString().padStart(2,'0')}`;
+  filenameInput.value = defaultFilename;
+  filenameInput.select();
+
+  return new Promise((resolve) => {
+    // 취소 버튼 이벤트
+    cancelBtn.addEventListener('click', () => {
+      document.body.removeChild(modal);
+      resolve(false);
+    });
+
+    // 모달 배경 클릭 시 닫기
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        document.body.removeChild(modal);
+        resolve(false);
+      }
+    });
+
+    // Enter 키 처리
+    filenameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        saveBtn.click();
+      } else if (e.key === 'Escape') {
+        cancelBtn.click();
+      }
+    });
+
+    // 저장 버튼 이벤트
+    saveBtn.addEventListener('click', async () => {
+      const filename = filenameInput.value.trim();
+      if (!filename) {
+        alert('파일명을 입력해주세요.');
+        filenameInput.focus();
+        return;
+      }
+
+      // 모달 닫기
+      document.body.removeChild(modal);
+
+      // 실제 저장 수행
+      await performTimelineSave(filename);
+      resolve(true);
+    });
+  });
+}
+
+// 실제 저장 수행 함수
+async function performTimelineSave(filename) {
+  const saveBtn = document.getElementById('save-all-timeline');
+  if (!saveBtn) return;
+
+  // 버튼 상태 변경
+  const originalText = saveBtn.innerHTML;
+  saveBtn.innerHTML = '⏳ 저장 중...';
+  saveBtn.disabled = true;
+
+  try {
+    // 현재 프로젝트 정보 가져오기
+    const currentProject = window.currentProject;
+    if (!currentProject) {
+      throw new Error('프로젝트 정보를 찾을 수 없습니다.');
+    }
+
+    // 타임라인 테이블에서 현재 상태 수집
+    const timelineData = collectTimelineData();
+
+    // 서버에 저장
+    const response = await fetch('/api/project/save-timeline', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        project_id: currentProject.id,
+        timeline_data: timelineData,
+        filename: filename,
+        timestamp: new Date().toISOString()
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`저장 실패: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    // 로컬 스토리지에도 저장 (백업용)
+    const storageKey = `timeline_save_${currentProject.id}_${Date.now()}`;
+    const saveData = {
+      projectId: currentProject.id,
+      timelineData: timelineData,
+      filename: filename,
+      timestamp: new Date().toISOString(),
+      lastModified: Date.now()
+    };
+    localStorage.setItem(storageKey, JSON.stringify(saveData));
+
+    // 성공 피드백
+    saveBtn.innerHTML = '✅ 저장 완료';
+    saveBtn.style.background = '#28a745';
+
+    // 성공 메시지 표시
+    showNotification(`"${filename}" 타임라인이 성공적으로 저장되었습니다.`, 'success');
+
+    setTimeout(() => {
+      saveBtn.innerHTML = originalText;
+      saveBtn.disabled = false;
+      saveBtn.style.background = '';
+    }, 2000);
+
+  } catch (error) {
+    console.error('타임라인 저장 오류:', error);
+
+    // 오류 피드백
+    saveBtn.innerHTML = '❌ 저장 실패';
+    saveBtn.style.background = '#dc3545';
+
+    // 오류 메시지 표시
+    showNotification(`저장 실패: ${error.message}`, 'error');
+
+    setTimeout(() => {
+      saveBtn.innerHTML = originalText;
+      saveBtn.disabled = false;
+      saveBtn.style.background = '';
+    }, 3000);
+  }
+}
+
+// 다른 이름으로 저장 함수
+function saveAsTimeline() {
+  console.log('다른 이름으로 저장 버튼 클릭됨');
+  saveAllTimelineChanges(); // 기존 저장 함수 재사용
+}
+
+// 저장된 타임라인 목록 가져오기
+function getSavedTimelineList() {
+  const savedTimelines = [];
+  const currentProject = window.currentProject;
+
+  if (!currentProject) return savedTimelines;
+
+  // 로컬 스토리지에서 저장된 타임라인들 찾기
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith(`timeline_save_${currentProject.id}_`)) {
+      try {
+        const data = JSON.parse(localStorage.getItem(key));
+        if (data && data.filename) {
+          savedTimelines.push({
+            key: key,
+            filename: data.filename,
+            timestamp: data.timestamp,
+            projectId: data.projectId
+          });
+        }
+      } catch (error) {
+        console.error('타임라인 데이터 파싱 오류:', error);
+      }
+    }
+  }
+
+  // 최신순으로 정렬
+  savedTimelines.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  return savedTimelines;
+}
+
+// 저장된 타임라인 목록 모달 생성
+function createTimelineListModal(title, onSelect) {
+  const savedTimelines = getSavedTimelineList();
+
+  const modal = document.createElement('div');
+  modal.className = 'filename-modal';
+  modal.innerHTML = `
+    <div class="filename-modal-content">
+      <h3>${title}</h3>
+      <div style="max-height: 300px; overflow-y: auto; margin: 1rem 0;">
+        ${savedTimelines.length === 0
+          ? '<p style="text-align: center; color: #666;">저장된 타임라인이 없습니다.</p>'
+          : savedTimelines.map(timeline => `
+              <div class="timeline-item" data-key="${timeline.key}" style="
+                padding: 0.75rem;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                margin-bottom: 0.5rem;
+                cursor: pointer;
+                transition: background-color 0.2s;
+              ">
+                <div style="font-weight: 500;">${timeline.filename}</div>
+                <div style="font-size: 0.8rem; color: #666;">
+                  ${new Date(timeline.timestamp).toLocaleString()}
+                </div>
+              </div>
+            `).join('')}
+      </div>
+      <div class="filename-modal-buttons">
+        <button type="button" class="filename-modal-btn secondary" id="timeline-modal-cancel">취소</button>
+      </div>
+    </div>
+  `;
+
+  // 타임라인 아이템 클릭 이벤트
+  modal.querySelectorAll('.timeline-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const key = item.dataset.key;
+      const filename = item.querySelector('div').textContent;
+      onSelect(key, filename);
+      document.body.removeChild(modal);
+    });
+
+    // 호버 효과
+    item.addEventListener('mouseenter', () => {
+      item.style.backgroundColor = '#f8f9fa';
+    });
+    item.addEventListener('mouseleave', () => {
+      item.style.backgroundColor = '';
+    });
+  });
+
+  // 취소 버튼
+  modal.querySelector('#timeline-modal-cancel').addEventListener('click', () => {
+    document.body.removeChild(modal);
+  });
+
+  // 모달 배경 클릭으로 닫기
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      document.body.removeChild(modal);
+    }
+  });
+
+  return modal;
+}
+
+// 타임라인 불러오기 함수
+function loadTimeline() {
+  console.log('불러오기 버튼 클릭됨');
+  const modal = createTimelineListModal('📂 저장된 타임라인 불러오기', (key, filename) => {
+    try {
+      const data = JSON.parse(localStorage.getItem(key));
+      if (data && data.timelineData) {
+        restoreTimelineState(data.timelineData);
+        showNotification(`"${filename}" 타임라인을 불러왔습니다.`, 'success');
+      } else {
+        throw new Error('타임라인 데이터가 없습니다.');
+      }
+    } catch (error) {
+      console.error('타임라인 불러오기 오류:', error);
+      showNotification(`불러오기 실패: ${error.message}`, 'error');
+    }
+  });
+
+  document.body.appendChild(modal);
+}
+
+// 타임라인 삭제 함수
+function deleteTimeline() {
+  console.log('삭제 버튼 클릭됨');
+  const modal = createTimelineListModal('🗑️ 타임라인 삭제', (key, filename) => {
+    if (confirm(`"${filename}" 타임라인을 정말 삭제하시겠습니까?`)) {
+      try {
+        localStorage.removeItem(key);
+        showNotification(`"${filename}" 타임라인이 삭제되었습니다.`, 'success');
+
+        // 모달을 다시 열어서 업데이트된 목록 표시
+        setTimeout(() => {
+          deleteTimeline();
+        }, 100);
+      } catch (error) {
+        console.error('타임라인 삭제 오류:', error);
+        showNotification(`삭제 실패: ${error.message}`, 'error');
+      }
+    }
+  });
+
+  document.body.appendChild(modal);
+}
+
+// 타임라인 데이터 수집 함수
+function collectTimelineData() {
+  const timelineRows = document.querySelectorAll('tr[data-row-index]');
+  const timelineData = [];
+
+  timelineRows.forEach((row) => {
+    const rowIndex = parseInt(row.dataset.rowIndex);
+
+    // 자막 텍스트 가져오기
+    const subtitleElement = row.querySelector('.subtitle-text');
+    const subtitleText = subtitleElement ? subtitleElement.textContent.trim() : '';
+
+    // 해설 여부 확인
+    const narrationCheckbox = row.querySelector('.narration-checkbox');
+    const isNarration = narrationCheckbox ? narrationCheckbox.checked : false;
+
+    // 실제 저장될 텍스트 (해설인 경우 >> 접두사 추가)
+    const finalText = isNarration ? `>> ${subtitleText}` : subtitleText;
+
+    // 미디어 정보 수집
+    const musicCell = row.querySelector('.bgmusic-column-tl');
+    const imageCell = row.querySelector('.image-column-tl');
+    const videoCell = row.querySelector('.video-column-tl');
+
+    const rowData = {
+      index: rowIndex,
+      subtitle: finalText,
+      is_narration: isNarration,
+      music: musicCell ? musicCell.textContent.trim() : '',
+      image: imageCell ? imageCell.textContent.trim() : '',
+      video: videoCell ? videoCell.textContent.trim() : '',
+      timestamp: new Date().toISOString()
+    };
+
+    timelineData.push(rowData);
+  });
+
+  return timelineData;
+}
+
+// 로컬 스토리지에 타임라인 상태 자동 저장
+function saveTimelineToLocalStorage() {
+  try {
+    const timelineData = collectTimelineData();
+    const currentProject = window.currentProject;
+
+    if (currentProject && timelineData.length > 0) {
+      const storageKey = `timeline_autosave_${currentProject.id}`;
+      const saveData = {
+        projectId: currentProject.id,
+        timelineData: timelineData,
+        timestamp: new Date().toISOString(),
+        lastModified: Date.now()
+      };
+
+      localStorage.setItem(storageKey, JSON.stringify(saveData));
+      console.log('타임라인 자동 저장 완료:', new Date().toLocaleTimeString());
+    }
+  } catch (error) {
+    console.error('로컬 스토리지 저장 실패:', error);
+  }
+}
+
+// 로컬 스토리지에서 타임라인 상태 복원
+function loadTimelineFromLocalStorage() {
+  try {
+    const currentProject = window.currentProject;
+    if (!currentProject) return false;
+
+    const storageKey = `timeline_autosave_${currentProject.id}`;
+    const savedData = localStorage.getItem(storageKey);
+
+    if (!savedData) return false;
+
+    const parsedData = JSON.parse(savedData);
+
+    // 5분 이내 저장된 데이터만 복원 (너무 오래된 데이터는 복원하지 않음)
+    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+    if (parsedData.lastModified < fiveMinutesAgo) {
+      return false;
+    }
+
+    // 타임라인 복원
+    restoreTimelineState(parsedData.timelineData);
+
+    showNotification('이전 편집 내용이 복원되었습니다. ✨', 'info');
+    return true;
+  } catch (error) {
+    console.error('로컬 스토리지 복원 실패:', error);
+    return false;
+  }
+}
+
+// 타임라인 상태 복원 함수
+function restoreTimelineState(timelineData) {
+  timelineData.forEach(item => {
+    const row = document.querySelector(`tr[data-row-index="${item.index}"]`);
+    if (!row) return;
+
+    // 자막 텍스트 복원 (>> 접두사 제거)
+    const subtitleElement = row.querySelector('.subtitle-text');
+    if (subtitleElement) {
+      const originalText = item.subtitle.startsWith('>> ')
+        ? item.subtitle.substring(3)
+        : item.subtitle;
+      subtitleElement.textContent = originalText;
+    }
+
+    // 해설 체크박스 상태 복원
+    const narrationCheckbox = row.querySelector('.narration-checkbox');
+    if (narrationCheckbox) {
+      narrationCheckbox.checked = item.is_narration;
+
+      // 해설 스타일 적용
+      if (item.is_narration) {
+        subtitleElement?.classList.add('narration');
+      } else {
+        subtitleElement?.classList.remove('narration');
+      }
+    }
+  });
+}
+
+// 타임라인 버튼 이벤트 리스너 설정
+function setupTimelineButtons() {
+  console.log('타임라인 버튼 설정 시작...');
+
+  // 전체 재생 버튼 이벤트 리스너 추가
+  const playAllButton = document.getElementById('play-all-audio');
+  if (playAllButton) {
+    playAllButton.addEventListener('click', playAllAudioClips);
+    console.log('전체 재생 버튼 연결됨');
+  } else {
+    console.warn('전체 재생 버튼을 찾을 수 없음');
+  }
+
+  // 전체 저장 버튼 이벤트 리스너 추가
+  const saveAllButton = document.getElementById('save-all-timeline');
+  if (saveAllButton) {
+    saveAllButton.addEventListener('click', saveAllTimelineChanges);
+    console.log('전체 저장 버튼 연결됨');
+  } else {
+    console.warn('전체 저장 버튼을 찾을 수 없음');
+  }
+
+  // 다른 이름으로 저장 버튼 이벤트 리스너 추가
+  const saveAsButton = document.getElementById('save-as-timeline');
+  if (saveAsButton) {
+    saveAsButton.addEventListener('click', saveAsTimeline);
+    console.log('다른 이름 저장 버튼 연결됨');
+  } else {
+    console.warn('다른 이름 저장 버튼을 찾을 수 없음');
+  }
+
+  // 불러오기 버튼 이벤트 리스너 추가
+  const loadButton = document.getElementById('load-timeline');
+  if (loadButton) {
+    loadButton.addEventListener('click', loadTimeline);
+    console.log('불러오기 버튼 연결됨');
+  } else {
+    console.warn('불러오기 버튼을 찾을 수 없음');
+  }
+
+  // 삭제 버튼 이벤트 리스너 추가
+  const deleteButton = document.getElementById('delete-timeline');
+  if (deleteButton) {
+    deleteButton.addEventListener('click', deleteTimeline);
+    console.log('삭제 버튼 연결됨');
+  } else {
+    console.warn('삭제 버튼을 찾을 수 없음');
+  }
+
+  console.log('타임라인 버튼 설정 완료');
+
+  // AI 버튼들도 함께 설정
+  setupAIButtons();
+}
+
+// AI 버튼 이벤트 리스너 설정
+function setupAIButtons() {
+  console.log('AI 버튼 설정 시작...');
+
+  // 이벤트 위임을 사용하여 동적으로 생성된 버튼들에도 이벤트 적용
+  document.addEventListener('click', function(e) {
+    const target = e.target;
+
+    if (target.classList.contains('reinterpret-btn')) {
+      e.preventDefault();
+      const rowIndex = target.dataset.rowIndex;
+      reinterpretText(rowIndex, target);
+    } else if (target.classList.contains('translate-jp-btn')) {
+      e.preventDefault();
+      const rowIndex = target.dataset.rowIndex;
+      translateToJapanese(rowIndex, target);
+    } else if (target.classList.contains('backtranslate-kr-btn')) {
+      e.preventDefault();
+      const rowIndex = target.dataset.rowIndex;
+      backTranslateToKorean(rowIndex, target);
+    }
+  });
+
+  console.log('AI 버튼 설정 완료');
+}
+
+// 재해석 AI 함수
+async function reinterpretText(rowIndex, button) {
+  console.log(`재해석 AI 실행: 행 ${rowIndex}`);
+
+  const row = document.querySelector(`tr[data-row-index="${rowIndex}"]`);
+  if (!row) return;
+
+  const subtitleElement = row.querySelector('.subtitle-text');
+  const originalText = subtitleElement ? subtitleElement.textContent.trim() : '';
+
+  if (!originalText) {
+    showNotification('재해석할 텍스트가 없습니다.', 'error');
+    return;
+  }
+
+  // 버튼 로딩 상태
+  button.classList.add('loading');
+  button.disabled = true;
+
+  try {
+    const response = await fetch('/api/ai/reinterpret', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: originalText,
+        context: 'subtitle_reinterpretation'
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`재해석 실패: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    if (result.reinterpretedText) {
+      subtitleElement.textContent = result.reinterpretedText;
+      showNotification('텍스트가 재해석되었습니다.', 'success');
+
+      // 자동 저장 트리거
+      saveTimelineToLocalStorage();
+    } else {
+      throw new Error('재해석 결과가 없습니다.');
+    }
+
+  } catch (error) {
+    console.error('재해석 오류:', error);
+    showNotification(`재해석 실패: ${error.message}`, 'error');
+  } finally {
+    button.classList.remove('loading');
+    button.disabled = false;
+  }
+}
+
+// 일본어 번역 AI 함수
+async function translateToJapanese(rowIndex, button) {
+  console.log(`일본어 번역 AI 실행: 행 ${rowIndex}`);
+
+  const row = document.querySelector(`tr[data-row-index="${rowIndex}"]`);
+  if (!row) return;
+
+  const subtitleElement = row.querySelector('.subtitle-text');
+  const originalText = subtitleElement ? subtitleElement.textContent.trim() : '';
+
+  if (!originalText) {
+    showNotification('번역할 텍스트가 없습니다.', 'error');
+    return;
+  }
+
+  // 버튼 로딩 상태
+  button.classList.add('loading');
+  button.disabled = true;
+
+  try {
+    const response = await fetch('/api/ai/translate-jp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: originalText,
+        sourceLanguage: 'ko',
+        targetLanguage: 'ja'
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`일본어 번역 실패: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    if (result.translatedText) {
+      subtitleElement.textContent = result.translatedText;
+      showNotification('일본어로 번역되었습니다.', 'success');
+
+      // 자동 저장 트리거
+      saveTimelineToLocalStorage();
+    } else {
+      throw new Error('번역 결과가 없습니다.');
+    }
+
+  } catch (error) {
+    console.error('일본어 번역 오류:', error);
+    showNotification(`일본어 번역 실패: ${error.message}`, 'error');
+  } finally {
+    button.classList.remove('loading');
+    button.disabled = false;
+  }
+}
+
+// 역번역 한국어 AI 함수
+async function backTranslateToKorean(rowIndex, button) {
+  console.log(`역번역 한국어 AI 실행: 행 ${rowIndex}`);
+
+  const row = document.querySelector(`tr[data-row-index="${rowIndex}"]`);
+  if (!row) return;
+
+  const subtitleElement = row.querySelector('.subtitle-text');
+  const originalText = subtitleElement ? subtitleElement.textContent.trim() : '';
+
+  if (!originalText) {
+    showNotification('역번역할 텍스트가 없습니다.', 'error');
+    return;
+  }
+
+  // 버튼 로딩 상태
+  button.classList.add('loading');
+  button.disabled = true;
+
+  try {
+    const response = await fetch('/api/ai/backtranslate-kr', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: originalText,
+        sourceLanguage: 'ja',
+        targetLanguage: 'ko'
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`역번역 실패: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    if (result.translatedText) {
+      subtitleElement.textContent = result.translatedText;
+      showNotification('한국어로 역번역되었습니다.', 'success');
+
+      // 자동 저장 트리거
+      saveTimelineToLocalStorage();
+    } else {
+      throw new Error('역번역 결과가 없습니다.');
+    }
+
+  } catch (error) {
+    console.error('역번역 오류:', error);
+    showNotification(`역번역 실패: ${error.message}`, 'error');
+  } finally {
+    button.classList.remove('loading');
+    button.disabled = false;
+  }
+}
+
+// 자동 저장 이벤트 리스너 설정
+function setupAutoSave() {
+  // 입력 변경 시 자동 저장 (디바운스 적용)
+  let autoSaveTimeout;
+  const debouncedAutoSave = () => {
+    clearTimeout(autoSaveTimeout);
+    autoSaveTimeout = setTimeout(() => {
+      saveTimelineToLocalStorage();
+      // 상태 표시 (선택사항)
+      const saveIndicator = document.getElementById('autosave-indicator');
+      if (saveIndicator) {
+        saveIndicator.textContent = '🟢 자동저장됨';
+        setTimeout(() => {
+          saveIndicator.textContent = '';
+        }, 2000);
+      }
+    }, 2000); // 2초 후 저장
+  };
+
+  // 타임라인 테이블 변경 감지
+  const timelineContainer = document.querySelector('.timeline-table-container');
+  if (timelineContainer) {
+    timelineContainer.addEventListener('input', debouncedAutoSave);
+    timelineContainer.addEventListener('change', debouncedAutoSave);
+  }
+
+  // 페이지 종료 전 자동 저장
+  window.addEventListener('beforeunload', () => {
+    saveTimelineToLocalStorage();
+  });
+
+  // 주기적 자동 저장 (30초마다)
+  setInterval(saveTimelineToLocalStorage, 30000);
+}
+
+// 통합 알림 메시지 표시 함수
+function showNotification(message, type = 'info') {
+  // 기존 알림 제거
+  const existingNotification = document.querySelector('.timeline-notification, .notification');
+  if (existingNotification) {
+    existingNotification.remove();
+  }
+
+  // 새 알림 생성
+  const notification = document.createElement('div');
+
+  // 타임라인 섹션이 있으면 타임라인용 스타일, 없으면 일반 스타일
+  const timelineSection = document.querySelector('.timeline-section');
+
+  if (timelineSection) {
+    // 타임라인 알림 스타일 (CSS 클래스 사용)
+    notification.className = `timeline-notification notification-${type}`;
+    notification.textContent = message;
+    timelineSection.insertBefore(notification, timelineSection.firstChild);
+  } else {
+    // 일반 알림 스타일 (fixed position)
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      background: ${type === 'success' ? '#28a745' : type === 'error' ? '#dc3545' : '#17a2b8'};
+      color: white;
+      border-radius: 4px;
+      z-index: 1000;
+      animation: slideIn 0.3s ease;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    `;
+    document.body.appendChild(notification);
+  }
+
+  // 3초 후 자동 제거
+  setTimeout(() => {
+    if (notification.parentNode) {
+      notification.remove();
+    }
+  }, 3000);
+}
+
+// 체크박스 상태 변경 시 자막 스타일 업데이트
+function setupNarrationCheckboxListeners() {
+  const checkboxes = document.querySelectorAll('.narration-checkbox');
+  checkboxes.forEach(checkbox => {
+    checkbox.addEventListener('change', function() {
+      const rowIndex = parseInt(this.dataset.row);
+      const isChecked = this.checked;
+
+      // 체크박스 아이콘 업데이트
+      const icon = this.nextElementSibling.querySelector('.checkbox-icon');
+      if (icon) {
+        icon.textContent = isChecked ? '🗣️' : '💬';
+      }
+
+      // 자막 스타일 업데이트
+      const subtitleText = document.querySelector(`tr[data-row-index="${rowIndex}"] .subtitle-text`);
+      if (subtitleText) {
+        if (isChecked) {
+          subtitleText.classList.add('narration');
+        } else {
+          subtitleText.classList.remove('narration');
+        }
+      }
+
+      // 서버에 상태 저장 (나중에 구현)
+      // updateNarrationStatus(rowIndex, isChecked);
+    });
+  });
 }
 
 // 타임라인 테이블 편집 기능들
@@ -4333,28 +5182,6 @@ function deleteTimelineRow(rowIndex) {
   showNotification('타임라인 항목이 삭제되었습니다.', 'info');
 }
 
-function showNotification(message, type = 'info') {
-  const notification = document.createElement('div');
-  notification.className = `notification ${type}`;
-  notification.textContent = message;
-  notification.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    padding: 12px 20px;
-    background: ${type === 'success' ? '#28a745' : type === 'error' ? '#dc3545' : '#17a2b8'};
-    color: white;
-    border-radius: 4px;
-    z-index: 1000;
-    animation: slideIn 0.3s ease;
-  `;
-
-  document.body.appendChild(notification);
-
-  setTimeout(() => {
-    notification.remove();
-  }, 3000);
-}
 
 // ---------------------------------------------------------------------------
 // Video Import functionality
