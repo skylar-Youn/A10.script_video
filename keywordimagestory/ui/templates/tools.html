@@ -294,5 +294,64 @@
     </article>
   </section>
 
+  <!-- Tool 5: 자막과 영상 해설, 영상 가져오기 -->
+  <section class="tool-section">
+    <article class="tool-card import-tool">
+      <header class="tool-header">
+        <div class="tool-icon">📹</div>
+        <div class="tool-info">
+          <h2>5. 자막과 영상 해설, 영상 가져오기</h2>
+          <p>YouTube 다운로드 서버에서 자막과 영상을 가져와 프로젝트에 등록합니다.</p>
+        </div>
+      </header>
+
+      <div class="tool-content">
+        <form id="video-import-form" class="tool-form">
+          <div class="mode-selection">
+            <label>다운로드 서버
+              <select name="server" id="import-server">
+                <option value="8003" selected>http://127.0.0.1:8003 (YouTube 다운로드)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="import-options">
+            <button type="button" id="fetch-downloads" class="secondary">다운로드 목록 새로고침</button>
+            <div id="download-list" class="download-list">
+              <div class="placeholder"><p>다운로드 목록을 불러오려면 '새로고침' 버튼을 클릭하세요.</p></div>
+            </div>
+          </div>
+
+          <div class="selected-import">
+            <label>선택된 파일
+              <select name="selected_file" id="selected-file" disabled>
+                <option value="">파일을 선택하세요</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="form-controls">
+            <button type="submit" class="import-btn">자막과 영상 가져오기</button>
+            <button type="button" id="save-video-import-btn" class="save-btn" disabled>결과 저장</button>
+            <button type="button" class="refresh-btn secondary">새로고침</button>
+          </div>
+        </form>
+
+        <div class="tool-results">
+          <div id="video-import-result" class="import-result">
+            <div class="placeholder"><p>가져온 자막과 영상이 여기에 표시됩니다.</p></div>
+          </div>
+
+          <div class="saved-results" id="video-import-saved">
+            <h3>💾 가져온 영상 목록</h3>
+            <div class="saved-body" id="video-import-saved-body">
+              <div class="placeholder"><p>가져온 영상이 없습니다.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
 </div>
 {% endblock %}

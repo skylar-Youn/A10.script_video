@@ -24,31 +24,36 @@ const state = {
     story_keywords: null,
     image_story: null,
     shorts_script: null,
-    shorts_scenes: null
+    shorts_scenes: null,
+    video_import: null
   },
   savedRecords: {
     story_keywords: [],
     image_story: [],
     shorts_script: [],
-    shorts_scenes: []
+    shorts_scenes: [],
+    video_import: []
   },
   activeRecords: {
     story_keywords: null,
     image_story: null,
     shorts_script: null,
-    shorts_scenes: null
+    shorts_scenes: null,
+    video_import: null
   },
   checkedRecords: {
     story_keywords: new Set(),
     image_story: new Set(),
     shorts_script: new Set(),
-    shorts_scenes: new Set()
+    shorts_scenes: new Set(),
+    video_import: new Set()
   },
   lastRequests: {
     story_keywords: null,
     image_story: null,
     shorts_script: null,
-    shorts_scenes: null
+    shorts_scenes: null,
+    video_import: null
   },
   audioResults: {
     shorts_script: null,
@@ -60,7 +65,8 @@ const TOOL_KEYS = {
   STORY: "story_keywords",
   IMAGE_STORY: "image_story",
   SCRIPT: "shorts_script",
-  SCENES: "shorts_scenes"
+  SCENES: "shorts_scenes",
+  VIDEO_IMPORT: "video_import"
 };
 
 const GENERATION_ENDPOINTS = {
@@ -3969,6 +3975,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // 모든 도구의 저장된 기록 로드
+  async function loadAllToolRecords() {
+    for (const tool of Object.values(TOOL_KEYS)) {
+      try {
+        await loadSavedRecords(tool);
+      } catch (error) {
+        console.error(`Failed to load records for ${tool}:`, error);
+      }
+    }
+  }
+
   const persistedSelection = loadPersistedSelection();
   const toolSelect = document.getElementById("tool-selection");
   if (toolSelect) {
@@ -3978,6 +3995,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (persistedSelection?.tool) {
       toolSelect.value = persistedSelection.tool;
     }
+
+    // 페이지 로드 시 모든 기록 로드
+    loadAllToolRecords();
   }
   if (persistedSelection?.tool) {
     state.activeRecords[persistedSelection.tool] = persistedSelection.recordId || null;
@@ -4053,6 +4073,13 @@ document.addEventListener("DOMContentLoaded", () => {
           }
           if (Array.isArray(payload.images)) {
             currentProject.image_prompts = payload.images;
+            // Save image prompts to server
+            for (const image of payload.images) {
+              await api(`/api/projects/${project.project_id}/prompts/image`, {
+                method: "POST",
+                body: JSON.stringify(image)
+              });
+            }
           }
         }
 
@@ -4062,6 +4089,13 @@ document.addEventListener("DOMContentLoaded", () => {
           }
           if (Array.isArray(payload.scenes)) {
             currentProject.video_prompts = payload.scenes;
+            // Save video prompts to server
+            for (const scene of payload.scenes) {
+              await api(`/api/projects/${project.project_id}/prompts/video`, {
+                method: "POST",
+                body: JSON.stringify(scene)
+              });
+            }
           }
         }
 
@@ -4251,6 +4285,351 @@ function showNotification(message, type = 'info') {
   setTimeout(() => {
     notification.remove();
   }, 3000);
+}
+
+// ---------------------------------------------------------------------------
+// Video Import functionality
+// ---------------------------------------------------------------------------
+
+let downloadData = [];
+
+async function fetchDownloadList() {
+  try {
+    const response = await fetch('/api/downloads');
+    const data = await response.json();
+    downloadData = data.files || [];
+
+    renderDownloadList();
+    updateSelectedFileDropdown();
+
+    showNotification(`${data.count}개의 파일을 찾았습니다.`, 'success');
+  } catch (error) {
+    console.error('Error fetching downloads:', error);
+    showNotification('다운로드 목록을 불러오는데 실패했습니다.', 'error');
+  }
+}
+
+function renderDownloadList() {
+  const container = document.getElementById('download-list');
+  if (!container) return;
+
+  if (!downloadData.length) {
+    container.innerHTML = '<div class="placeholder"><p>다운로드된 파일이 없습니다.</p></div>';
+    return;
+  }
+
+  const html = downloadData.map(file => `
+    <div class="download-item" data-file-id="${file.id}">
+      <div class="download-info">
+        <h4>${file.title}</h4>
+        <div class="file-details">
+          <span class="subtitle-info">자막: ${file.subtitle_file.split('/').pop()}</span>
+          <span class="video-info">영상: ${file.has_video ? file.video_files.length + '개' : '없음'}</span>
+          <span class="size-info">크기: ${(file.size / 1024).toFixed(1)}KB</span>
+        </div>
+      </div>
+      <div class="download-actions">
+        <button type="button" class="select-file-btn" data-file-id="${file.id}">선택</button>
+      </div>
+    </div>
+  `).join('');
+
+  container.innerHTML = html;
+
+  // 이벤트 리스너 추가
+  container.addEventListener('click', handleDownloadItemClick);
+}
+
+function handleDownloadItemClick(event) {
+  const selectBtn = event.target.closest('.select-file-btn');
+  if (selectBtn) {
+    const fileId = selectBtn.dataset.fileId;
+    selectDownloadFile(fileId);
+  }
+}
+
+function selectDownloadFile(fileId) {
+  // 기존 선택 해제
+  document.querySelectorAll('.download-item').forEach(item => {
+    item.classList.remove('selected');
+  });
+
+  // 새 선택
+  const selectedItem = document.querySelector(`[data-file-id="${fileId}"]`);
+  if (selectedItem) {
+    selectedItem.classList.add('selected');
+  }
+
+  // 드롭다운 업데이트
+  const selectedFileSelect = document.getElementById('selected-file');
+  if (selectedFileSelect) {
+    selectedFileSelect.value = fileId;
+    selectedFileSelect.disabled = false;
+  }
+}
+
+function updateSelectedFileDropdown() {
+  const selectedFileSelect = document.getElementById('selected-file');
+  if (!selectedFileSelect) return;
+
+  selectedFileSelect.innerHTML = '<option value="">파일을 선택하세요</option>';
+
+  downloadData.forEach(file => {
+    const option = document.createElement('option');
+    option.value = file.id;
+    option.textContent = file.title;
+    selectedFileSelect.appendChild(option);
+  });
+
+  if (downloadData.length > 0) {
+    selectedFileSelect.disabled = false;
+  }
+}
+
+async function importVideo(formData) {
+  try {
+    const response = await fetch('/api/import-video', {
+      method: 'POST',
+      body: formData
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      renderImportResult(result);
+      showNotification(result.message, 'success');
+
+      // 저장 버튼 활성화
+      const saveBtn = document.getElementById('save-video-import-btn');
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.onclick = () => saveVideoImportResult(result);
+      }
+    } else {
+      throw new Error(result.message || 'Import failed');
+    }
+  } catch (error) {
+    console.error('Error importing video:', error);
+    showNotification('영상 가져오기에 실패했습니다: ' + error.message, 'error');
+  }
+}
+
+function renderImportResult(result) {
+  const container = document.getElementById('video-import-result');
+  if (!container) return;
+
+  // Handle the direct API response structure
+  const subtitles = result.subtitles || [];
+  const subtitleCount = result.subtitle_count || 0;
+  const videoCount = result.video_count || 0;
+
+  const html = `
+    <div class="import-success">
+      <h4>✅ 가져오기 완료</h4>
+      <div class="import-details">
+        <p><strong>메시지:</strong> ${result.message}</p>
+        <p><strong>자막 개수:</strong> ${subtitleCount}개</p>
+        <p><strong>영상 파일:</strong> ${videoCount}개</p>
+        <p><strong>가져온 시간:</strong> ${new Date().toLocaleString()}</p>
+      </div>
+      <div class="subtitle-preview">
+        <h5>자막 미리보기 (처음 3개)</h5>
+        <div class="subtitle-list">
+          ${subtitles.slice(0, 3).map(sub => `
+            <div class="subtitle-item">
+              <span class="time">${sub.start_time} → ${sub.end_time}</span>
+              <span class="text">${sub.text}</span>
+            </div>
+          `).join('')}
+          ${subtitles.length > 3 ? `<p>... 외 ${subtitles.length - 3}개</p>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+// 현재 선택된 파일명 저장 변수
+let currentSelectedFileName = '';
+
+// 이벤트 리스너 설정
+document.addEventListener('DOMContentLoaded', function() {
+  // 다운로드 목록 새로고침 버튼
+  const fetchBtn = document.getElementById('fetch-downloads');
+  if (fetchBtn) {
+    fetchBtn.addEventListener('click', fetchDownloadList);
+  }
+
+  // 영상 가져오기 폼
+  const importForm = document.getElementById('video-import-form');
+  if (importForm) {
+    importForm.addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const formData = new FormData(this);
+      const fileId = formData.get('selected_file');
+
+      if (!fileId) {
+        showNotification('파일을 선택해주세요.', 'error');
+        return;
+      }
+
+      await importVideo(formData);
+    });
+  }
+
+  // 선택된 파일 드롭다운 변경 이벤트
+  const selectedFileSelect = document.getElementById('selected-file');
+  if (selectedFileSelect) {
+    selectedFileSelect.addEventListener('change', function() {
+      const fileId = this.value;
+      if (fileId) {
+        // 선택된 파일명 저장 (option의 텍스트에서 가져오기)
+        const selectedOption = this.options[this.selectedIndex];
+        currentSelectedFileName = selectedOption.text || fileId;
+        selectDownloadFile(fileId);
+      }
+    });
+  }
+
+  // 저장된 비디오 가져오기 목록 로드
+  loadVideoImportRecords();
+});
+
+// 비디오 가져오기 결과 저장
+async function saveVideoImportResult(result) {
+  const defaultTitle = currentSelectedFileName || `가져온 영상 ${new Date().toLocaleDateString()}`;
+  const title = prompt('저장할 제목을 입력하세요:', defaultTitle);
+  if (!title) return;
+
+  try {
+    const payload = {
+      subtitle_count: result.subtitle_count,
+      video_count: result.video_count,
+      subtitles: result.subtitles,
+      message: result.message
+    };
+
+    const response = await fetch('/api/tools/video_import/records', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, payload })
+    });
+
+    if (response.ok) {
+      showNotification(`"${title}" 저장되었습니다.`, 'success');
+      loadVideoImportRecords();
+
+      // 저장 버튼 비활성화
+      const saveBtn = document.getElementById('save-video-import-btn');
+      if (saveBtn) {
+        saveBtn.disabled = true;
+      }
+    } else {
+      throw new Error('저장에 실패했습니다.');
+    }
+  } catch (error) {
+    console.error('Error saving video import result:', error);
+    showNotification('저장에 실패했습니다: ' + error.message, 'error');
+  }
+}
+
+// 저장된 비디오 가져오기 기록 로드
+async function loadVideoImportRecords() {
+  try {
+    const response = await fetch('/api/tools/video_import/records');
+    const records = await response.json();
+    renderVideoImportRecords(records);
+  } catch (error) {
+    console.error('Error loading video import records:', error);
+  }
+}
+
+// 저장된 비디오 가져오기 기록 렌더링
+function renderVideoImportRecords(records) {
+  const container = document.getElementById('video-import-saved-body');
+  if (!container) return;
+
+  if (!records || records.length === 0) {
+    container.innerHTML = '<div class="placeholder"><p>가져온 영상이 없습니다.</p></div>';
+    return;
+  }
+
+  const html = records.map(record => `
+    <div class="saved-item">
+      <input type="checkbox" id="video-import-${record.id}" />
+      <label for="video-import-${record.id}" class="saved-item-label">
+        <div class="saved-item-title">${record.title}</div>
+        <div class="saved-item-meta">
+          자막 ${record.payload.subtitle_count}개, 영상 ${record.payload.video_count}개 ·
+          ${new Date(record.created_at).toLocaleString()}
+        </div>
+      </label>
+      <div class="saved-item-actions">
+        <button type="button" class="load-btn" data-record-id="${record.id}">불러오기</button>
+        <button type="button" class="delete-btn" data-record-id="${record.id}">삭제</button>
+      </div>
+    </div>
+  `).join('');
+
+  container.innerHTML = html;
+
+  // 이벤트 리스너 추가
+  container.querySelectorAll('.load-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const recordId = btn.getAttribute('data-record-id');
+      loadVideoImportRecord(recordId);
+    });
+  });
+
+  container.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const recordId = btn.getAttribute('data-record-id');
+      deleteVideoImportRecord(recordId);
+    });
+  });
+}
+
+// 저장된 비디오 가져오기 기록 불러오기
+async function loadVideoImportRecord(recordId) {
+  try {
+    const response = await fetch(`/api/tools/video_import/records/${recordId}`);
+    const record = await response.json();
+
+    renderImportResult({
+      subtitle_count: record.payload.subtitle_count,
+      video_count: record.payload.video_count,
+      subtitles: record.payload.subtitles,
+      message: record.payload.message
+    });
+
+    showNotification(`"${record.title}" 불러왔습니다.`, 'success');
+  } catch (error) {
+    console.error('Error loading video import record:', error);
+    showNotification('불러오기에 실패했습니다: ' + error.message, 'error');
+  }
+}
+
+// 저장된 비디오 가져오기 기록 삭제
+async function deleteVideoImportRecord(recordId) {
+  if (!confirm('정말 삭제하시겠습니까?')) return;
+
+  try {
+    const response = await fetch(`/api/tools/video_import/records/${recordId}`, {
+      method: 'DELETE'
+    });
+
+    if (response.ok) {
+      showNotification('삭제되었습니다.', 'success');
+      loadVideoImportRecords();
+    } else {
+      throw new Error('삭제에 실패했습니다.');
+    }
+  } catch (error) {
+    console.error('Error deleting video import record:', error);
+    showNotification('삭제에 실패했습니다: ' + error.message, 'error');
+  }
 }
 
 

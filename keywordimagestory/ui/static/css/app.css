@@ -2963,3 +2963,170 @@ textarea.inline-edit {
   cursor: default;
   color: var(--muted-color);
 }
+
+/* Video Import Styles */
+.download-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin: 1rem 0;
+}
+
+.download-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--card-background-color);
+  transition: all 0.2s ease;
+}
+
+.download-item:hover {
+  background: var(--contrast-hover);
+}
+
+.download-item.selected {
+  background: var(--primary-hover);
+  border-color: var(--primary);
+}
+
+.download-item:last-child {
+  border-bottom: none;
+}
+
+.download-info h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  color: var(--color);
+}
+
+.file-details {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--muted-color);
+}
+
+.file-details span {
+  background: var(--contrast);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.download-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.select-file-btn {
+  padding: 0.5rem 1rem;
+  background: var(--primary);
+  color: var(--primary-inverse);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background-color 0.2s ease;
+}
+
+.select-file-btn:hover {
+  background: var(--primary-hover);
+}
+
+.import-success {
+  background: var(--success-background);
+  border: 1px solid var(--success);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 1rem 0;
+}
+
+.import-success h4 {
+  color: var(--success);
+  margin: 0 0 1rem 0;
+}
+
+.import-details {
+  margin: 1rem 0;
+}
+
+.import-details p {
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+}
+
+.subtitle-preview {
+  margin-top: 1.5rem;
+}
+
+.subtitle-preview h5 {
+  margin: 0 0 1rem 0;
+  color: var(--color);
+}
+
+.subtitle-list {
+  background: var(--code-background-color);
+  border-radius: 4px;
+  padding: 1rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.subtitle-item {
+  display: flex;
+  gap: 1rem;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  background: var(--card-background-color);
+  border-radius: 4px;
+}
+
+.subtitle-item .time {
+  min-width: 150px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.subtitle-item .text {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--color);
+}
+
+.import-tool .tool-icon {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.selected-import select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 섹션 5 영상 가져오기 텍스트 색상 수정 */
+.import-tool,
+.import-tool p,
+.import-tool span,
+.import-tool label,
+.import-tool .tool-description {
+  color: #000000 !important;
+}
+
+.import-tool h2,
+.import-tool h3,
+.import-tool h4 {
+  color: #000000 !important;
+}
+
+/* 가져온 영상 목록 텍스트 색상 */
+#video-import-saved,
+#video-import-saved p,
+#video-import-saved span,
+#video-import-saved label,
+#video-import-saved .saved-item-title,
+#video-import-saved .saved-item-meta {
+  color: #000000 !important;
+}

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import logging
+import os
+import glob
 from datetime import datetime
 from typing import Any
+from pathlib import Path
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -546,6 +549,118 @@ async def api_delete_history_entry(project_id: str, version: int) -> Response:
     if entry is None:
         raise HTTPException(status_code=404, detail="History entry not found")
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Video Import endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/downloads")
+async def api_get_downloads():
+    """다운로드 폴더에서 사용 가능한 영상과 자막 파일 목록을 반환합니다."""
+    try:
+        download_dir = Path("/home/sk/ws/A10.script_video/youtube/download")
+        if not download_dir.exists():
+            return {"files": [], "message": "Download directory not found"}
+
+        files = []
+        # SRT 파일들을 찾고 해당하는 영상 파일 확인
+        for srt_file in download_dir.glob("*.srt"):
+            # 영상 파일 찾기 (webm, mp4 등)
+            base_name = srt_file.stem.rsplit('.', 1)[0] if '.' in srt_file.stem else srt_file.stem
+            video_files = list(download_dir.glob(f"{base_name}.*"))
+            video_files = [f for f in video_files if f.suffix.lower() in ['.webm', '.mp4', '.mkv', '.avi']]
+
+            file_info = {
+                "id": base_name,
+                "title": base_name.replace('[', '').replace(']', '').split(' [')[0],
+                "subtitle_file": str(srt_file),
+                "video_files": [str(f) for f in video_files],
+                "has_video": len(video_files) > 0,
+                "size": srt_file.stat().st_size if srt_file.exists() else 0,
+                "modified": srt_file.stat().st_mtime if srt_file.exists() else 0
+            }
+            files.append(file_info)
+
+        return {"files": files, "count": len(files)}
+
+    except Exception as e:
+        logging.error(f"Error listing downloads: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing downloads: {str(e)}")
+
+
+@app.post("/api/import-video")
+async def api_import_video(
+    selected_file: str = Form(...),
+    title: str = Form(None)
+):
+    """선택된 영상과 자막을 프로젝트로 가져옵니다."""
+    try:
+        download_dir = Path("/home/sk/ws/A10.script_video/youtube/download")
+        logging.info(f"Looking for file: {selected_file}")
+
+        # SRT 파일 찾기 (정확한 파일명으로)
+        srt_file = download_dir / f"{selected_file}.ko.srt"
+        if not srt_file.exists():
+            # .en.srt도 시도
+            srt_file = download_dir / f"{selected_file}.en.srt"
+            if not srt_file.exists():
+                # 다른 언어 확장자들도 시도
+                srt_files = list(download_dir.glob(f"{selected_file}.*.srt"))
+                if srt_files:
+                    srt_file = srt_files[0]
+                else:
+                    raise HTTPException(status_code=404, detail="Subtitle file not found")
+
+        logging.info(f"Found SRT file: {srt_file}")
+
+        # 영상 파일 찾기
+        video_files = []
+        for ext in ['.webm', '.mp4', '.mkv', '.avi']:
+            video_file = download_dir / f"{selected_file}{ext}"
+            if video_file.exists():
+                video_files.append(video_file)
+
+        # SRT 파일 읽기
+        subtitles = []
+        with open(srt_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # 간단한 SRT 파싱
+        subtitle_blocks = content.strip().split('\n\n')
+        for i, block in enumerate(subtitle_blocks):
+            if not block.strip():
+                continue
+            lines = block.strip().split('\n')
+            if len(lines) >= 3:
+                index = lines[0]
+                time_range = lines[1]
+                text = '\n'.join(lines[2:])
+
+                # 시간 파싱 (00:00:00,000 --> 00:00:05,000)
+                if '-->' in time_range:
+                    start_time, end_time = time_range.split(' --> ')
+                    subtitles.append({
+                        "index": len(subtitles) + 1,
+                        "start_time": start_time.strip(),
+                        "end_time": end_time.strip(),
+                        "text": text.strip(),
+                        "scene_tag": f"[씬 {len(subtitles) + 1}]",
+                        "status": "imported"
+                    })
+
+        # 성공 응답 반환
+        return {
+            "success": True,
+            "message": f"성공적으로 가져왔습니다. 자막 {len(subtitles)}개, 영상 {len(video_files)}개",
+            "subtitle_count": len(subtitles),
+            "video_count": len(video_files),
+            "subtitles": subtitles
+        }
+
+    except Exception as e:
+        logging.error(f"Error importing video: {e}")
+        raise HTTPException(status_code=500, detail=f"Error importing video: {str(e)}")
 
 
 def include_router(app_: FastAPI) -> None:

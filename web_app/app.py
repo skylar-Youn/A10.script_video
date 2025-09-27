@@ -56,6 +56,7 @@ from ai_shorts_maker.services import (
     update_subtitle_style,
     update_subtitle,
 )
+import ai_shorts_maker.translator as translator_module
 from ai_shorts_maker.translator import (
     TranslatorProject,
     TranslatorProjectCreate,

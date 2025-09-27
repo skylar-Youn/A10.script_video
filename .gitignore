@@ -29,5 +29,5 @@ ai_shorts_maker/assets/*
 __pycache__/*
 *.pyc 
 
-
+*.md 
 *.xlsx
