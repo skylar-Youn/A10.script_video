@@ -1918,6 +1918,19 @@ function buildProjectMarkup(project, totalDuration) {
             <button id="delete-timeline" type="button" class="danger" title="저장된 타임라인 삭제">
               🗑️ 삭제
             </button>
+            <div style="border-left: 1px solid #ddd; margin: 0 0.5rem; height: 32px;"></div>
+            <button id="bulk-reinterpret-all" type="button" class="secondary" title="모든 해설 부분을 재해석AI로 변환">
+              🔄 전체 재해석
+            </button>
+            <button id="bulk-translate-jp-all" type="button" class="secondary" title="모든 해설 부분을 일본어로 번역">
+              🇯🇵 전체 일본어
+            </button>
+            <button id="bulk-backtranslate-kr-all" type="button" class="secondary" title="모든 해설 부분을 역번역 한국어로 변환">
+              🔙 전체 역번역
+            </button>
+            <button id="bulk-tts-all" type="button" class="secondary" title="모든 해설 부분을 음성으로 변환">
+              🎤 전체 음성
+            </button>
             <span id="autosave-indicator" style="font-size: 0.8rem; color: #666; margin-left: 1rem; min-width: 80px;"></span>
           </div>
         </div>
@@ -1938,6 +1951,52 @@ function buildProjectMarkup(project, totalDuration) {
               ${renderTimelineTableRows(project)}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- 전체 AI 변환 섹션 -->
+      <section class="bulk-ai-section" style="margin-bottom: 2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="margin: 0;">🤖 해설 부분 전체 AI 변환</h3>
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <label for="bulk-ai-type" style="font-weight: 500;">변환 유형:</label>
+              <select id="bulk-ai-type" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                <option value="">변환 유형 선택</option>
+                <option value="reinterpret">🔄 재해석AI</option>
+                <option value="translate-jp">🇯🇵 일본어번역AI</option>
+                <option value="backtranslate-kr">🔙 역번역한국어AI</option>
+                <option value="tts">🎤 음성변환</option>
+              </select>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button id="bulk-ai-start" type="button" class="primary" disabled>
+                🚀 전체 변환 시작
+              </button>
+              <button id="bulk-ai-cancel" type="button" class="secondary" disabled>
+                ⏹️ 중단
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 진행 상태 표시 -->
+        <div id="bulk-ai-progress" style="display: none; margin-bottom: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <span id="bulk-ai-status">준비 중...</span>
+            <span id="bulk-ai-count">0 / 0</span>
+          </div>
+          <div style="width: 100%; background: #f0f0f0; border-radius: 10px; height: 20px; overflow: hidden;">
+            <div id="bulk-ai-progress-bar" style="width: 0%; background: linear-gradient(90deg, #007bff, #0056b3); height: 100%; transition: width 0.3s ease; border-radius: 10px;"></div>
+          </div>
+        </div>
+
+        <!-- 대상 항목 미리보기 -->
+        <div id="bulk-ai-preview" style="display: none;">
+          <h4 style="margin: 1rem 0 0.5rem 0;">변환 대상 (해설 부분만):</h4>
+          <div id="bulk-ai-preview-list" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 1rem; background: #f9f9f9;">
+            <!-- 동적으로 생성됨 -->
+          </div>
         </div>
       </section>
 
@@ -4246,19 +4305,25 @@ function renderTimelineTableRows(project) {
         <td rowspan="2" class="narration-check-column-tl">
           <div class="narration-checkbox-wrapper">
             <input type="checkbox" id="narration-${index}" class="narration-checkbox" data-row="${index}" ${isNarration ? 'checked' : ''}>
-            <label for="narration-${index}" class="narration-label" title="해설 여부 체크">
+            <label for="narration-${index}" class="narration-label" title="해설 체크박스">
               <span class="checkbox-icon">${isNarration ? '🗣️' : '💬'}</span>
+            </label>
+          </div>
+          <div class="reinterpret-checkbox-wrapper" style="margin-top: 0.5rem;">
+            <input type="checkbox" id="reinterpret-${index}" class="reinterpret-checkbox" data-row="${index}">
+            <label for="reinterpret-${index}" class="reinterpret-label" title="체크박스">
+              <span class="checkbox-icon"></span>
             </label>
           </div>
         </td>
         <td class="content-column-tl subtitle-content-tl" data-field="subtitle">
-          <div class="subtitle-with-tts">
+          <div class="subtitle-row">
             <span class="subtitle-text${isNarration ? ' narration' : ''}">${escapeHtml(subtitle.text.replace('>> ', '').replace('>>', ''))}</span>
-            <div class="ai-buttons-row" style="margin-top: 0.5rem; display: flex; gap: 0.25rem; flex-wrap: wrap; align-items: center;">
-              <button type="button" class="ai-btn reinterpret-btn small" data-row-index="${index}" title="텍스트를 다시 해석해주는 AI">🔄 재해석</button>
-              <button type="button" class="ai-btn translate-jp-btn small" data-row-index="${index}" title="일본어로 번역">🇯🇵 일본어</button>
-              <button type="button" class="ai-btn backtranslate-kr-btn small" data-row-index="${index}" title="일본어를 한국어로 역번역">🔙 역번역</button>
-              <button type="button" class="tts-btn secondary small" data-subtitle-index="${index}" title="음성 변환">🎤 음성</button>
+            <div style="border-top: 1px solid #dee2e6; margin: 0.5rem 0;"></div>
+            <div class="audio-clip-controls">
+              <button type="button" class="play-audio-btn secondary small" data-audio-index="${index}" title="음성 클립 재생" disabled>
+                ▶️
+              </button>
             </div>
           </div>
         </td>
@@ -4274,12 +4339,12 @@ function renderTimelineTableRows(project) {
         </td>
       </tr>
       <tr>
-        <td class="content-column-tl voice-content-tl" data-field="voice">
-          <div class="audio-clip-controls">
-            <button type="button" class="play-audio-btn secondary small" data-audio-index="${index}" title="음성 재생" disabled>
-              ▶️
-            </button>
-            <small>음성 클립</small>
+        <td class="content-column-tl ai-buttons-row-tl" data-field="ai-buttons">
+          <div class="ai-buttons-compact" style="display: flex; gap: 0.5rem; align-items: center; justify-content: center; padding: 0.25rem 0;">
+            <button type="button" class="ai-icon-btn reinterpret-btn" data-row-index="${index}" title="재해석AI">🔄</button>
+            <button type="button" class="ai-icon-btn translate-jp-btn" data-row-index="${index}" title="일본어번역">🇯🇵</button>
+            <button type="button" class="ai-icon-btn backtranslate-kr-btn" data-row-index="${index}" title="역번역한국어">🔙</button>
+            <button type="button" class="ai-icon-btn tts-btn" data-subtitle-index="${index}" title="음성변환">🎤</button>
           </div>
         </td>
       </tr>
@@ -4779,6 +4844,31 @@ function setupTimelineButtons() {
     console.warn('삭제 버튼을 찾을 수 없음');
   }
 
+  // 전체 AI 변환 버튼들 이벤트 리스너 추가
+  const bulkReinterpretAllButton = document.getElementById('bulk-reinterpret-all');
+  if (bulkReinterpretAllButton) {
+    bulkReinterpretAllButton.addEventListener('click', () => startBulkAIConversion('reinterpret'));
+    console.log('전체 재해석 버튼 연결됨');
+  }
+
+  const bulkTranslateJpAllButton = document.getElementById('bulk-translate-jp-all');
+  if (bulkTranslateJpAllButton) {
+    bulkTranslateJpAllButton.addEventListener('click', () => startBulkAIConversion('translate-jp'));
+    console.log('전체 일본어 버튼 연결됨');
+  }
+
+  const bulkBacktranslateKrAllButton = document.getElementById('bulk-backtranslate-kr-all');
+  if (bulkBacktranslateKrAllButton) {
+    bulkBacktranslateKrAllButton.addEventListener('click', () => startBulkAIConversion('backtranslate-kr'));
+    console.log('전체 역번역 버튼 연결됨');
+  }
+
+  const bulkTtsAllButton = document.getElementById('bulk-tts-all');
+  if (bulkTtsAllButton) {
+    bulkTtsAllButton.addEventListener('click', () => startBulkAIConversion('tts'));
+    console.log('전체 음성 버튼 연결됨');
+  }
+
   console.log('타임라인 버튼 설정 완료');
 
   // AI 버튼들도 함께 설정
@@ -4809,6 +4899,331 @@ function setupAIButtons() {
   });
 
   console.log('AI 버튼 설정 완료');
+
+  // 전체 AI 변환 기능도 설정
+  setupBulkAIFeature();
+}
+
+// 전체 AI 변환 기능 설정
+function setupBulkAIFeature() {
+  console.log('전체 AI 변환 기능 설정 시작...');
+
+  // 요소들이 없으면 나중에 다시 시도
+  setTimeout(() => {
+    const bulkAiType = document.getElementById('bulk-ai-type');
+    const bulkAiStart = document.getElementById('bulk-ai-start');
+    const bulkAiCancel = document.getElementById('bulk-ai-cancel');
+
+    console.log('전체 AI 변환 요소 확인:', {
+      bulkAiType: !!bulkAiType,
+      bulkAiStart: !!bulkAiStart,
+      bulkAiCancel: !!bulkAiCancel
+    });
+
+    if (!bulkAiType || !bulkAiStart || !bulkAiCancel) {
+      console.warn('전체 AI 변환 요소들을 찾을 수 없음 - DOM이 아직 준비되지 않음');
+      return;
+    }
+
+    // 변환 유형 선택 시 미리보기 표시
+    bulkAiType.addEventListener('change', function() {
+      const selectedType = this.value;
+      console.log('변환 유형 선택됨:', selectedType);
+
+      if (selectedType) {
+        updateBulkAIPreview();
+        bulkAiStart.disabled = false;
+        const bulkAiPreview = document.getElementById('bulk-ai-preview');
+        if (bulkAiPreview) {
+          bulkAiPreview.style.display = 'block';
+        }
+      } else {
+        bulkAiStart.disabled = true;
+        const bulkAiPreview = document.getElementById('bulk-ai-preview');
+        if (bulkAiPreview) {
+          bulkAiPreview.style.display = 'none';
+        }
+      }
+    });
+
+    // 전체 변환 시작 버튼
+    bulkAiStart.addEventListener('click', function() {
+      const selectedType = bulkAiType.value;
+      console.log('전체 변환 시작 클릭:', selectedType);
+      if (selectedType) {
+        startBulkAIConversion(selectedType);
+      }
+    });
+
+    // 변환 중단 버튼
+    bulkAiCancel.addEventListener('click', function() {
+      console.log('변환 중단 클릭');
+      cancelBulkAIConversion();
+    });
+
+    console.log('전체 AI 변환 기능 설정 완료');
+  }, 3000); // 3초 후에 설정
+}
+
+// 해설 부분 대상 항목 수집
+function getNarrationTargets() {
+  const targets = [];
+  const rows = document.querySelectorAll('tr[data-row-index]');
+
+  console.log(`전체 행 개수: ${rows.length}`);
+
+  rows.forEach(row => {
+    const rowIndex = parseInt(row.dataset.rowIndex);
+    const narrationCheckbox = row.querySelector('.narration-checkbox');
+    const subtitleElement = row.querySelector('.subtitle-text');
+
+    if (narrationCheckbox && narrationCheckbox.checked && subtitleElement) {
+      const text = subtitleElement.textContent.trim();
+      if (text) {
+        targets.push({
+          rowIndex: rowIndex,
+          element: subtitleElement,
+          originalText: text,
+          row: row
+        });
+        console.log(`해설 대상 추가: 행 ${rowIndex}, 텍스트: ${text.substring(0, 50)}...`);
+      }
+    }
+  });
+
+  console.log(`해설 대상 총 개수: ${targets.length}`);
+  return targets;
+}
+
+// 전체 AI 변환 미리보기 업데이트
+function updateBulkAIPreview() {
+  console.log('미리보기 업데이트 시작');
+  const targets = getNarrationTargets();
+  const previewList = document.getElementById('bulk-ai-preview-list');
+
+  if (!previewList) {
+    console.warn('미리보기 리스트 요소를 찾을 수 없음');
+    return;
+  }
+
+  if (targets.length === 0) {
+    previewList.innerHTML = '<p style="color: #666; text-align: center;">해설로 체크된 항목이 없습니다.</p>';
+    console.log('해설 대상 없음');
+    return;
+  }
+
+  const html = targets.map((target, index) => `
+    <div style="padding: 0.5rem; border-bottom: 1px solid #eee; ${index === targets.length - 1 ? 'border-bottom: none;' : ''}">
+      <div style="font-weight: 500; margin-bottom: 0.25rem;">행 ${target.rowIndex + 1}</div>
+      <div style="color: #666; font-size: 0.9rem;">${target.originalText.length > 100 ? target.originalText.substring(0, 100) + '...' : target.originalText}</div>
+    </div>
+  `).join('');
+
+  previewList.innerHTML = `
+    <div style="margin-bottom: 1rem; font-weight: 500; color: #333;">
+      총 ${targets.length}개 항목이 변환됩니다.
+    </div>
+    ${html}
+  `;
+
+  console.log('미리보기 업데이트 완료:', targets.length, '개 항목');
+}
+
+// 전체 AI 변환 상태 변수
+let bulkAIConversionState = {
+  isRunning: false,
+  shouldCancel: false,
+  currentIndex: 0,
+  totalCount: 0,
+  targets: [],
+  type: ''
+};
+
+// 전체 AI 변환 시작
+async function startBulkAIConversion(type) {
+  console.log(`전체 AI 변환 시작: ${type}`);
+
+  const targets = getNarrationTargets();
+
+  if (targets.length === 0) {
+    showNotification('해설로 체크된 항목이 없습니다. 먼저 해설 체크박스를 선택해주세요.', 'error');
+    return;
+  }
+
+  console.log(`변환할 대상: ${targets.length}개`);
+
+  // 사용자 확인
+  if (!confirm(`${targets.length}개의 해설 항목을 ${type}로 변환하시겠습니까?`)) {
+    return;
+  }
+
+  // 상태 초기화
+  bulkAIConversionState = {
+    isRunning: true,
+    shouldCancel: false,
+    currentIndex: 0,
+    totalCount: targets.length,
+    targets: targets,
+    type: type
+  };
+
+  // UI 상태 업데이트
+  updateBulkAIUI(true);
+
+  // 변환 진행률 표시 시작
+  updateBulkAIProgress(0, targets.length, '변환 준비 중...');
+
+  try {
+    for (let i = 0; i < targets.length; i++) {
+      if (bulkAIConversionState.shouldCancel) {
+        showNotification('변환이 사용자에 의해 중단되었습니다.', 'info');
+        break;
+      }
+
+      bulkAIConversionState.currentIndex = i;
+      const target = targets[i];
+
+      updateBulkAIProgress(i + 1, targets.length, `${i + 1}번째 항목 변환 중...`);
+
+      await processBulkAITarget(target, type);
+
+      // 각 변환 후 잠시 대기 (API 제한 고려)
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    if (!bulkAIConversionState.shouldCancel) {
+      showNotification(`${targets.length}개 항목의 전체 변환이 완료되었습니다.`, 'success');
+
+      // 자동 저장
+      saveTimelineToLocalStorage();
+    }
+
+  } catch (error) {
+    console.error('전체 AI 변환 오류:', error);
+    showNotification(`전체 변환 중 오류 발생: ${error.message}`, 'error');
+  } finally {
+    // 상태 초기화
+    bulkAIConversionState.isRunning = false;
+    updateBulkAIUI(false);
+  }
+}
+
+// 개별 타겟 처리
+async function processBulkAITarget(target, type) {
+  try {
+    let apiEndpoint = '';
+    let requestBody = {};
+
+    switch (type) {
+      case 'reinterpret':
+        apiEndpoint = '/api/ai/reinterpret';
+        requestBody = {
+          text: target.originalText,
+          context: 'subtitle_reinterpretation'
+        };
+        break;
+      case 'translate-jp':
+        apiEndpoint = '/api/ai/translate-jp';
+        requestBody = {
+          text: target.originalText,
+          sourceLanguage: 'ko',
+          targetLanguage: 'ja'
+        };
+        break;
+      case 'backtranslate-kr':
+        apiEndpoint = '/api/ai/backtranslate-kr';
+        requestBody = {
+          text: target.originalText,
+          sourceLanguage: 'ja',
+          targetLanguage: 'ko'
+        };
+        break;
+      case 'tts':
+        // TTS는 기존 함수 재사용
+        await convertTextToSpeech(target.rowIndex);
+        return;
+      default:
+        throw new Error(`알 수 없는 변환 타입: ${type}`);
+    }
+
+    const response = await fetch(apiEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API 오류: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    let resultText = '';
+    if (type === 'reinterpret' && result.reinterpretedText) {
+      resultText = result.reinterpretedText;
+    } else if ((type === 'translate-jp' || type === 'backtranslate-kr') && result.translatedText) {
+      resultText = result.translatedText;
+    } else {
+      throw new Error('변환 결과가 없습니다.');
+    }
+
+    // UI 업데이트
+    target.element.textContent = resultText;
+
+  } catch (error) {
+    console.error(`타겟 ${target.rowIndex} 변환 오류:`, error);
+    throw error;
+  }
+}
+
+// 전체 AI 변환 중단
+function cancelBulkAIConversion() {
+  if (bulkAIConversionState.isRunning) {
+    bulkAIConversionState.shouldCancel = true;
+    console.log('전체 AI 변환 중단 요청');
+  }
+}
+
+// 전체 AI 변환 진행률 업데이트
+function updateBulkAIProgress(current, total, status) {
+  const progressElement = document.getElementById('bulk-ai-progress');
+  const statusElement = document.getElementById('bulk-ai-status');
+  const countElement = document.getElementById('bulk-ai-count');
+  const progressBarElement = document.getElementById('bulk-ai-progress-bar');
+
+  if (progressElement && statusElement && countElement && progressBarElement) {
+    progressElement.style.display = bulkAIConversionState.isRunning ? 'block' : 'none';
+    statusElement.textContent = status;
+    countElement.textContent = `${current} / ${total}`;
+
+    const percentage = total > 0 ? (current / total) * 100 : 0;
+    progressBarElement.style.width = `${percentage}%`;
+  }
+}
+
+// 전체 AI 변환 UI 상태 업데이트
+function updateBulkAIUI(isRunning) {
+  const bulkAiType = document.getElementById('bulk-ai-type');
+  const bulkAiStart = document.getElementById('bulk-ai-start');
+  const bulkAiCancel = document.getElementById('bulk-ai-cancel');
+
+  if (bulkAiType && bulkAiStart && bulkAiCancel) {
+    bulkAiType.disabled = isRunning;
+    bulkAiStart.disabled = isRunning;
+    bulkAiCancel.disabled = !isRunning;
+  }
+
+  if (!isRunning) {
+    // 진행률 숨기기
+    setTimeout(() => {
+      const progressElement = document.getElementById('bulk-ai-progress');
+      if (progressElement) {
+        progressElement.style.display = 'none';
+      }
+    }, 2000);
+  }
 }
 
 // 재해석 AI 함수

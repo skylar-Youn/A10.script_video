@@ -72,4 +72,6 @@ lsof -ti :8000 | xargs kill -9
 chrome-devtools-mcp.new_page 
 
 
- uvicorn keywordimagestory.app:app --reload --port 8001 chrome-devtools-mcp.new_page 로 열어봐
+ uvicorn keywordimagestory.app:app --reload --port 8000 chrome-devtools-mcp.new_page 로 열어봐
+
+ http://127.0.0.1:8000/
