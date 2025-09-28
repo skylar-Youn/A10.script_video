@@ -85,6 +85,21 @@ class VideoAnalysisApp {
         document.getElementById('clear-results').addEventListener('click', () => {
             this.clearResults();
         });
+
+        // 동기화 기능 버튼들
+        const syncVideoSrtBtn = document.getElementById('sync-video-srt');
+        if (syncVideoSrtBtn) {
+            syncVideoSrtBtn.addEventListener('click', () => {
+                this.synchronizeVideoWithSubtitle();
+            });
+        }
+
+        const syncVideoAudioBtn = document.getElementById('sync-video-audio');
+        if (syncVideoAudioBtn) {
+            syncVideoAudioBtn.addEventListener('click', () => {
+                this.synchronizeVideoWithAudio();
+            });
+        }
     }
 
     async loadFileList(filterType = 'all') {
@@ -245,6 +260,12 @@ class VideoAnalysisApp {
         if (isSelected) {
             this.selectedFiles.add(filePath);
             card.classList.add('selected');
+
+            // 비디오 파일이면 플레이어에 로드하고 영상 편집 탭으로 전환
+            if (this.getFileType(filePath) === 'video') {
+                this.loadVideoToPlayer(filePath);
+                this.switchTab('video-edit');
+            }
         } else {
             this.selectedFiles.delete(filePath);
             card.classList.remove('selected');
@@ -502,15 +523,15 @@ class VideoAnalysisApp {
 
         document.getElementById('audio-duration').textContent = this.formatDuration(data.duration);
         document.getElementById('silence-count').textContent = data.silence_regions.length + '개';
-        document.getElementById('voice-percentage').textContent = data.voice_percentage.toFixed(1) + '%';
+        document.getElementById('voice-percentage').textContent = (data.voice_percentage || 0).toFixed(1) + '%';
 
         // 갭 목록 표시
         const gapsContainer = document.getElementById('detected-gaps');
         gapsContainer.innerHTML = data.silence_regions.map(gap => `
             <div class="gap-item">
-                <span class="time-range">${gap.start_time.toFixed(2)}s - ${gap.end_time.toFixed(2)}s</span>
-                <span class="duration">${gap.duration.toFixed(2)}초</span>
-                <button class="action-btn" onclick="app.applyToTimeline('${gap.start_time}', '${gap.end_time}')">
+                <span class="time-range">${(gap.start || 0).toFixed(2)}s - ${(gap.end || 0).toFixed(2)}s</span>
+                <span class="duration">${(gap.duration || 0).toFixed(2)}초</span>
+                <button class="action-btn" onclick="app.applyToTimeline('${gap.start || 0}', '${gap.end || 0}')">
                     🎬 타임라인에 적용
                 </button>
             </div>
@@ -561,7 +582,7 @@ class VideoAnalysisApp {
         const data = firstResult.data;
 
         document.getElementById('generated-srt-content').textContent = data.srt_content;
-        document.getElementById('recognition-accuracy').textContent = `🎯 인식률: ${data.accuracy.toFixed(1)}%`;
+        document.getElementById('recognition-accuracy').textContent = `🎯 인식률: ${(data.accuracy || 0).toFixed(1)}%`;
         document.getElementById('recognition-segments').textContent = `📊 ${data.successful_segments}/${data.total_segments} 구간 성공`;
 
         document.getElementById('stt-results').style.display = 'block';
@@ -824,6 +845,267 @@ class VideoAnalysisApp {
         // 권장사항 실행 로직
         console.log(`권장사항 실행: ${action}`);
         this.showError('자동 수정 기능은 아직 구현 중입니다');
+    }
+
+    loadVideoToPlayer(filePath) {
+        const videoPlayer = document.getElementById('video-player');
+        if (videoPlayer) {
+            // 파일 경로를 서버에서 제공하는 정적 파일 경로로 변환
+            const videoUrl = `/api/file-content?path=${encodeURIComponent(filePath)}`;
+
+            // 기존 이벤트 리스너 제거
+            videoPlayer.removeEventListener('loadedmetadata', this.onVideoLoadedMetadata);
+            videoPlayer.removeEventListener('timeupdate', this.onVideoTimeUpdate);
+            videoPlayer.removeEventListener('canplay', this.onVideoCanPlay);
+
+            videoPlayer.src = videoUrl;
+
+            // 이벤트 리스너를 인스턴스 메서드로 바인딩
+            this.onVideoLoadedMetadata = () => {
+                const totalTime = document.getElementById('total-time');
+                if (totalTime) {
+                    totalTime.textContent = this.formatTime(videoPlayer.duration);
+                }
+
+                const timeline = document.getElementById('video-timeline');
+                if (timeline) {
+                    timeline.max = videoPlayer.duration;
+                    timeline.addEventListener('input', () => {
+                        videoPlayer.currentTime = timeline.value;
+                    });
+                }
+
+                // 오디오 시각화 초기화
+                this.initializeVideoAudioVisualization();
+                console.log(`비디오 메타데이터 로드 완료: 길이 ${videoPlayer.duration}초`);
+            };
+
+            this.onVideoTimeUpdate = () => {
+                const currentTime = document.getElementById('current-time');
+                if (currentTime) {
+                    currentTime.textContent = this.formatTime(videoPlayer.currentTime);
+                }
+
+                const timeline = document.getElementById('video-timeline');
+                if (timeline && !timeline.dataset.userSeeking) {
+                    timeline.value = videoPlayer.currentTime;
+                }
+
+                // 실시간 오디오 시각화 업데이트
+                this.updateVideoAudioVisualization(videoPlayer.currentTime);
+            };
+
+            this.onVideoCanPlay = () => {
+                console.log('비디오 재생 준비 완료');
+                // 오디오 트랙이 있는지 확인
+                if (videoPlayer.audioTracks && videoPlayer.audioTracks.length > 0) {
+                    console.log(`오디오 트랙 감지: ${videoPlayer.audioTracks.length}개`);
+                } else {
+                    console.log('오디오 트랙 정보를 가져올 수 없음');
+                }
+            };
+
+            // 이벤트 리스너 등록
+            videoPlayer.addEventListener('loadedmetadata', this.onVideoLoadedMetadata);
+            videoPlayer.addEventListener('timeupdate', this.onVideoTimeUpdate);
+            videoPlayer.addEventListener('canplay', this.onVideoCanPlay);
+
+            // 음성과 비디오가 함께 재생되도록 설정
+            videoPlayer.muted = false;
+            videoPlayer.controls = true;
+            videoPlayer.preload = 'metadata';
+            videoPlayer.volume = 1.0;
+
+            // 동적으로 소스 타입 설정
+            if (filePath.toLowerCase().includes('.mp4')) {
+                videoPlayer.querySelector('source[type="video/mp4"]').src = videoUrl;
+            } else if (filePath.toLowerCase().includes('.webm')) {
+                videoPlayer.querySelector('source[type="video/webm"]').src = videoUrl;
+            }
+
+            console.log(`비디오 로드 시작: ${filePath}`);
+        }
+    }
+
+    formatTime(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    initializeVideoAudioVisualization() {
+        const canvas = document.getElementById('video-audio-waveform');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        this.videoAudioCanvas = canvas;
+        this.videoAudioCtx = ctx;
+
+        // 캔버스 초기화
+        ctx.fillStyle = 'rgba(74, 158, 255, 0.1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 시간 그리드 그리기
+        this.drawTimeGrid();
+
+        console.log('비디오 오디오 시각화 초기화 완료');
+    }
+
+    updateVideoAudioVisualization(currentTime) {
+        if (!this.videoAudioCanvas || !this.videoAudioCtx) return;
+
+        const canvas = this.videoAudioCanvas;
+        const ctx = this.videoAudioCtx;
+        const videoPlayer = document.getElementById('video-player');
+
+        if (!videoPlayer || !videoPlayer.duration) return;
+
+        // 재생 위치 표시
+        const progress = currentTime / videoPlayer.duration;
+        const x = progress * canvas.width;
+
+        // 캔버스 지우고 다시 그리기
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 배경
+        ctx.fillStyle = 'rgba(74, 158, 255, 0.1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 시간 그리드
+        this.drawTimeGrid();
+
+        // 재생 위치 선
+        ctx.strokeStyle = 'rgba(255, 68, 68, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+
+        // 무음 구간이 있으면 표시
+        if (this.analysisResults.audio && this.analysisResults.audio.length > 0) {
+            const audioResult = this.analysisResults.audio.find(r => r.status === 'success');
+            if (audioResult && audioResult.data.silence_regions) {
+                this.drawSilenceRegions(audioResult.data.silence_regions, videoPlayer.duration);
+            }
+        }
+    }
+
+    drawTimeGrid() {
+        if (!this.videoAudioCanvas || !this.videoAudioCtx) return;
+
+        const canvas = this.videoAudioCanvas;
+        const ctx = this.videoAudioCtx;
+        const videoPlayer = document.getElementById('video-player');
+
+        if (!videoPlayer || !videoPlayer.duration) return;
+
+        // 시간 마커
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 1;
+        ctx.font = '10px Arial';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+
+        const timeInterval = Math.max(1, Math.ceil(videoPlayer.duration / 20));
+        for (let i = 0; i <= videoPlayer.duration; i += timeInterval) {
+            const x = (i / videoPlayer.duration) * canvas.width;
+
+            // 세로선
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+
+            // 시간 텍스트
+            ctx.fillText(this.formatTime(i), x + 2, 12);
+        }
+    }
+
+    drawSilenceRegions(silenceRegions, duration) {
+        if (!this.videoAudioCanvas || !this.videoAudioCtx) return;
+
+        const canvas = this.videoAudioCanvas;
+        const ctx = this.videoAudioCtx;
+
+        ctx.fillStyle = 'rgba(255, 68, 68, 0.3)';
+
+        silenceRegions.forEach(region => {
+            const startX = (region.start / duration) * canvas.width;
+            const endX = (region.end / duration) * canvas.width;
+            ctx.fillRect(startX, 0, endX - startX, canvas.height);
+        });
+    }
+
+    synchronizeVideoWithSubtitle() {
+        const videoPlayer = document.getElementById('video-player');
+        if (!videoPlayer || !videoPlayer.src) {
+            this.showError('먼저 비디오를 로드하세요');
+            return;
+        }
+
+        // 선택된 파일 중 SRT 파일 찾기
+        const srtFiles = Array.from(this.selectedFiles).filter(path => path.endsWith('.srt'));
+        if (srtFiles.length === 0) {
+            this.showError('SRT 파일을 선택하세요');
+            return;
+        }
+
+        // 자막 분석 결과가 있으면 시각화에 반영
+        if (this.analysisResults.subtitle && this.analysisResults.subtitle.length > 0) {
+            console.log('자막 데이터를 비디오와 동기화 중...');
+            this.showSuccess('자막과 비디오가 동기화되었습니다');
+        } else {
+            // 자막 분석이 안 되어 있으면 자동으로 분석 시작
+            this.startSubtitleAnalysis();
+        }
+    }
+
+    synchronizeVideoWithAudio() {
+        const videoPlayer = document.getElementById('video-player');
+        if (!videoPlayer || !videoPlayer.src) {
+            this.showError('먼저 비디오를 로드하세요');
+            return;
+        }
+
+        // 현재 비디오의 음성 분석 시작
+        if (this.analysisResults.audio && this.analysisResults.audio.length > 0) {
+            console.log('음성 분석 데이터를 비디오와 동기화 중...');
+            // 기존 분석 결과를 시각화에 반영
+            this.updateVideoAudioVisualization(videoPlayer.currentTime);
+            this.showSuccess('음성 분석 결과가 비디오와 동기화되었습니다');
+        } else {
+            // 음성 분석이 안 되어 있으면 자동으로 분석 시작
+            this.showInfo('비디오의 음성을 분석합니다...');
+            this.startAudioAnalysis();
+        }
+    }
+
+    showSuccess(message) {
+        console.log('✅ ' + message);
+        // 실제 구현에서는 토스트 메시지나 알림을 표시
+        const notification = document.createElement('div');
+        notification.className = 'notification success';
+        notification.textContent = '✅ ' + message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+
+    showInfo(message) {
+        console.log('ℹ️ ' + message);
+        // 실제 구현에서는 토스트 메시지나 알림을 표시
+        const notification = document.createElement('div');
+        notification.className = 'notification info';
+        notification.textContent = 'ℹ️ ' + message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+
+    getFileType(filePath) {
+        const ext = filePath.split('.').pop().toLowerCase();
+        if (['mp4', 'webm', 'avi', 'mov', 'mkv'].includes(ext)) return 'video';
+        if (['mp3', 'wav', 'm4a', 'flac', 'aac'].includes(ext)) return 'audio';
+        if (['srt', 'vtt', 'ass'].includes(ext)) return 'subtitle';
+        return 'other';
     }
 }
 

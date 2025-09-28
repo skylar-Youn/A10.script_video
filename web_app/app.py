@@ -1145,6 +1145,20 @@ async def test_simple_page(request: Request):
     return templates.TemplateResponse("test_simple.html", context)
 
 
+@app.get("/analysis")
+async def analysis_redirect():
+    """분석 페이지로 리디렉션"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="http://127.0.0.1:8002/", status_code=302)
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Favicon 요청 처리"""
+    from fastapi.responses import Response
+    return Response(status_code=204)
+
+
 @app.get("/shorts", response_class=HTMLResponse)
 async def index(request: Request):
     selected_base = request.query_params.get("existing")
