@@ -1827,12 +1827,44 @@ textarea:focus {
     font-weight: bold;
 }
 
+/* 0초 마커 특별 스타일 */
+.time-marker.zero-marker {
+    height: 40px;
+    border-left: 4px solid var(--error-color) !important;
+    color: var(--error-color) !important;
+    font-weight: 900 !important;
+    font-size: 0.8rem !important;
+    background: rgba(255, 68, 68, 0.1);
+    padding-left: 4px;
+    border-radius: 2px;
+    box-shadow: 0 0 8px rgba(255, 68, 68, 0.3);
+}
+
+.time-marker.zero-marker::before {
+    content: '📍 ';
+    font-size: 0.7rem;
+}
+
 /* 타임라인 트랙 */
 .timeline-track {
     height: 60px;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     position: relative;
+}
+
+/* 0초 기준선을 모든 트랙에 표시 (이제 맨 왼쪽) */
+.timeline-track::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0%; /* 0초가 맨 왼쪽이므로 0% */
+    width: 3px;
+    background: linear-gradient(to bottom, var(--error-color), rgba(255, 68, 68, 0.5));
+    z-index: 50;
+    pointer-events: none;
+    box-shadow: 0 0 6px rgba(255, 68, 68, 0.4);
 }
 
 .track-header {

@@ -1876,16 +1876,16 @@ class VideoAnalysisApp {
         // 타임라인 편집기 상태
         this.timeline = {
             zoom: 1,
-            duration: 0,
+            duration: 300,   // 기본 5분으로 설정
             currentTime: 0,
             pixelsPerSecond: 50,
             videoData: null,
             audioData: null,
             subtitleData: null,
             isPlaying: false,
-            startOffset: 30, // 0초 이전에 30초 여백 추가
-            minTime: -30,    // 최소 -30초까지 표시
-            maxTime: 0       // 최대 시간은 동적으로 설정
+            startOffset: 0,  // 0초부터 시작
+            minTime: 0,      // 최소 0초부터 표시
+            maxTime: 300     // 최대 시간은 동적으로 설정 (기본 5분)
         };
 
         this.setupTimelineControls();
@@ -1894,6 +1894,12 @@ class VideoAnalysisApp {
         // 초기 타임라인 설정
         this.updateTimelineWidth();
         this.updateTimelineRuler();
+
+        console.log('타임라인 편집기 초기화 완료:', {
+            duration: this.timeline.duration,
+            minTime: this.timeline.minTime,
+            maxTime: this.timeline.maxTime
+        });
     }
 
     setupTimelineControls() {
@@ -2000,7 +2006,7 @@ class VideoAnalysisApp {
                 const x = e.clientX - rect.left + timelineContainer.scrollLeft;
 
                 // 전체 시간 범위 계산
-                const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+                const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
                 const timelineContent = document.getElementById('timeline-content');
                 const width = parseFloat(timelineContent.style.minWidth) || 1000;
 
@@ -2108,17 +2114,17 @@ class VideoAnalysisApp {
     seekToTime(time) {
         const videoPlayer = document.getElementById('video-player');
 
-        // 타임라인 현재 시간 업데이트 (음수 시간 허용)
-        this.timeline.currentTime = Math.max(this.timeline.minTime, time);
+        // 타임라인 현재 시간 업데이트 (0초 이상만 허용)
+        this.timeline.currentTime = Math.max(0, time);
 
         if (videoPlayer && time >= 0) {
-            // 비디오 플레이어는 양수 시간만 허용
+            // 비디오 플레이어 시간 설정
             const clampedTime = Math.max(0, Math.min(videoPlayer.duration || time, time));
             videoPlayer.currentTime = clampedTime;
             console.log(`비디오 플레이어 시간 이동: ${clampedTime}초`);
-        } else {
-            console.log(`타임라인 시간 이동: ${this.timeline.currentTime}초 (음수 시간)`);
         }
+
+        console.log(`타임라인 시간 이동: ${this.timeline.currentTime}초`);
 
         // 재생 헤드 위치 강제 업데이트
         this.updateTimelinePosition();
@@ -2165,7 +2171,7 @@ class VideoAnalysisApp {
         const timelineContent = document.getElementById('timeline-content');
         if (timelineContent) {
             // 전체 시간 범위 계산 (minTime부터 duration까지)
-            const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+            const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
             const width = totalDuration * this.timeline.pixelsPerSecond * this.timeline.zoom;
             timelineContent.style.minWidth = Math.max(1000, width) + 'px';
 
@@ -2185,11 +2191,11 @@ class VideoAnalysisApp {
         ruler.innerHTML = '';
 
         const interval = this.getOptimalTimeInterval();
-        const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+        const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
         const width = totalDuration * this.timeline.pixelsPerSecond * this.timeline.zoom;
 
-        // 음수 시간부터 시작해서 최대 시간까지 마커 생성
-        const maxTime = Math.max(this.timeline.duration, 60); // 최소 60초까지는 표시
+        // 0초부터 시작해서 최대 시간까지 마커 생성
+        const maxTime = Math.max(this.timeline.duration || 60, 60); // 실제 지속시간 또는 최소 60초
 
         for (let time = this.timeline.minTime; time <= maxTime; time += interval) {
             const marker = document.createElement('div');
@@ -2205,6 +2211,7 @@ class VideoAnalysisApp {
                 marker.className += ' zero-marker';
                 marker.style.color = '#ff4444';
                 marker.style.fontWeight = 'bold';
+                marker.style.zIndex = '100';
             }
 
             // 위치 계산 (minTime을 기준으로 오프셋)
@@ -2215,11 +2222,17 @@ class VideoAnalysisApp {
             ruler.appendChild(marker);
         }
 
+        // 0초 기준선 위치 계산 및 CSS 변수 설정 (이제 0초는 맨 왼쪽)
+        const zeroPosition = 0; // 0초가 시작점이므로 0%
+        document.documentElement.style.setProperty('--zero-line-position', `${zeroPosition}%`);
+
         console.log('타임라인 눈금자 업데이트:', {
             minTime: this.timeline.minTime,
             maxTime: maxTime,
+            duration: this.timeline.duration,
             totalDuration: totalDuration,
-            width: width
+            width: width,
+            zeroPosition: `${zeroPosition}%`
         });
     }
 
@@ -2242,7 +2255,7 @@ class VideoAnalysisApp {
         const width = parseFloat(timelineContent.style.minWidth) || 1000;
 
         // 전체 시간 범위 계산
-        const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+        const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
 
         // 현재 시간을 기준으로 위치 계산 (minTime 오프셋 고려)
         const adjustedTime = this.timeline.currentTime - this.timeline.minTime;
@@ -2335,8 +2348,9 @@ class VideoAnalysisApp {
 
             // 비디오 트랙에 클립 표시
             if (videoTrack) {
+                // 0초부터 시작하므로 전체 폭 사용
                 videoTrack.innerHTML = `
-                    <div class="video-clip" style="left: 0; width: 100%;">
+                    <div class="video-clip" style="left: 0%; width: 100%;">
                         📹 ${videoPath.split('/').pop()}
                     </div>
                 `;
@@ -2521,10 +2535,14 @@ class VideoAnalysisApp {
             block.className = 'subtitle-block';
             block.dataset.index = index;
 
-            // 전체 시간 범위 계산 (음수 시간 고려)
-            const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
-            const adjustedStartTime = subtitle.start_time - this.timeline.minTime;
-            const duration = subtitle.end_time - subtitle.start_time;
+            // 자막 시간이 음수인 경우 0으로 조정
+            const startTime = Math.max(0, subtitle.start_time);
+            const endTime = Math.max(0, subtitle.end_time);
+
+            // 전체 시간 범위 계산 (0초부터 시작)
+            const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
+            const adjustedStartTime = startTime; // 0초부터 시작하므로 그대로 사용
+            const duration = endTime - startTime;
 
             const startPercent = (adjustedStartTime / totalDuration) * 100;
             const widthPercent = (duration / totalDuration) * 100;
@@ -2546,24 +2564,24 @@ class VideoAnalysisApp {
 
             if (blockWidthPx < 80) {
                 // 매우 작은 블록: 시작 시간만 표시
-                timeElement.textContent = `${this.formatSubtitleTime(subtitle.start_time, true)}`;
+                timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}`;
                 textElement.style.display = 'none';
                 timeElement.style.fontSize = '10px';
             } else if (blockWidthPx < 120) {
                 // 작은 블록: 시작→끝 시간 표시
-                timeElement.textContent = `${this.formatSubtitleTime(subtitle.start_time, true)}→${this.formatSubtitleTime(subtitle.end_time, true)}`;
+                timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}→${this.formatSubtitleTime(endTime, true)}`;
                 textElement.style.display = 'none';
                 timeElement.style.fontSize = '10px';
             } else if (blockWidthPx < 200) {
                 // 중간 블록: 시간 + 짧은 텍스트
-                timeElement.textContent = `${this.formatSubtitleTime(subtitle.start_time)}→${this.formatSubtitleTime(subtitle.end_time)}`;
+                timeElement.textContent = `${this.formatSubtitleTime(startTime)}→${this.formatSubtitleTime(endTime)}`;
                 textElement.textContent = subtitle.text.length > 20 ?
                     subtitle.text.substring(0, 17) + '...' : subtitle.text;
                 timeElement.style.fontSize = '11px';
                 textElement.style.fontSize = '12px';
             } else {
                 // 큰 블록: 전체 시간 + 전체 텍스트
-                timeElement.textContent = `🕐 ${this.formatSubtitleTime(subtitle.start_time)} → ${this.formatSubtitleTime(subtitle.end_time)} (${this.formatSubtitleTime(duration)}초)`;
+                timeElement.textContent = `🕐 ${this.formatSubtitleTime(startTime)} → ${this.formatSubtitleTime(endTime)} (${this.formatSubtitleTime(duration)}초)`;
                 timeElement.style.fontSize = '11px';
                 textElement.style.fontSize = '13px';
             }
@@ -2572,7 +2590,7 @@ class VideoAnalysisApp {
             block.appendChild(timeElement);
             block.appendChild(textElement);
 
-            block.title = `${this.formatSubtitleTime(subtitle.start_time)} - ${this.formatSubtitleTime(subtitle.end_time)}\n${subtitle.text}`;
+            block.title = `${this.formatSubtitleTime(startTime)} - ${this.formatSubtitleTime(endTime)}\n${subtitle.text}`;
 
             // 자막 블록 클릭 이벤트
             block.addEventListener('click', () => {
@@ -2745,10 +2763,11 @@ class VideoAnalysisApp {
 
         ctx.fillStyle = gradient;
 
+        // 0초부터 시작하므로 단순하게 계산
         const barWidth = Math.max(1, canvas.width / waveformData.length);
 
         waveformData.forEach((amplitude, index) => {
-            const x = index * barWidth;
+            const x = index * barWidth; // 0초부터 시작
             const height = amplitude * centerY * 0.9; // 실제 데이터이므로 90% 높이 사용
 
             if (height > 0.5) {
@@ -2794,11 +2813,12 @@ class VideoAnalysisApp {
         const waveformColor = '#00ff88';
         ctx.fillStyle = waveformColor;
 
+        // 0초부터 시작하므로 단순하게 계산
         const segmentWidth = 2;
         const numSegments = Math.floor(canvas.width / segmentWidth);
 
         for (let i = 0; i < numSegments; i++) {
-            const x = i * segmentWidth;
+            const x = i * segmentWidth; // 0초부터 시작
 
             // 음성과 유사한 패턴 생성
             const baseFreq = i * 0.03;
