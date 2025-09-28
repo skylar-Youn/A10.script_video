@@ -1992,15 +1992,15 @@ textarea:focus {
     background: linear-gradient(135deg, var(--warning-color), #cc8800);
     border-radius: 4px;
     border: 1px solid rgba(255, 255, 255, 0.3);
-    display: flex;
+    display: flex !important;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     color: white;
     font-size: 0.7rem;
     font-weight: 500;
     cursor: pointer;
-    overflow: hidden;
+    overflow: visible;
     padding: 2px 4px;
     text-align: center;
     line-height: 1.1;
@@ -2019,12 +2019,32 @@ textarea:focus {
     box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
 }
 
+/* 자막 블록 내 번호 표시 */
+.subtitle-number {
+    font-size: 0.8rem;
+    font-weight: 900;
+    color: rgba(255, 255, 255, 1.0) !important;
+    background: rgba(255, 165, 0, 0.9) !important;
+    padding: 2px 5px;
+    border-radius: 4px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 1);
+    letter-spacing: 0.3px;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    margin-bottom: 2px;
+    text-align: center;
+    min-width: 25px;
+    white-space: nowrap;
+    display: block !important;
+    position: relative;
+    z-index: 10;
+}
+
 /* 자막 블록 내 시간 표시 */
 .subtitle-time {
     font-size: 0.6rem;
     font-weight: 700;
     color: rgba(255, 255, 255, 1.0);
-    margin-bottom: 2px;
+    margin-bottom: 1px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

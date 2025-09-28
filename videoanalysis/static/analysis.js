@@ -1885,7 +1885,8 @@ class VideoAnalysisApp {
             isPlaying: false,
             startOffset: 0,  // 0초부터 시작
             minTime: 0,      // 최소 0초부터 표시
-            maxTime: 300     // 최대 시간은 동적으로 설정 (기본 5분)
+            maxTime: 300,    // 최대 시간은 동적으로 설정 (기본 5분)
+            realWaveformDrawn: false  // 실제 파형이 그려졌는지 플래그
         };
 
         this.setupTimelineControls();
@@ -2400,10 +2401,9 @@ class VideoAnalysisApp {
         const audioPath = audioFiles[0];
         this.timeline.audioData = { path: audioPath };
 
-        // 즉시 기본 파형 표시
-        this.showImmediateWaveform(audioPath);
+        console.log('🎵 음성 파일 로드 시작:', audioPath);
 
-        // 음성 파형 그리기
+        // 실제 음성 파형 그리기만 시도 (즉시 파형은 제거)
         await this.drawAudioWaveform(audioPath);
         this.showSuccess('음성 파일이 로드되었습니다');
     }
@@ -2550,6 +2550,18 @@ class VideoAnalysisApp {
             block.style.left = startPercent + '%';
             block.style.width = widthPercent + '%';
 
+            // 번호 표시 요소 생성
+            const numberElement = document.createElement('div');
+            numberElement.className = 'subtitle-number';
+            numberElement.textContent = `#${index + 1}`;
+
+            // 강제 스타일 적용 (CSS가 안 먹을 경우 대비)
+            numberElement.style.display = 'block';
+            numberElement.style.visibility = 'visible';
+            numberElement.style.opacity = '1';
+            numberElement.style.position = 'relative';
+            numberElement.style.zIndex = '20';
+
             // 시간 정보 요소 생성
             const timeElement = document.createElement('div');
             timeElement.className = 'subtitle-time';
@@ -2562,35 +2574,52 @@ class VideoAnalysisApp {
             // 블록 너비에 따라 표시 내용 조정
             const blockWidthPx = (widthPercent / 100) * (trackContent.offsetWidth || 1000);
 
-            if (blockWidthPx < 80) {
-                // 매우 작은 블록: 시작 시간만 표시
+            if (blockWidthPx < 40) {
+                // 극소 블록: 번호만 표시
+                numberElement.style.fontSize = '8px';
+                numberElement.style.padding = '1px 2px';
+                timeElement.style.display = 'none';
+                textElement.style.display = 'none';
+            } else if (blockWidthPx < 80) {
+                // 매우 작은 블록: 번호 + 시작 시간
+                numberElement.style.fontSize = '9px';
                 timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}`;
                 textElement.style.display = 'none';
-                timeElement.style.fontSize = '10px';
+                timeElement.style.fontSize = '9px';
             } else if (blockWidthPx < 120) {
-                // 작은 블록: 시작→끝 시간 표시
+                // 작은 블록: 번호 + 시작→끝 시간
+                numberElement.style.fontSize = '9px';
                 timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}→${this.formatSubtitleTime(endTime, true)}`;
                 textElement.style.display = 'none';
-                timeElement.style.fontSize = '10px';
+                timeElement.style.fontSize = '9px';
             } else if (blockWidthPx < 200) {
-                // 중간 블록: 시간 + 짧은 텍스트
+                // 중간 블록: 번호 + 시간 + 짧은 텍스트
+                numberElement.style.fontSize = '10px';
                 timeElement.textContent = `${this.formatSubtitleTime(startTime)}→${this.formatSubtitleTime(endTime)}`;
-                textElement.textContent = subtitle.text.length > 20 ?
-                    subtitle.text.substring(0, 17) + '...' : subtitle.text;
-                timeElement.style.fontSize = '11px';
-                textElement.style.fontSize = '12px';
+                textElement.textContent = subtitle.text.length > 15 ?
+                    subtitle.text.substring(0, 12) + '...' : subtitle.text;
+                timeElement.style.fontSize = '10px';
+                textElement.style.fontSize = '11px';
             } else {
-                // 큰 블록: 전체 시간 + 전체 텍스트
+                // 큰 블록: 번호 + 전체 시간 + 전체 텍스트
+                numberElement.style.fontSize = '11px';
                 timeElement.textContent = `🕐 ${this.formatSubtitleTime(startTime)} → ${this.formatSubtitleTime(endTime)} (${this.formatSubtitleTime(duration)}초)`;
-                timeElement.style.fontSize = '11px';
-                textElement.style.fontSize = '13px';
+                timeElement.style.fontSize = '10px';
+                textElement.style.fontSize = '12px';
             }
 
-            // 요소들을 블록에 추가
+            // 요소들을 블록에 추가 (번호가 맨 위에)
+            block.appendChild(numberElement);
             block.appendChild(timeElement);
             block.appendChild(textElement);
 
-            block.title = `${this.formatSubtitleTime(startTime)} - ${this.formatSubtitleTime(endTime)}\n${subtitle.text}`;
+            console.log(`자막 블록 #${index + 1} 생성됨:`, {
+                번호요소: numberElement.textContent,
+                블록너비: blockWidthPx + 'px',
+                번호표시여부: numberElement.style.display !== 'none'
+            });
+
+            block.title = `#${index + 1}: ${this.formatSubtitleTime(startTime)} - ${this.formatSubtitleTime(endTime)}\n${subtitle.text}`;
 
             // 자막 블록 클릭 이벤트
             block.addEventListener('click', () => {
@@ -2710,8 +2739,12 @@ class VideoAnalysisApp {
                 // 실제 파형 데이터로 그리기
                 this.renderRealWaveformData(ctx, canvas, data.waveform_data, audioPath);
                 console.log('✅ 실제 파형 데이터로 렌더링 완료');
+
+                // 성공 시 즉시 return하여 fallback이 호출되지 않도록
+                return;
             } else {
-                throw new Error('서버에서 파형 데이터를 받지 못함');
+                console.error('서버 응답 문제:', data);
+                throw new Error(`서버에서 파형 데이터를 받지 못함: ${JSON.stringify(data)}`);
             }
 
         } catch (error) {
@@ -2791,6 +2824,7 @@ class VideoAnalysisApp {
         ctx.font = 'bold 12px Arial';
         const fileName = audioPath.split('/').pop();
         ctx.fillText(`🎵 ${fileName} (실제 파형)`, 10, 20);
+        console.log('🖼️ 실제 파형 텍스트 표시됨:', fileName);
 
         ctx.font = '10px Arial';
         ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
@@ -2802,6 +2836,9 @@ class VideoAnalysisApp {
         ctx.strokeRect(0, 0, canvas.width, canvas.height);
 
         console.log('✅ 실제 파형 렌더링 완료');
+
+        // 실제 파형이 성공적으로 그려졌음을 표시
+        console.log('🎯 황금색 실제 파형 표시 완료:', fileName);
     }
 
     renderFallbackWaveform(ctx, canvas, audioPath) {
@@ -2854,6 +2891,7 @@ class VideoAnalysisApp {
         ctx.font = 'bold 12px Arial';
         const fileName = audioPath.split('/').pop();
         ctx.fillText(`🎵 ${fileName} (데모 파형)`, 10, 20);
+        console.log('🖼️ 데모 파형 텍스트 표시됨:', fileName);
 
         ctx.font = '10px Arial';
         ctx.fillStyle = waveformColor;
