@@ -2249,33 +2249,40 @@ textarea.inline-edit {
   text-align: center;
   color: #000000 !important;
   padding: 4px;
+  display: table-cell;
+  align-items: center;
+  justify-content: center;
 }
 
-.narration-checkbox-wrapper {
+.narration-checkbox-wrapper, .reinterpret-checkbox-wrapper {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
 }
 
-.narration-checkbox {
+.narration-checkbox, .reinterpret-checkbox {
   display: none;
 }
 
-.narration-label {
+.narration-label, .reinterpret-label {
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
   padding: 4px;
   border-radius: 6px;
   transition: all 0.2s ease;
   background: rgba(255, 255, 255, 0.8);
   border: 2px solid #ddd;
+  min-height: 32px;
+  min-width: 32px;
 }
 
-.narration-label:hover {
+.narration-label:hover, .reinterpret-label:hover {
   background: rgba(59, 130, 246, 0.1);
   border-color: #3b82f6;
   transform: scale(1.05);
@@ -2287,13 +2294,81 @@ textarea.inline-edit {
   color: white;
 }
 
+.reinterpret-checkbox:checked + .reinterpret-label {
+  background: linear-gradient(135deg, #059669, #10b981);
+  border-color: #047857;
+  color: white;
+}
+
 .checkbox-icon {
   font-size: 14px;
   line-height: 1;
 }
 
-.narration-checkbox:checked + .narration-label .checkbox-icon {
+.narration-checkbox:checked + .narration-label .checkbox-icon,
+.reinterpret-checkbox:checked + .reinterpret-label .checkbox-icon {
   filter: none;
+}
+
+/* 갭 행 스타일 */
+.gap-row {
+  background-color: #f8f9fa;
+  border: 2px dashed #dee2e6;
+}
+
+.gap-time {
+  background-color: #fff3cd;
+  color: #856404;
+  font-weight: bold;
+  border: 2px solid #ffeaa7;
+}
+
+.gap-actions {
+  background-color: #f8f9fa;
+}
+
+.gap-content {
+  background-color: #fff;
+  border: 1px dashed #ccc;
+}
+
+.gap-placeholder {
+  padding: 1rem;
+  text-align: center;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.gap-controls {
+  background-color: #f8f9fa;
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.add-subtitle-btn, .delete-gap-btn, .trim-gap-btn {
+  min-width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.add-subtitle-btn:hover {
+  background-color: #28a745;
+  color: white;
+}
+
+.delete-gap-btn:hover {
+  background-color: #dc3545;
+  color: white;
+}
+
+.trim-gap-btn:hover {
+  background-color: #6c757d;
+  color: white;
 }
 
 .voice-content-tl {

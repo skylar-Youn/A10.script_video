@@ -4061,6 +4061,24 @@ document.addEventListener("DOMContentLoaded", () => {
       const rowIndex = parseInt(event.target.dataset.row);
       saveTimelineRow(rowIndex);
     }
+
+    // 갭 행 자막 추가 버튼 클릭
+    if (event.target.classList.contains('add-subtitle-btn')) {
+      const gapIndex = event.target.dataset.gap;
+      addSubtitleToGap(gapIndex);
+    }
+
+    // 갭 행 삭제 버튼 클릭
+    if (event.target.classList.contains('delete-gap-btn')) {
+      const gapIndex = event.target.dataset.gap;
+      deleteGap(gapIndex);
+    }
+
+    // 갭 길이 조정 버튼 클릭
+    if (event.target.classList.contains('trim-gap-btn')) {
+      const gapIndex = event.target.dataset.gap;
+      trimGap(gapIndex);
+    }
   });
 
   // 모든 도구의 저장된 기록 로드
@@ -4269,7 +4287,87 @@ function renderTimelineTableRows(project) {
   const imagePrompts = project.image_prompts || [];
   const videoPrompts = project.video_prompts || [];
 
-  return subtitles.map((subtitle, index) => {
+  // 타임스탬프 갭 감지 및 빈 행 생성을 위한 확장된 배열 생성
+  const extendedItems = [];
+
+  for (let i = 0; i < subtitles.length; i++) {
+    const current = subtitles[i];
+    const next = subtitles[i + 1];
+
+    // 현재 자막 추가
+    extendedItems.push({ type: 'subtitle', data: current, originalIndex: i });
+
+    // 다음 자막이 있을 때 갭 체크
+    if (next) {
+      const currentEndTime = parseFloat(current.end_time || current.end);
+      const nextStartTime = parseFloat(next.start_time || next.start);
+
+      // 0.1초 이상의 갭이 있으면 빈 행 추가
+      if (nextStartTime - currentEndTime > 0.1) {
+        extendedItems.push({
+          type: 'gap',
+          startTime: currentEndTime,
+          endTime: nextStartTime,
+          gapIndex: `gap_${i}_${i+1}`
+        });
+      }
+    }
+  }
+
+  return extendedItems.map((item, extendedIndex) => {
+    if (item.type === 'gap') {
+      return renderGapRow(item, extendedIndex);
+    } else {
+      return renderSubtitleRow(item.data, item.originalIndex, extendedIndex, project, backgroundMusic, imagePrompts, videoPrompts);
+    }
+  }).join('');
+
+  // 타임라인 테이블이 렌더링된 후 체크박스 이벤트 리스너 설정
+  setTimeout(() => {
+    setupNarrationCheckboxListeners();
+  }, 100);
+}
+
+// 갭 행 렌더링 함수
+function renderGapRow(gapItem, extendedIndex) {
+  const timeDisplay = `${formatTime(gapItem.startTime)}s→${formatTime(gapItem.endTime)}s`;
+  const timeLabel = `GAP<br/>${timeDisplay}`;
+
+  return `
+    <tr class="gap-row" data-gap-index="${gapItem.gapIndex}" data-extended-index="${extendedIndex}">
+      <td rowspan="2" class="time-column-tl gap-time">${timeLabel}</td>
+      <td rowspan="2" class="narration-check-column-tl gap-actions">
+        <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: center;">
+          <button type="button" class="add-subtitle-btn outline small" data-gap="${gapItem.gapIndex}" title="자막 추가">➕</button>
+          <button type="button" class="delete-gap-btn outline small" data-gap="${gapItem.gapIndex}" title="갭 삭제">🗑️</button>
+        </div>
+      </td>
+      <td class="content-column-tl gap-content" data-field="gap-content">
+        <div class="gap-placeholder" style="text-align: center; color: #999; font-style: italic; padding: 1rem;">
+          빈 타임스탬프 구간<br/>
+          <small>자막을 추가하거나 길이를 조정할 수 있습니다</small>
+        </div>
+      </td>
+      <td rowspan="2" class="bgmusic-column-tl">❌</td>
+      <td rowspan="2" class="image-column-tl">❌</td>
+      <td rowspan="2" class="video-column-tl">❌</td>
+      <td rowspan="2" class="actions-column-tl">
+        <div class="row-actions">
+          <button type="button" class="trim-gap-btn outline small" data-gap="${gapItem.gapIndex}" title="길이 조정">✂️</button>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td class="content-column-tl gap-controls" style="text-align: center; padding: 0.5rem;">
+        <small style="color: #666;">갭 시간: ${(gapItem.endTime - gapItem.startTime).toFixed(1)}초</small>
+      </td>
+    </tr>
+  `;
+}
+
+// 자막 행 렌더링 함수 (기존 로직을 분리)
+function renderSubtitleRow(subtitle, originalIndex, extendedIndex, project, backgroundMusic, imagePrompts, videoPrompts) {
+  const index = originalIndex; // 기존 인덱스 유지
     // video_import는 start_time/end_time(문자열), 다른 것들은 start/end(숫자) 사용
     const startTime = subtitle.start_time || subtitle.start;
     const endTime = subtitle.end_time || subtitle.end;
@@ -4349,12 +4447,6 @@ function renderTimelineTableRows(project) {
         </td>
       </tr>
     `;
-  }).join('');
-
-  // 타임라인 테이블이 렌더링된 후 체크박스 이벤트 리스너 설정
-  setTimeout(() => {
-    setupNarrationCheckboxListeners();
-  }, 100);
 }
 
 // 전체 타임라인 저장 함수
@@ -5941,6 +6033,142 @@ async function deleteVideoImportRecord(recordId) {
     console.error('Error deleting video import record:', error);
     showNotification('삭제에 실패했습니다: ' + error.message, 'error');
   }
+}
+
+// ===== 갭 관리 함수들 =====
+
+// 갭에 자막 추가
+function addSubtitleToGap(gapIndex) {
+  const [startIdx, endIdx] = gapIndex.split('_').slice(1).map(Number);
+  const gapRow = document.querySelector(`[data-gap-index="${gapIndex}"]`);
+
+  if (!gapRow || !currentProject || !currentProject.subtitles) {
+    showNotification('갭 정보를 찾을 수 없습니다.', 'error');
+    return;
+  }
+
+  // 갭의 시간 정보 가져오기
+  const prevSubtitle = currentProject.subtitles[startIdx];
+  const nextSubtitle = currentProject.subtitles[endIdx];
+
+  if (!prevSubtitle || !nextSubtitle) {
+    showNotification('타임스탬프 정보가 올바르지 않습니다.', 'error');
+    return;
+  }
+
+  const startTime = parseFloat(prevSubtitle.end_time || prevSubtitle.end);
+  const endTime = parseFloat(nextSubtitle.start_time || nextSubtitle.start);
+  const midTime = (startTime + endTime) / 2;
+
+  // 새 자막 객체 생성
+  const newSubtitle = {
+    start_time: startTime.toFixed(1),
+    end_time: midTime.toFixed(1),
+    text: "새 자막을 입력하세요",
+    start: startTime,
+    end: midTime
+  };
+
+  // 자막 배열에 삽입
+  currentProject.subtitles.splice(endIdx, 0, newSubtitle);
+
+  // 테이블 다시 렌더링
+  const tableBody = document.querySelector('.timeline-table tbody');
+  if (tableBody) {
+    tableBody.innerHTML = renderTimelineTableRows(currentProject);
+  }
+
+  showNotification('새 자막이 추가되었습니다. 텍스트를 수정해주세요.', 'success');
+}
+
+// 갭 삭제 (인접한 자막의 시간을 연결)
+function deleteGap(gapIndex) {
+  if (!confirm('이 갭을 삭제하고 인접한 자막을 연결하시겠습니까?')) return;
+
+  const [startIdx, endIdx] = gapIndex.split('_').slice(1).map(Number);
+
+  if (!currentProject || !currentProject.subtitles) {
+    showNotification('프로젝트 정보를 찾을 수 없습니다.', 'error');
+    return;
+  }
+
+  const prevSubtitle = currentProject.subtitles[startIdx];
+  const nextSubtitle = currentProject.subtitles[endIdx];
+
+  if (!prevSubtitle || !nextSubtitle) {
+    showNotification('자막 정보를 찾을 수 없습니다.', 'error');
+    return;
+  }
+
+  // 이전 자막의 종료 시간을 다음 자막의 시작 시간으로 연장
+  const nextStartTime = parseFloat(nextSubtitle.start_time || nextSubtitle.start);
+  prevSubtitle.end_time = nextStartTime.toFixed(1);
+  prevSubtitle.end = nextStartTime;
+
+  // 테이블 다시 렌더링
+  const tableBody = document.querySelector('.timeline-table tbody');
+  if (tableBody) {
+    tableBody.innerHTML = renderTimelineTableRows(currentProject);
+  }
+
+  showNotification('갭이 삭제되고 자막이 연결되었습니다.', 'success');
+}
+
+// 갭 길이 조정
+function trimGap(gapIndex) {
+  const [startIdx, endIdx] = gapIndex.split('_').slice(1).map(Number);
+
+  if (!currentProject || !currentProject.subtitles) {
+    showNotification('프로젝트 정보를 찾을 수 없습니다.', 'error');
+    return;
+  }
+
+  const prevSubtitle = currentProject.subtitles[startIdx];
+  const nextSubtitle = currentProject.subtitles[endIdx];
+
+  if (!prevSubtitle || !nextSubtitle) {
+    showNotification('자막 정보를 찾을 수 없습니다.', 'error');
+    return;
+  }
+
+  const startTime = parseFloat(prevSubtitle.end_time || prevSubtitle.end);
+  const endTime = parseFloat(nextSubtitle.start_time || nextSubtitle.start);
+  const currentGapDuration = endTime - startTime;
+
+  // 간단한 프롬프트로 새 길이 입력받기
+  const newDuration = prompt(`현재 갭 길이: ${currentGapDuration.toFixed(1)}초\n새로운 갭 길이를 입력하세요 (초):`, Math.max(0.1, currentGapDuration / 2).toFixed(1));
+
+  if (newDuration === null) return; // 취소
+
+  const duration = parseFloat(newDuration);
+  if (isNaN(duration) || duration < 0.1) {
+    showNotification('올바른 시간을 입력해주세요 (최소 0.1초)', 'error');
+    return;
+  }
+
+  if (duration >= currentGapDuration) {
+    showNotification('새 길이는 현재 갭 길이보다 작아야 합니다.', 'error');
+    return;
+  }
+
+  // 갭 길이 조정 (중앙에서 줄이기)
+  const reductionTime = (currentGapDuration - duration) / 2;
+  const newPrevEndTime = startTime + reductionTime;
+  const newNextStartTime = endTime - reductionTime;
+
+  // 자막 시간 업데이트
+  prevSubtitle.end_time = newPrevEndTime.toFixed(1);
+  prevSubtitle.end = newPrevEndTime;
+  nextSubtitle.start_time = newNextStartTime.toFixed(1);
+  nextSubtitle.start = newNextStartTime;
+
+  // 테이블 다시 렌더링
+  const tableBody = document.querySelector('.timeline-table tbody');
+  if (tableBody) {
+    tableBody.innerHTML = renderTimelineTableRows(currentProject);
+  }
+
+  showNotification(`갭 길이가 ${duration}초로 조정되었습니다.`, 'success');
 }
 
 
