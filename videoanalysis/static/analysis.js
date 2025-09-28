@@ -2678,6 +2678,12 @@ class VideoAnalysisApp {
 
         try {
             console.log('🔍 서버에서 실제 파형 데이터 요청 중...');
+            console.log('📁 요청할 오디오 파일 경로:', audioPath);
+
+            // 파일 경로 검증
+            if (!audioPath || audioPath.trim() === '') {
+                throw new Error('오디오 파일 경로가 비어있습니다');
+            }
 
             // 서버에서 실제 파형 데이터 가져오기
             const response = await fetch('/api/analyze-waveform', {
@@ -2692,7 +2698,9 @@ class VideoAnalysisApp {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const errorText = await response.text();
+                console.error('HTTP 에러 응답:', errorText);
+                throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
             }
 
             const data = await response.json();
@@ -2713,6 +2721,9 @@ class VideoAnalysisApp {
                 audioPath: audioPath,
                 stack: error.stack
             });
+
+            // 에러를 사용자에게도 표시
+            this.showError(`음성 파형 분석 실패: ${error.message}`);
             this.renderFallbackWaveform(ctx, canvas, audioPath);
         }
     }
@@ -2842,11 +2853,11 @@ class VideoAnalysisApp {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         ctx.font = 'bold 12px Arial';
         const fileName = audioPath.split('/').pop();
-        ctx.fillText(`🎵 ${fileName} (시뮬레이션)`, 10, 20);
+        ctx.fillText(`🎵 ${fileName} (데모 파형)`, 10, 20);
 
         ctx.font = '10px Arial';
         ctx.fillStyle = waveformColor;
-        ctx.fillText('가상 파형 - 실제 분석 실패', 10, canvas.height - 10);
+        ctx.fillText('⚠️ 실제 파형 분석 실패 - 콘솔 확인 필요', 10, canvas.height - 10);
 
         // 경계선
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
