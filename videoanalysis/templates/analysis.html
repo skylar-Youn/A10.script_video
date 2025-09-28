@@ -416,11 +416,49 @@
                                         </div>
                                     </div>
 
-                                    <!-- 자막 트랙 -->
-                                    <div class="timeline-track subtitle-track" id="subtitle-track">
-                                        <div class="track-header">📝 자막</div>
-                                        <div class="track-content">
-                                            <!-- 자막 블록들이 여기에 표시됩니다 -->
+                                    <!-- 하이브리드 자막 트랙 시스템 -->
+                                    <!-- 메인 자막 트랙 (원어 대사) -->
+                                    <div class="timeline-track subtitle-track main-subtitle-track" id="main-subtitle-track">
+                                        <div class="track-header">
+                                            <div class="track-title">📝 메인 자막</div>
+                                            <div class="track-controls">
+                                                <button class="track-toggle" data-track="main" title="표시/숨김">👁️</button>
+                                                <button class="track-lock" data-track="main" title="잠금/해제">🔓</button>
+                                                <button class="track-settings" data-track="main" title="설정">⚙️</button>
+                                            </div>
+                                        </div>
+                                        <div class="track-content" id="main-subtitle-content">
+                                            <!-- 메인 자막 블록들이 여기에 표시됩니다 -->
+                                        </div>
+                                    </div>
+
+                                    <!-- 번역/더빙 자막 트랙 -->
+                                    <div class="timeline-track subtitle-track translation-subtitle-track" id="translation-subtitle-track">
+                                        <div class="track-header">
+                                            <div class="track-title">🌐 번역 자막</div>
+                                            <div class="track-controls">
+                                                <button class="track-toggle" data-track="translation" title="표시/숨김">👁️</button>
+                                                <button class="track-lock" data-track="translation" title="잠금/해제">🔓</button>
+                                                <button class="track-settings" data-track="translation" title="설정">⚙️</button>
+                                            </div>
+                                        </div>
+                                        <div class="track-content" id="translation-subtitle-content">
+                                            <!-- 번역 자막 블록들이 여기에 표시됩니다 -->
+                                        </div>
+                                    </div>
+
+                                    <!-- 설명/효과음 자막 트랙 -->
+                                    <div class="timeline-track subtitle-track description-subtitle-track" id="description-subtitle-track">
+                                        <div class="track-header">
+                                            <div class="track-title">🔊 설명 자막</div>
+                                            <div class="track-controls">
+                                                <button class="track-toggle" data-track="description" title="표시/숨김">👁️</button>
+                                                <button class="track-lock" data-track="description" title="잠금/해제">🔓</button>
+                                                <button class="track-settings" data-track="description" title="설정">⚙️</button>
+                                            </div>
+                                        </div>
+                                        <div class="track-content" id="description-subtitle-content">
+                                            <!-- 설명 자막 블록들이 여기에 표시됩니다 -->
                                         </div>
                                     </div>
 
@@ -444,6 +482,7 @@
                             <button class="sync-btn debug" id="debug-waveform" style="background-color: #ff6b4a;">🔧 파형 디버그</button>
                             <button class="sync-btn test" id="test-real-waveform" style="background-color: #4CAF50;">🎵 실제 파형 테스트</button>
                             <button class="sync-btn test" id="test-subtitle-numbers" style="background-color: #FF6B4A;">🧪 자막 번호 테스트</button>
+                            <button class="sync-btn test" id="force-test-subtitles" style="background-color: #9C27B0;">🎯 강제 자막 표시</button>
                         </div>
                     </div>
 
@@ -634,6 +673,6 @@
     </div>
 </div>
 
-<script src="/static/analysis.js?v=5"></script>
+<script src="/static/analysis.js?v=8"></script>
 </body>
 </html>

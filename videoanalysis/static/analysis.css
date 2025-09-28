@@ -1776,12 +1776,12 @@ textarea:focus {
     background: #00cc66;
 }
 
-/* 타임라인 컨테이너 - 가로 스크롤 */
+/* 타임라인 컨테이너 - 가로/세로 스크롤 */
 .timeline-container {
     width: 100%;
-    height: 300px;
+    height: 400px; /* 높이 증가 */
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto; /* 세로 스크롤 활성화 */
     border: 1px solid var(--border-color);
     border-radius: 4px;
     position: relative;
@@ -1853,9 +1853,37 @@ textarea:focus {
     position: relative;
 }
 
-/* 자막 트랙은 더 높게 - 다중 레이어 지원 */
+/* 하이브리드 자막 트랙 시스템 */
 .subtitle-track {
-    height: 150px !important;
+    height: 80px !important;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: 2px;
+}
+
+/* 각 트랙별 테마 색상 */
+.main-subtitle-track {
+    background: linear-gradient(to right, rgba(74, 158, 255, 0.1), rgba(74, 158, 255, 0.05));
+    border-left: 4px solid rgba(74, 158, 255, 0.8);
+}
+
+.translation-subtitle-track {
+    background: linear-gradient(to right, rgba(40, 167, 69, 0.1), rgba(40, 167, 69, 0.05));
+    border-left: 4px solid rgba(40, 167, 69, 0.8);
+}
+
+.description-subtitle-track {
+    background: linear-gradient(to right, rgba(255, 193, 7, 0.1), rgba(255, 193, 7, 0.05));
+    border-left: 4px solid rgba(255, 193, 7, 0.8);
+}
+
+/* 숨겨진 트랙 스타일 */
+.subtitle-track.hidden {
+    height: 30px !important;
+    opacity: 0.5;
+}
+
+.subtitle-track.hidden .track-content {
+    display: none;
 }
 
 /* 0초 기준선을 모든 트랙에 표시 (이제 맨 왼쪽) */
@@ -1873,24 +1901,135 @@ textarea:focus {
 }
 
 .track-header {
-    width: 80px;
+    width: 120px;
     background: rgba(255, 255, 255, 0.1);
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
     justify-content: center;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     color: var(--text-primary);
     font-weight: 500;
     border-right: 1px solid var(--border-color);
     flex-shrink: 0;
     position: relative;
-    margin-left: -40px; /* 헤더를 왼쪽으로 이동하여 0초 이전에 배치 */
+    margin-left: -40px;
+    padding: 4px 8px;
+}
+
+.track-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100px;
+}
+
+.track-controls {
+    display: flex;
+    gap: 2px;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.track-header:hover .track-controls {
+    opacity: 1;
+}
+
+.track-toggle, .track-lock, .track-settings {
+    background: none;
+    border: none;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: all 0.2s;
+    color: var(--text-primary);
+}
+
+.track-toggle:hover, .track-lock:hover, .track-settings:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.track-toggle.disabled {
+    opacity: 0.4;
+}
+
+.track-lock.locked {
+    color: var(--error-color);
 }
 
 .track-content {
     flex: 1;
     position: relative;
     overflow: hidden;
+}
+
+/* 하이브리드 자막 블록 스타일 */
+.hybrid-subtitle {
+    position: absolute;
+    z-index: 10;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.hybrid-subtitle:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    z-index: 15;
+}
+
+.hybrid-number {
+    font-family: 'Courier New', monospace;
+    user-select: none;
+}
+
+/* 잠긴 트랙 스타일 */
+.subtitle-track.locked {
+    opacity: 0.7;
+}
+
+.subtitle-track.locked .hybrid-subtitle {
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
+.subtitle-track.locked .track-header::before {
+    content: '🔒';
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    font-size: 12px;
+}
+
+/* 타임라인 스크롤바 스타일링 */
+.timeline-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.timeline-container::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+.timeline-container::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.timeline-container::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-dark);
+}
+
+.timeline-container::-webkit-scrollbar-corner {
+    background: transparent;
 }
 
 /* 비디오 트랙 */
@@ -2183,7 +2322,8 @@ textarea:focus {
     }
 
     .timeline-container {
-        height: 250px;
+        height: 300px;
+        overflow-y: auto;
     }
 
     .timeline-track {
@@ -2215,7 +2355,8 @@ textarea:focus {
     }
 
     .timeline-container {
-        height: 200px;
+        height: 250px;
+        overflow-y: auto;
     }
 
     .timeline-track {

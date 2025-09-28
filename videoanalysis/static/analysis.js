@@ -10,6 +10,13 @@ class VideoAnalysisApp {
         this.analysisResults = {};
         this.charts = {};
 
+        // 하이브리드 자막 트랙 시스템 설정
+        this.trackStates = {
+            main: { visible: true, locked: false },
+            translation: { visible: true, locked: false },
+            description: { visible: true, locked: false }
+        };
+
         this.init();
     }
 
@@ -144,6 +151,9 @@ class VideoAnalysisApp {
                 this.testRealWaveform();
             });
         }
+
+        // 하이브리드 자막 트랙 제어 버튼들
+        this.setupTrackControls();
     }
 
     setupTimelineEditor() {
@@ -384,6 +394,128 @@ class VideoAnalysisApp {
 
         this.updateSelectedFilesList();
         this.updateStatusBar();
+    }
+
+    // 하이브리드 자막 트랙 제어 시스템
+    setupTrackControls() {
+        console.log('🎛️ 하이브리드 트랙 제어 시스템 초기화');
+
+        // 각 트랙의 제어 버튼에 이벤트 리스너 추가
+        ['main', 'translation', 'description'].forEach(trackType => {
+            // 가시성 토글 버튼
+            const toggleBtn = document.querySelector(`.track-toggle[data-track="${trackType}"]`);
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    this.toggleTrackVisibility(trackType);
+                });
+            }
+
+            // 잠금 토글 버튼
+            const lockBtn = document.querySelector(`.track-lock[data-track="${trackType}"]`);
+            if (lockBtn) {
+                lockBtn.addEventListener('click', () => {
+                    this.toggleTrackLock(trackType);
+                });
+            }
+
+            // 설정 버튼
+            const settingsBtn = document.querySelector(`.track-settings[data-track="${trackType}"]`);
+            if (settingsBtn) {
+                settingsBtn.addEventListener('click', () => {
+                    this.showTrackSettings(trackType);
+                });
+            }
+        });
+    }
+
+    toggleTrackVisibility(trackType) {
+        console.log(`👁️ 트랙 가시성 토글: ${trackType}`);
+
+        this.trackStates[trackType].visible = !this.trackStates[trackType].visible;
+
+        // UI 업데이트
+        const toggleBtn = document.querySelector(`.track-toggle[data-track="${trackType}"]`);
+        const track = document.getElementById(`${trackType}-subtitle-track`);
+
+        if (this.trackStates[trackType].visible) {
+            toggleBtn.textContent = '👁️';
+            toggleBtn.title = '트랙 숨기기';
+            if (track) track.style.display = 'block';
+        } else {
+            toggleBtn.textContent = '🚫';
+            toggleBtn.title = '트랙 보이기';
+            if (track) track.style.display = 'none';
+        }
+
+        // 자막 다시 렌더링
+        this.renderHybridSubtitleTracks();
+    }
+
+    toggleTrackLock(trackType) {
+        console.log(`🔒 트랙 잠금 토글: ${trackType}`);
+
+        this.trackStates[trackType].locked = !this.trackStates[trackType].locked;
+
+        // UI 업데이트
+        const lockBtn = document.querySelector(`.track-lock[data-track="${trackType}"]`);
+        const track = document.getElementById(`${trackType}-subtitle-track`);
+
+        if (this.trackStates[trackType].locked) {
+            lockBtn.textContent = '🔒';
+            lockBtn.title = '트랙 잠금 해제';
+            if (track) track.classList.add('locked');
+        } else {
+            lockBtn.textContent = '🔓';
+            lockBtn.title = '트랙 잠금';
+            if (track) track.classList.remove('locked');
+        }
+    }
+
+    showTrackSettings(trackType) {
+        console.log(`⚙️ 트랙 설정 표시: ${trackType}`);
+
+        const trackNames = {
+            main: '메인 자막',
+            translation: '번역 자막',
+            description: '설명 자막'
+        };
+
+        alert(`${trackNames[trackType]} 설정\n\n향후 업데이트에서 제공될 예정입니다:\n- 트랙 색상 변경\n- 폰트 크기 조절\n- 자막 스타일 설정`);
+    }
+
+    // 자막을 트랙별로 분류하는 함수
+    classifySubtitlesByType(subtitles) {
+        console.log('🏷️ 자막 분류 시작:', subtitles.length);
+
+        const classified = {
+            main: [],
+            translation: [],
+            description: []
+        };
+
+        subtitles.forEach((subtitle, index) => {
+            const text = subtitle.text.toLowerCase();
+
+            // 간단한 분류 로직 (향후 AI 기반으로 개선 가능)
+            if (text.includes('[') && text.includes(']')) {
+                // [효과음], [음악] 등은 설명 자막으로 분류
+                classified.description.push({...subtitle, originalIndex: index});
+            } else if (text.match(/^[a-zA-Z\s\.,!?]+$/)) {
+                // 영어만 포함된 경우 번역 자막으로 분류
+                classified.translation.push({...subtitle, originalIndex: index});
+            } else {
+                // 나머지는 메인 자막으로 분류
+                classified.main.push({...subtitle, originalIndex: index});
+            }
+        });
+
+        console.log('📊 자막 분류 결과:', {
+            메인: classified.main.length,
+            번역: classified.translation.length,
+            설명: classified.description.length
+        });
+
+        return classified;
     }
 
     updateSelectedFilesList() {
@@ -2004,6 +2136,14 @@ class VideoAnalysisApp {
                 this.testSubtitleNumberDisplay();
             });
         }
+
+        // 강제 자막 표시 버튼
+        const forceTestBtn = document.getElementById('force-test-subtitles');
+        if (forceTestBtn) {
+            forceTestBtn.addEventListener('click', () => {
+                this.forceDisplayTestSubtitles();
+            });
+        }
     }
 
     setupTimelineEvents() {
@@ -2516,10 +2656,11 @@ class VideoAnalysisApp {
                 console.log('자막 데이터:', this.timeline.subtitleData);
 
                 try {
-                    this.renderSubtitleTrack();
-                    console.log('✅ renderSubtitleTrack 완료');
+                    // 하이브리드 시스템 사용
+                    this.renderHybridSubtitleTracks();
+                    console.log('✅ renderHybridSubtitleTracks 완료');
                 } catch (error) {
-                    console.error('❌ renderSubtitleTrack 에러:', error);
+                    console.error('❌ renderHybridSubtitleTracks 에러:', error);
                 }
 
                 this.updateTimelineRuler();
@@ -2562,6 +2703,13 @@ class VideoAnalysisApp {
         console.log('🧹 기존 내용 지우기');
         trackContent.innerHTML = '';
 
+        if (subtitles.length === 0) {
+            console.error('❌ 자막 데이터가 비어있습니다');
+            // 테스트 자막 생성
+            this.createTestSubtitle(trackContent);
+            return;
+        }
+
         // 자막 겹침 방지를 위한 레이어 계산
         const layers = this.calculateSubtitleLayers(subtitles);
         console.log('📚 자막 레이어 계산 완료:', layers);
@@ -2593,7 +2741,24 @@ class VideoAnalysisApp {
             block.style.top = topPosition + 'px';
             block.style.height = '28px'; // 레이어 높이에 맞게 더 크게 조정
 
-            console.log(`자막 #${index + 1} 배치: layer=${layer}, top=${topPosition}px`);
+            // 레이어별 색상 및 스타일 적용
+            const layerColors = [
+                'rgba(0, 123, 255, 0.9)', // 레이어 0: 파란색
+                'rgba(40, 167, 69, 0.9)', // 레이어 1: 초록색
+                'rgba(255, 193, 7, 0.9)', // 레이어 2: 노란색
+                'rgba(220, 53, 69, 0.9)', // 레이어 3: 빨간색
+                'rgba(102, 16, 242, 0.9)', // 레이어 4: 보라색
+                'rgba(255, 133, 27, 0.9)'  // 레이어 5: 주황색
+            ];
+
+            const layerColor = layerColors[layer % layerColors.length];
+            block.style.background = `linear-gradient(135deg, ${layerColor}, ${layerColor.replace('0.9', '0.7')})`;
+
+            // 레이어 정보를 블록에 저장
+            block.dataset.layer = layer;
+            block.title = `#${index + 1} (Layer ${layer}): ${this.formatSubtitleTime(startTime)} - ${this.formatSubtitleTime(endTime)}\n${subtitle.text}`;
+
+            console.log(`자막 #${index + 1} 배치: layer=${layer}, top=${topPosition}px, color=${layerColor}`);
 
             // 번호 표시 요소 생성 - 더 강력한 스타일링
             const numberElement = document.createElement('div');
@@ -2610,7 +2775,7 @@ class VideoAnalysisApp {
                 'top': '0px',
                 'left': '0px',
                 'z-index': '999',
-                'background-color': 'rgb(255, 60, 60)', // 더 눈에 띄는 빨간색
+                'background-color': numberBgColor, // 레이어별 색상
                 'color': 'white',
                 'font-weight': '900',
                 'font-size': '12px', // 더 큰 폰트
@@ -2649,8 +2814,20 @@ class VideoAnalysisApp {
             // 블록 너비에 따라 표시 내용 조정
             const blockWidthPx = (widthPercent / 100) * (trackContent.offsetWidth || 1000);
 
-            // 번호는 항상 표시, 크기만 조정
-            numberElement.textContent = `${index + 1}`;
+            // 번호는 항상 표시, 레이어 정보도 포함
+            numberElement.textContent = layer > 0 ? `${index + 1}` : `${index + 1}`;
+
+            // 레이어별로 번호 색상 다르게
+            const numberBgColors = [
+                'rgb(255, 60, 60)',    // 레이어 0: 빨간색
+                'rgb(34, 139, 34)',    // 레이어 1: 진한 초록색
+                'rgb(255, 140, 0)',    // 레이어 2: 진한 주황색
+                'rgb(128, 0, 128)',    // 레이어 3: 보라색
+                'rgb(0, 100, 200)',    // 레이어 4: 진한 파란색
+                'rgb(220, 20, 60)'     // 레이어 5: 크림슨
+            ];
+
+            const numberBgColor = numberBgColors[layer % numberBgColors.length];
 
             // 텍스트 컨테이너 생성 (번호 옆에 표시)
             const textContainer = document.createElement('div');
@@ -2743,6 +2920,9 @@ class VideoAnalysisApp {
             trackContent.appendChild(block);
         });
 
+        // 레이어 범례 추가
+        this.addLayerLegend(layers);
+
         // 렌더링 완료 후 전체 확인
         console.log('🎯 자막 트랙 렌더링 완료');
         console.log(`📊 생성된 블록 수: ${trackContent.children.length}`);
@@ -2763,6 +2943,198 @@ class VideoAnalysisApp {
         }, 200);
     }
 
+    // 하이브리드 자막 트랙 렌더링 메인 함수
+    renderHybridSubtitleTracks() {
+        console.log('🎬 하이브리드 자막 트랙 렌더링 시작');
+
+        if (!this.timeline.subtitleData) {
+            console.error('❌ timeline.subtitleData가 없습니다');
+            return;
+        }
+
+        const subtitles = this.timeline.subtitleData.subtitles || [];
+        console.log(`📝 총 자막 수: ${subtitles.length}`);
+
+        if (subtitles.length === 0) {
+            console.error('❌ 자막 데이터가 비어있습니다');
+            return;
+        }
+
+        // 자막을 트랙별로 분류
+        const classifiedSubtitles = this.classifySubtitlesByType(subtitles);
+
+        // 각 트랙에 자막 렌더링
+        ['main', 'translation', 'description'].forEach(trackType => {
+            if (this.trackStates[trackType].visible) {
+                this.renderTrackSubtitles(trackType, classifiedSubtitles[trackType]);
+            } else {
+                // 숨겨진 트랙은 비우기
+                this.clearTrackContent(trackType);
+            }
+        });
+
+        console.log('✅ 하이브리드 자막 트랙 렌더링 완료');
+    }
+
+    // 특정 트랙의 자막들을 렌더링
+    renderTrackSubtitles(trackType, subtitles) {
+        console.log(`🎯 ${trackType} 트랙 렌더링: ${subtitles.length}개 자막`);
+
+        const track = document.getElementById(`${trackType}-subtitle-track`);
+        if (!track) {
+            console.error(`❌ ${trackType}-subtitle-track 요소를 찾을 수 없습니다`);
+            return;
+        }
+
+        const trackContent = track.querySelector('.track-content');
+        if (!trackContent) {
+            console.error(`❌ ${trackType} 트랙의 .track-content 요소를 찾을 수 없습니다`);
+            return;
+        }
+
+        // 기존 내용 지우기
+        trackContent.innerHTML = '';
+
+        if (subtitles.length === 0) {
+            console.log(`📝 ${trackType} 트랙에 자막이 없습니다`);
+            return;
+        }
+
+        // 트랙 내에서 레이어 계산 (같은 트랙 내 겹침 방지)
+        const layers = this.calculateSubtitleLayers(subtitles);
+        console.log(`📚 ${trackType} 트랙 레이어 계산 완료:`, layers);
+
+        // 트랙별 색상 테마
+        const trackThemes = {
+            main: {
+                bgColor: 'rgba(74, 158, 255, 0.9)',
+                numberBg: 'rgb(255, 60, 60)',
+                name: '메인'
+            },
+            translation: {
+                bgColor: 'rgba(40, 167, 69, 0.9)',
+                numberBg: 'rgb(34, 139, 34)',
+                name: '번역'
+            },
+            description: {
+                bgColor: 'rgba(255, 193, 7, 0.9)',
+                numberBg: 'rgb(255, 140, 0)',
+                name: '설명'
+            }
+        };
+
+        const theme = trackThemes[trackType];
+
+        subtitles.forEach((subtitle, index) => {
+            const block = document.createElement('div');
+            block.className = 'subtitle-block hybrid-subtitle';
+            block.dataset.index = subtitle.originalIndex || index;
+            block.dataset.trackType = trackType;
+
+            // 자막 시간이 음수인 경우 0으로 조정
+            const startTime = Math.max(0, subtitle.start_time);
+            const endTime = Math.max(0, subtitle.end_time);
+
+            // 전체 시간 범위 계산
+            const totalDuration = Math.max(this.timeline.duration, 60);
+            const duration = endTime - startTime;
+
+            const startPercent = (startTime / totalDuration) * 100;
+            const widthPercent = (duration / totalDuration) * 100;
+
+            // 레이어에 따른 위치 조정
+            const layer = layers[index] || 0;
+            const layerHeight = 25; // 트랙별로 높이 조정
+            const topPosition = 2 + (layer * layerHeight);
+
+            block.style.left = startPercent + '%';
+            block.style.width = Math.max(widthPercent, 3) + '%';
+            block.style.top = topPosition + 'px';
+            block.style.height = '22px';
+
+            // 트랙별 색상 적용
+            block.style.background = `linear-gradient(135deg, ${theme.bgColor}, ${theme.bgColor.replace('0.9', '0.7')})`;
+            block.style.border = `1px solid ${theme.bgColor.replace('0.9', '1')}`;
+
+            // 레이어 정보를 블록에 저장
+            block.dataset.layer = layer;
+            block.title = `${theme.name} #${subtitle.originalIndex + 1 || index + 1} (Layer ${layer}): ${this.formatSubtitleTime(startTime)} - ${this.formatSubtitleTime(endTime)}\n${subtitle.text}`;
+
+            // 번호 표시 요소 생성
+            const numberElement = document.createElement('div');
+            numberElement.className = 'subtitle-number hybrid-number';
+            numberElement.textContent = `${subtitle.originalIndex + 1 || index + 1}`;
+
+            // 강력한 인라인 스타일
+            Object.assign(numberElement.style, {
+                'display': 'block',
+                'visibility': 'visible',
+                'opacity': '1',
+                'backgroundColor': theme.numberBg,
+                'color': 'white',
+                'fontWeight': '900',
+                'fontSize': '9px',
+                'padding': '1px 3px',
+                'borderRadius': '3px',
+                'position': 'absolute',
+                'left': '2px',
+                'top': '2px',
+                'zIndex': '25',
+                'minWidth': '15px',
+                'textAlign': 'center',
+                'lineHeight': '1.2'
+            });
+
+            // 블록에 번호 추가
+            block.appendChild(numberElement);
+
+            // 이벤트 리스너 추가 (편집 기능)
+            this.addSubtitleBlockEvents(block, subtitle, subtitle.originalIndex || index);
+
+            // 트랙에 블록 추가
+            trackContent.appendChild(block);
+
+            console.log(`${theme.name} #${subtitle.originalIndex + 1 || index + 1} 배치: layer=${layer}, top=${topPosition}px`);
+        });
+    }
+
+    // 트랙 내용 비우기
+    clearTrackContent(trackType) {
+        const track = document.getElementById(`${trackType}-subtitle-track`);
+        if (track) {
+            const trackContent = track.querySelector('.track-content');
+            if (trackContent) {
+                trackContent.innerHTML = '';
+            }
+        }
+    }
+
+    // 자막 블록에 이벤트 리스너 추가
+    addSubtitleBlockEvents(block, subtitle, index) {
+        // 클릭 시 재생 위치 이동
+        block.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.seekToTime(subtitle.start_time);
+            this.showSubtitleEditInfo(subtitle, index);
+        });
+
+        // 더블클릭 시 편집
+        block.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            if (!this.trackStates[block.dataset.trackType]?.locked) {
+                this.editSubtitleSegment(index);
+            }
+        });
+
+        // 우클릭 컨텍스트 메뉴
+        block.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (!this.trackStates[block.dataset.trackType]?.locked) {
+                this.showSubtitleContextMenu(e, index);
+            }
+        });
+    }
+
     calculateSubtitleLayers(subtitles) {
         console.log('🧮 자막 레이어 계산 시작');
         const layers = new Array(subtitles.length).fill(0);
@@ -2773,21 +3145,22 @@ class VideoAnalysisApp {
             const endTime = Math.max(0, subtitle.end_time);
 
             // 적절한 레이어 찾기
-            let assignedLayer = 0;
+            let assignedLayer = -1;
 
+            // 기존 레이어에서 사용 가능한 것 찾기
             for (let layer = 0; layer < layerEndTimes.length; layer++) {
                 // 이 레이어의 마지막 자막이 현재 자막 시작 전에 끝나면 사용 가능
                 if (layerEndTimes[layer] <= startTime) {
                     assignedLayer = layer;
+                    layerEndTimes[layer] = endTime; // 레이어 종료 시간 업데이트
                     break;
                 }
             }
 
-            // 새 레이어가 필요한 경우
-            if (assignedLayer === layerEndTimes.length) {
+            // 사용 가능한 레이어가 없으면 새 레이어 생성
+            if (assignedLayer === -1) {
+                assignedLayer = layerEndTimes.length;
                 layerEndTimes.push(endTime);
-            } else {
-                layerEndTimes[assignedLayer] = endTime;
             }
 
             layers[index] = assignedLayer;
@@ -2797,6 +3170,248 @@ class VideoAnalysisApp {
 
         console.log(`총 ${Math.max(...layers) + 1}개 레이어 사용`);
         return layers;
+    }
+
+    addLayerLegend(layers) {
+        // 기존 범례 제거
+        const existingLegend = document.querySelector('.layer-legend');
+        if (existingLegend) {
+            existingLegend.remove();
+        }
+
+        const maxLayer = Math.max(...layers);
+        if (maxLayer === 0) return; // 레이어가 1개면 범례 불필요
+
+        // 범례 컨테이너 생성
+        const legend = document.createElement('div');
+        legend.className = 'layer-legend';
+        legend.style.cssText = `
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 1000;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        `;
+
+        const title = document.createElement('div');
+        title.textContent = '📚 자막 레이어';
+        title.style.cssText = `
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #4CAF50;
+        `;
+        legend.appendChild(title);
+
+        // 레이어별 색상 정의 (블록과 동일)
+        const layerColors = [
+            'rgba(0, 123, 255, 0.9)', // 레이어 0: 파란색
+            'rgba(40, 167, 69, 0.9)', // 레이어 1: 초록색
+            'rgba(255, 193, 7, 0.9)', // 레이어 2: 노란색
+            'rgba(220, 53, 69, 0.9)', // 레이어 3: 빨간색
+            'rgba(102, 16, 242, 0.9)', // 레이어 4: 보라색
+            'rgba(255, 133, 27, 0.9)'  // 레이어 5: 주황색
+        ];
+
+        // 각 레이어에 대한 범례 항목 생성
+        for (let i = 0; i <= maxLayer; i++) {
+            const layerCount = layers.filter(l => l === i).length;
+            const layerItem = document.createElement('div');
+            layerItem.style.cssText = `
+                display: flex;
+                align-items: center;
+                margin-bottom: 4px;
+            `;
+
+            const colorBox = document.createElement('div');
+            colorBox.style.cssText = `
+                width: 16px;
+                height: 16px;
+                background: ${layerColors[i % layerColors.length]};
+                border: 1px solid white;
+                border-radius: 3px;
+                margin-right: 8px;
+            `;
+
+            const label = document.createElement('span');
+            label.textContent = `레이어 ${i}: ${layerCount}개`;
+            label.style.fontSize = '11px';
+
+            layerItem.appendChild(colorBox);
+            layerItem.appendChild(label);
+            legend.appendChild(layerItem);
+        }
+
+        // 설명 추가
+        const explanation = document.createElement('div');
+        explanation.textContent = '겹치는 자막들을 층별로 표시';
+        explanation.style.cssText = `
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 8px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            padding-top: 6px;
+        `;
+        legend.appendChild(explanation);
+
+        // 타임라인 컨테이너에 추가
+        const timelineContainer = document.getElementById('timeline-container');
+        if (timelineContainer) {
+            timelineContainer.appendChild(legend);
+        }
+
+        console.log(`📚 레이어 범례 생성됨: ${maxLayer + 1}개 레이어`);
+    }
+
+    createTestSubtitle(trackContent) {
+        console.log('🧪 테스트 자막 생성 중...');
+
+        // 테스트 자막 데이터
+        const testSubtitles = [
+            { start_time: 0, end_time: 3, text: "테스트 자막 1" },
+            { start_time: 2.5, end_time: 5.5, text: "테스트 자막 2 (겹침)" },
+            { start_time: 5, end_time: 8, text: "테스트 자막 3" }
+        ];
+
+        const layers = this.calculateSubtitleLayers(testSubtitles);
+
+        testSubtitles.forEach((subtitle, index) => {
+            const block = document.createElement('div');
+            block.className = 'subtitle-block';
+
+            const layer = layers[index] || 0;
+            const layerHeight = 30;
+            const topPosition = 5 + (layer * layerHeight);
+
+            const startPercent = (subtitle.start_time / 10) * 100; // 10초 기준
+            const widthPercent = ((subtitle.end_time - subtitle.start_time) / 10) * 100;
+
+            // 기본 스타일 강제 적용
+            block.style.cssText = `
+                position: absolute;
+                left: ${startPercent}%;
+                width: ${Math.max(widthPercent, 15)}%;
+                top: ${topPosition}px;
+                height: 28px;
+                background: linear-gradient(135deg, rgb(255, 100, 100), rgb(200, 50, 50));
+                border: 2px solid white;
+                border-radius: 8px;
+                display: flex !important;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+                font-size: 12px;
+                z-index: 10;
+                box-shadow: 0 3px 10px rgba(0,0,0,0.5);
+            `;
+
+            block.textContent = `TEST ${index + 1}`;
+            block.title = `테스트 자막 #${index + 1}: ${subtitle.text}`;
+
+            trackContent.appendChild(block);
+            console.log(`✅ 테스트 자막 ${index + 1} 생성됨`);
+        });
+
+        console.log('🎯 테스트 자막 생성 완료');
+    }
+
+    forceDisplayTestSubtitles() {
+        console.log('🎯 강제 자막 표시 실행');
+
+        const subtitleTrack = document.getElementById('subtitle-track');
+        const trackContent = subtitleTrack ? subtitleTrack.querySelector('.track-content') : null;
+
+        if (!trackContent) {
+            console.error('❌ 자막 트랙을 찾을 수 없습니다');
+            return;
+        }
+
+        // 기존 내용 제거
+        trackContent.innerHTML = '';
+
+        // 테스트 자막 강제 생성
+        this.createTestSubtitle(trackContent);
+
+        // DOM 검증
+        setTimeout(() => {
+            this.validateSubtitleDOM(trackContent);
+        }, 100);
+
+        this.showSuccess('강제 테스트 자막이 표시되었습니다');
+    }
+
+    validateSubtitleDOM(trackContent) {
+        console.log('🔍 DOM 검증 시작');
+
+        const subtitleTrack = document.getElementById('subtitle-track');
+        const blocks = trackContent.querySelectorAll('.subtitle-block');
+
+        console.log('DOM 상태:', {
+            subtitleTrack: subtitleTrack,
+            trackContent: trackContent,
+            blocks: blocks,
+            blocksCount: blocks.length,
+            trackContentParent: trackContent.parentElement,
+            trackVisible: subtitleTrack ? getComputedStyle(subtitleTrack).display : 'null',
+            trackContentVisible: getComputedStyle(trackContent).display,
+            trackContentSize: {
+                width: trackContent.offsetWidth,
+                height: trackContent.offsetHeight,
+                scrollWidth: trackContent.scrollWidth,
+                scrollHeight: trackContent.scrollHeight
+            }
+        });
+
+        // 각 블록의 상태 확인
+        blocks.forEach((block, index) => {
+            const rect = block.getBoundingClientRect();
+            const computed = getComputedStyle(block);
+
+            console.log(`블록 #${index + 1} 상태:`, {
+                element: block,
+                position: {
+                    left: block.style.left,
+                    top: block.style.top,
+                    width: block.style.width,
+                    height: block.style.height
+                },
+                computed: {
+                    position: computed.position,
+                    display: computed.display,
+                    visibility: computed.visibility,
+                    opacity: computed.opacity,
+                    zIndex: computed.zIndex
+                },
+                boundingRect: {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                    visible: rect.width > 0 && rect.height > 0
+                },
+                inViewport: rect.top >= 0 && rect.left >= 0 &&
+                           rect.bottom <= window.innerHeight &&
+                           rect.right <= window.innerWidth
+            });
+        });
+
+        // 자막 트랙 컨테이너의 스크롤 상태
+        const timelineContainer = document.getElementById('timeline-container');
+        if (timelineContainer) {
+            console.log('타임라인 컨테이너 스크롤:', {
+                scrollLeft: timelineContainer.scrollLeft,
+                scrollTop: timelineContainer.scrollTop,
+                scrollWidth: timelineContainer.scrollWidth,
+                scrollHeight: timelineContainer.scrollHeight,
+                clientWidth: timelineContainer.clientWidth,
+                clientHeight: timelineContainer.clientHeight
+            });
+        }
     }
 
     selectSubtitleBlock(block) {
@@ -2867,7 +3482,7 @@ class VideoAnalysisApp {
         subtitle.end_time = endTime;
 
         // 타임라인 다시 그리기
-        this.renderSubtitleTrack();
+        this.renderHybridSubtitleTracks();
 
         this.showSuccess(`자막 #${index + 1} 구간이 수정되었습니다: ${this.formatSubtitleTime(startTime)} → ${this.formatSubtitleTime(endTime)}`);
     }
@@ -2963,7 +3578,7 @@ class VideoAnalysisApp {
         };
 
         subtitles.splice(index, 0, newSubtitle);
-        this.renderSubtitleTrack();
+        this.renderHybridSubtitleTracks();
         this.showSuccess(`자막 #${index + 1} 앞에 새 구간이 추가되었습니다.`);
     }
 
@@ -2984,7 +3599,7 @@ class VideoAnalysisApp {
         };
 
         subtitles.splice(index + 1, 0, newSubtitle);
-        this.renderSubtitleTrack();
+        this.renderHybridSubtitleTracks();
         this.showSuccess(`자막 #${index + 1} 뒤에 새 구간이 추가되었습니다.`);
     }
 
@@ -3017,7 +3632,7 @@ class VideoAnalysisApp {
         };
 
         subtitles.splice(index + 1, 0, newSubtitle);
-        this.renderSubtitleTrack();
+        this.renderHybridSubtitleTracks();
         this.showSuccess(`자막 #${index + 1}이 ${this.formatSubtitleTime(splitTimeNum)}에서 분할되었습니다.`);
     }
 
@@ -3031,7 +3646,7 @@ class VideoAnalysisApp {
         if (!confirmed) return;
 
         subtitles.splice(index, 1);
-        this.renderSubtitleTrack();
+        this.renderHybridSubtitleTracks();
         this.showSuccess(`자막 #${index + 1}이 삭제되었습니다.`);
     }
 
@@ -3426,7 +4041,7 @@ class VideoAnalysisApp {
 
     redrawTimeline() {
         this.updateTimelineRuler();
-        this.renderSubtitleTrack();
+        this.renderHybridSubtitleTracks();
         if (this.timeline.audioData) {
             this.drawAudioWaveform(this.timeline.audioData.path);
         }
@@ -3758,7 +4373,7 @@ window.debugSubtitleTrack = function() {
 window.forceRenderSubtitles = function() {
     console.log('🔄 강제 자막 렌더링 실행');
     if (window.app && window.app.timeline && window.app.timeline.subtitleData) {
-        window.app.renderSubtitleTrack();
+        window.app.renderHybridSubtitleTracks();
     } else {
         console.error('자막 데이터가 없습니다');
         console.log('앱 상태:', {
