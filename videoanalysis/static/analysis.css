@@ -1635,11 +1635,14 @@ textarea:focus {
     justify-content: space-between;
     align-items: center;
     padding: 1rem;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.8);
+    border: 2px solid var(--border-color);
     border-radius: var(--radius);
     margin-bottom: 1rem;
     flex-wrap: wrap;
     gap: 1rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
 }
 
 .playback-controls {
@@ -1648,19 +1651,93 @@ textarea:focus {
 }
 
 .playback-controls button {
-    background: var(--primary-color);
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+    color: white !important;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    padding: 0.75rem 1.25rem;
+    border-radius: 8px;
     cursor: pointer;
     transition: var(--transition);
-    font-size: 1rem;
+    font-size: 1.2rem !important;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(74, 158, 255, 0.3);
+    min-width: 50px;
+    min-height: 45px;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    opacity: 1 !important;
+    visibility: visible !important;
+    position: relative;
+    z-index: 10;
 }
 
 .playback-controls button:hover {
-    background: var(--primary-dark);
-    transform: scale(1.05);
+    background: linear-gradient(135deg, var(--primary-dark), var(--success-color));
+    transform: scale(1.1);
+    box-shadow: 0 6px 16px rgba(74, 158, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.playback-controls button:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 8px rgba(74, 158, 255, 0.4);
+}
+
+/* 재생 중일 때 플레이 버튼 스타일 */
+.playback-controls button.playing,
+#play-pause-btn.playing {
+    background: linear-gradient(135deg, var(--success-color), #00cc66) !important;
+    animation: pulse 2s infinite;
+    display: flex !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3); }
+    50% { box-shadow: 0 4px 20px rgba(0, 255, 136, 0.6); }
+    100% { box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3); }
+}
+
+/* 개별 버튼 스타일 */
+#play-pause-btn {
+    background: linear-gradient(135deg, #4CAF50, #45a049) !important;
+    display: flex !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    z-index: 10 !important;
+}
+
+#stop-btn {
+    background: linear-gradient(135deg, #f44336, #da190b);
+}
+
+#rewind-btn {
+    background: linear-gradient(135deg, #ff9800, #e68900);
+}
+
+#forward-btn {
+    background: linear-gradient(135deg, #2196F3, #0b7dda);
+}
+
+/* 버튼 hover 효과 개별 적용 */
+#play-pause-btn:hover {
+    background: linear-gradient(135deg, #45a049, #4CAF50) !important;
+    transform: scale(1.1) !important;
+    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.5) !important;
+}
+
+#stop-btn:hover {
+    background: linear-gradient(135deg, #da190b, #f44336);
+}
+
+#rewind-btn:hover {
+    background: linear-gradient(135deg, #e68900, #ff9800);
+}
+
+#forward-btn:hover {
+    background: linear-gradient(135deg, #0b7dda, #2196F3);
 }
 
 .zoom-controls {
@@ -1709,6 +1786,7 @@ textarea:focus {
     border-radius: 4px;
     position: relative;
     background: rgba(0, 0, 0, 0.5);
+    padding-left: 40px; /* 헤더 공간 확보 */
 }
 
 .timeline-content {
@@ -1758,7 +1836,7 @@ textarea:focus {
 }
 
 .track-header {
-    width: 120px;
+    width: 80px;
     background: rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
@@ -1768,6 +1846,8 @@ textarea:focus {
     font-weight: 500;
     border-right: 1px solid var(--border-color);
     flex-shrink: 0;
+    position: relative;
+    margin-left: -40px; /* 헤더를 왼쪽으로 이동하여 0초 이전에 배치 */
 }
 
 .track-content {
@@ -1812,6 +1892,65 @@ textarea:focus {
 /* 자막 트랙 */
 .subtitle-track .track-content {
     background: linear-gradient(135deg, rgba(255, 165, 0, 0.2), rgba(255, 165, 0, 0.1));
+    position: relative;
+}
+
+/* 자막 트랙 내 시간 표시선 */
+.subtitle-track .track-content::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent 49px,
+        rgba(255, 255, 255, 0.1) 49px,
+        rgba(255, 255, 255, 0.1) 50px
+    );
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* 자막 트랙 시간 눈금 오버레이 */
+.subtitle-track-indicators {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.subtitle-time-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.2);
+    font-size: 0.6rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.subtitle-time-tick.major {
+    background: rgba(255, 255, 255, 0.4);
+    width: 2px;
+}
+
+.subtitle-time-tick::after {
+    content: attr(data-time);
+    position: absolute;
+    bottom: 2px;
+    left: 2px;
+    font-size: 0.55rem;
+    color: rgba(255, 255, 255, 0.8);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.3);
+    padding: 1px 2px;
+    border-radius: 1px;
 }
 
 .subtitle-block {
@@ -1822,6 +1961,7 @@ textarea:focus {
     border-radius: 4px;
     border: 1px solid rgba(255, 255, 255, 0.3);
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     color: white;
@@ -1831,7 +1971,9 @@ textarea:focus {
     overflow: hidden;
     padding: 2px 4px;
     text-align: center;
-    line-height: 1.2;
+    line-height: 1.1;
+    z-index: 5;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .subtitle-block:hover {
@@ -1843,6 +1985,59 @@ textarea:focus {
 .subtitle-block.selected {
     background: linear-gradient(135deg, var(--success-color), #00cc66);
     box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}
+
+/* 자막 블록 내 시간 표시 */
+.subtitle-time {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 1.0);
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 1px 3px;
+    border-radius: 2px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    letter-spacing: 0.3px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.subtitle-text {
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: white;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+    line-height: 1.2;
+}
+
+/* 자막 블록이 작을 때 텍스트 숨기기 */
+.subtitle-block {
+    min-width: 60px; /* 최소 너비 설정 */
+}
+
+.subtitle-block[style*="width"] {
+    /* JavaScript에서 너비가 작게 설정된 블록의 경우 */
+}
+
+/* 작은 자막 블록에서는 텍스트를 숨기고 시간만 표시 */
+@media (max-width: 1200px) {
+    .subtitle-block {
+        font-size: 0.6rem;
+    }
+
+    .subtitle-time {
+        font-size: 0.55rem;
+    }
+
+    .subtitle-text {
+        font-size: 0.6rem;
+    }
 }
 
 /* 재생 헤드 */

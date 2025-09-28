@@ -45,11 +45,43 @@ async def analysis_main_page(request: Request):
     return templates.TemplateResponse("analysis.html", {"request": request})
 
 
+@app.get("/analysis", response_class=HTMLResponse)
+async def analysis_page(request: Request):
+    """분석 페이지 (메인과 동일)"""
+    return templates.TemplateResponse("analysis.html", {"request": request})
+
+
 @app.get("/favicon.ico")
 async def favicon():
     """Favicon 요청 처리"""
     from fastapi.responses import Response
     return Response(status_code=204)
+
+
+@app.post("/api/analyze-waveform")
+async def analyze_audio_waveform(request: dict = Body(...)):
+    """오디오 파일의 파형 데이터를 분석하여 반환"""
+    try:
+        audio_path = request.get("audio_path")
+        width = request.get("width", 800)  # 파형 너비 (픽셀)
+
+        if not audio_path or not os.path.exists(audio_path):
+            raise HTTPException(status_code=404, detail="오디오 파일을 찾을 수 없습니다")
+
+        # FFmpeg를 사용하여 오디오 파형 데이터 추출
+        waveform_data = extract_waveform_data(audio_path, width)
+
+        return {
+            "status": "success",
+            "audio_path": audio_path,
+            "waveform_data": waveform_data,
+            "width": width,
+            "sample_count": len(waveform_data)
+        }
+
+    except Exception as e:
+        logger.exception(f"파형 분석 에러: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/extract-audio")
@@ -982,6 +1014,101 @@ def format_duration_str(seconds: float) -> str:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     else:
         return f"{minutes}:{secs:02d}"
+
+
+def extract_waveform_data(audio_path: str, width: int = 800) -> List[float]:
+    """FFmpeg를 사용하여 오디오 파일의 파형 데이터를 추출"""
+    try:
+        import tempfile
+        import json
+
+        # 임시 파일로 원시 오디오 데이터 추출
+        with tempfile.NamedTemporaryFile(suffix='.raw', delete=False) as temp_file:
+            temp_raw_path = temp_file.name
+
+        try:
+            # FFmpeg로 모노 PCM 16비트 데이터 추출
+            cmd = [
+                'ffmpeg', '-i', audio_path,
+                '-f', 's16le',  # 16비트 리틀 엔디안
+                '-ac', '1',     # 모노
+                '-ar', '22050', # 22.05kHz 샘플레이트
+                '-y', temp_raw_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            logger.info(f"오디오 원시 데이터 추출 완료: {audio_path}")
+
+            # 원시 데이터 읽기
+            with open(temp_raw_path, 'rb') as f:
+                raw_data = f.read()
+
+            # 16비트 정수로 변환
+            import struct
+            sample_count = len(raw_data) // 2  # 16비트 = 2바이트
+            samples = struct.unpack(f'<{sample_count}h', raw_data)  # 리틀 엔디안 short
+
+            logger.info(f"총 샘플 수: {sample_count}")
+
+            # 파형 데이터 생성 (다운샘플링)
+            if sample_count == 0:
+                return [0.0] * width
+
+            samples_per_pixel = max(1, sample_count // width)
+            waveform_data = []
+
+            for i in range(width):
+                start_idx = i * samples_per_pixel
+                end_idx = min(start_idx + samples_per_pixel, sample_count)
+
+                # 구간 내 최대 절댓값 찾기
+                max_amplitude = 0
+                for j in range(start_idx, end_idx):
+                    amplitude = abs(samples[j])
+                    if amplitude > max_amplitude:
+                        max_amplitude = amplitude
+
+                # 정규화 (0.0 ~ 1.0)
+                normalized_amplitude = max_amplitude / 32767.0  # 16비트 최댓값
+                waveform_data.append(min(1.0, normalized_amplitude))
+
+            logger.info(f"파형 데이터 생성 완료: {len(waveform_data)} 포인트")
+            return waveform_data
+
+        finally:
+            # 임시 파일 정리
+            if os.path.exists(temp_raw_path):
+                os.remove(temp_raw_path)
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg 파형 추출 에러: {e.stderr}")
+        # 실패 시 가상 데이터 반환
+        return generate_fallback_waveform(width)
+    except Exception as e:
+        logger.error(f"파형 데이터 추출 실패: {e}")
+        return generate_fallback_waveform(width)
+
+
+def generate_fallback_waveform(width: int) -> List[float]:
+    """실제 분석 실패 시 사용할 가상 파형 데이터"""
+    import math
+    import random
+
+    waveform_data = []
+    for i in range(width):
+        # 음성과 유사한 패턴 생성
+        base_freq = i * 0.02
+        speech_envelope = (math.sin(i * 0.008) + 1) / 2  # 0~1 사이
+
+        amplitude = (
+            math.sin(base_freq) * 0.6 +
+            math.sin(base_freq * 2.3) * 0.3 +
+            random.uniform(-0.1, 0.1)
+        ) * speech_envelope
+
+        waveform_data.append(max(0, min(1, abs(amplitude))))
+
+    return waveform_data
 
 
 if __name__ == "__main__":

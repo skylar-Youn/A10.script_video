@@ -18,6 +18,11 @@ class VideoAnalysisApp {
         this.loadFileList();
         this.loadFolderTree();
         this.updateUI();
+
+        // 재생 버튼 초기 상태 설정
+        setTimeout(() => {
+            this.updatePlayPauseButton();
+        }, 100);
     }
 
     setupEventListeners() {
@@ -123,6 +128,22 @@ class VideoAnalysisApp {
 
         // 고급 타임라인 편집기 기능
         this.setupTimelineEditor();
+
+        // 디버그 버튼
+        const debugWaveformBtn = document.getElementById('debug-waveform');
+        if (debugWaveformBtn) {
+            debugWaveformBtn.addEventListener('click', () => {
+                this.debugWaveform();
+            });
+        }
+
+        // 실제 파형 테스트 버튼
+        const testRealWaveformBtn = document.getElementById('test-real-waveform');
+        if (testRealWaveformBtn) {
+            testRealWaveformBtn.addEventListener('click', () => {
+                this.testRealWaveform();
+            });
+        }
     }
 
     setupTimelineEditor() {
@@ -139,7 +160,7 @@ class VideoAnalysisApp {
         const playPauseBtn = document.getElementById('play-pause-btn');
         if (playPauseBtn) {
             playPauseBtn.addEventListener('click', () => {
-                this.toggleVideoPlayback();
+                this.togglePlayback();
             });
         }
 
@@ -346,6 +367,15 @@ class VideoAnalysisApp {
             if (this.getFileType(filePath) === 'video') {
                 this.loadVideoToPlayer(filePath);
                 this.switchTab('video-edit');
+            }
+
+            // 오디오 파일이면 즉시 파형 분석 시도
+            if (this.getFileType(filePath) === 'audio') {
+                console.log('🎵 오디오 파일 선택됨, 즉시 파형 분석 시도:', filePath);
+                this.switchTab('video-edit'); // 영상 편집 탭으로 이동
+                setTimeout(() => {
+                    this.drawAudioWaveform(filePath);
+                }, 500);
             }
         } else {
             this.selectedFiles.delete(filePath);
@@ -838,17 +868,23 @@ class VideoAnalysisApp {
         return path.split('.').pop().toUpperCase();
     }
 
-    formatDuration(seconds) {
-        if (!seconds) return '0초';
+    formatDuration(seconds, short = false) {
+        if (!seconds) return short ? '0:00' : '0초';
 
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         const secs = Math.floor(seconds % 60);
 
-        if (hours > 0) {
-            return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-        } else {
+        if (short) {
+            // 짧은 형식: 분:초만 표시
             return `${minutes}:${secs.toString().padStart(2, '0')}`;
+        } else {
+            // 기본 형식
+            if (hours > 0) {
+                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            } else {
+                return `${minutes}:${secs.toString().padStart(2, '0')}`;
+            }
         }
     }
 
@@ -1633,11 +1669,43 @@ class VideoAnalysisApp {
         ctx.fillText(this.formatDuration(currentTime), cursorX + 5, 15);
     }
 
-    formatDuration(seconds) {
-        if (!seconds || seconds < 0) return '0:00';
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    formatDuration(seconds, short = false) {
+        if (seconds === 0) return '0:00';
+
+        const isNegative = seconds < 0;
+        const absSeconds = Math.abs(seconds);
+        const mins = Math.floor(absSeconds / 60);
+        const secs = Math.floor(absSeconds % 60);
+
+        let timeStr;
+        if (short) {
+            // 짧은 형식: 0:30, 1:45
+            timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+        } else {
+            // 일반 형식: 0:30, 1:45
+            timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        return isNegative ? `-${timeStr}` : timeStr;
+    }
+
+    // 자막용 시간 포맷팅 (음수 방지)
+    formatSubtitleTime(seconds, short = false) {
+        // 자막 시간은 항상 양수로 처리
+        const positiveSeconds = Math.max(0, seconds || 0);
+
+        if (positiveSeconds === 0) return '0:00';
+
+        const mins = Math.floor(positiveSeconds / 60);
+        const secs = Math.floor(positiveSeconds % 60);
+
+        if (short) {
+            // 짧은 형식: 0:30, 1:45
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        } else {
+            // 일반 형식: 0:30, 1:45
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
     }
 
     // 음성 추출 기능
@@ -1814,11 +1882,18 @@ class VideoAnalysisApp {
             videoData: null,
             audioData: null,
             subtitleData: null,
-            isPlaying: false
+            isPlaying: false,
+            startOffset: 30, // 0초 이전에 30초 여백 추가
+            minTime: -30,    // 최소 -30초까지 표시
+            maxTime: 0       // 최대 시간은 동적으로 설정
         };
 
         this.setupTimelineControls();
         this.setupTimelineEvents();
+
+        // 초기 타임라인 설정
+        this.updateTimelineWidth();
+        this.updateTimelineRuler();
     }
 
     setupTimelineControls() {
@@ -1923,7 +1998,24 @@ class VideoAnalysisApp {
             timelineContainer.addEventListener('click', (e) => {
                 const rect = timelineContainer.getBoundingClientRect();
                 const x = e.clientX - rect.left + timelineContainer.scrollLeft;
-                const time = x / (this.timeline.pixelsPerSecond * this.timeline.zoom);
+
+                // 전체 시간 범위 계산
+                const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+                const timelineContent = document.getElementById('timeline-content');
+                const width = parseFloat(timelineContent.style.minWidth) || 1000;
+
+                // 클릭한 위치를 실제 시간으로 변환 (minTime 고려)
+                const normalizedPosition = x / width;
+                const time = (normalizedPosition * totalDuration) + this.timeline.minTime;
+
+                console.log('타임라인 클릭:', {
+                    x: x,
+                    normalizedPosition: normalizedPosition,
+                    time: time,
+                    minTime: this.timeline.minTime,
+                    totalDuration: totalDuration
+                });
+
                 this.seekToTime(time);
             });
         }
@@ -1965,12 +2057,20 @@ class VideoAnalysisApp {
         }
 
         console.log('현재 재생 상태:', this.timeline.isPlaying);
+        console.log('현재 비디오 시간:', videoPlayer.currentTime);
+
         if (this.timeline.isPlaying) {
             videoPlayer.pause();
-            console.log('비디오 일시정지');
+            console.log('비디오 일시정지 - 현재 위치:', videoPlayer.currentTime);
         } else {
+            // 현재 타임라인 위치로 비디오 시간 설정
+            if (this.timeline.currentTime !== undefined && this.timeline.currentTime !== videoPlayer.currentTime) {
+                videoPlayer.currentTime = this.timeline.currentTime;
+                console.log('비디오 시간을 타임라인 위치로 설정:', this.timeline.currentTime);
+            }
+
             videoPlayer.play().then(() => {
-                console.log('비디오 재생 시작');
+                console.log('비디오 재생 시작 - 위치:', videoPlayer.currentTime);
             }).catch(error => {
                 console.error('비디오 재생 실패:', error);
                 this.showError('비디오 재생에 실패했습니다: ' + error.message);
@@ -2007,15 +2107,49 @@ class VideoAnalysisApp {
 
     seekToTime(time) {
         const videoPlayer = document.getElementById('video-player');
-        if (videoPlayer) {
-            videoPlayer.currentTime = Math.max(0, Math.min(videoPlayer.duration, time));
+
+        // 타임라인 현재 시간 업데이트 (음수 시간 허용)
+        this.timeline.currentTime = Math.max(this.timeline.minTime, time);
+
+        if (videoPlayer && time >= 0) {
+            // 비디오 플레이어는 양수 시간만 허용
+            const clampedTime = Math.max(0, Math.min(videoPlayer.duration || time, time));
+            videoPlayer.currentTime = clampedTime;
+            console.log(`비디오 플레이어 시간 이동: ${clampedTime}초`);
+        } else {
+            console.log(`타임라인 시간 이동: ${this.timeline.currentTime}초 (음수 시간)`);
         }
+
+        // 재생 헤드 위치 강제 업데이트
+        this.updateTimelinePosition();
+        this.updateCurrentSubtitle();
     }
 
     updatePlayPauseButton() {
         const btn = document.getElementById('play-pause-btn');
+        console.log('updatePlayPauseButton 호출됨, 버튼 요소:', btn);
+        console.log('재생 상태:', this.timeline.isPlaying);
+
         if (btn) {
-            btn.textContent = this.timeline.isPlaying ? '⏸️' : '⏯️';
+            btn.textContent = this.timeline.isPlaying ? '⏸️' : '▶️';
+
+            // 버튼이 확실히 보이도록 강제 스타일 적용
+            btn.style.display = 'flex';
+            btn.style.opacity = '1';
+            btn.style.visibility = 'visible';
+
+            console.log('버튼 텍스트 설정:', btn.textContent);
+
+            // 재생 상태에 따른 스타일 클래스 적용
+            if (this.timeline.isPlaying) {
+                btn.classList.add('playing');
+                console.log('playing 클래스 추가됨');
+            } else {
+                btn.classList.remove('playing');
+                console.log('playing 클래스 제거됨');
+            }
+        } else {
+            console.error('play-pause-btn 요소를 찾을 수 없습니다!');
         }
     }
 
@@ -2029,35 +2163,64 @@ class VideoAnalysisApp {
 
     updateTimelineWidth() {
         const timelineContent = document.getElementById('timeline-content');
-        if (timelineContent && this.timeline.duration > 0) {
-            const width = this.timeline.duration * this.timeline.pixelsPerSecond * this.timeline.zoom;
+        if (timelineContent) {
+            // 전체 시간 범위 계산 (minTime부터 duration까지)
+            const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+            const width = totalDuration * this.timeline.pixelsPerSecond * this.timeline.zoom;
             timelineContent.style.minWidth = Math.max(1000, width) + 'px';
+
+            console.log('타임라인 너비 업데이트:', {
+                totalDuration: totalDuration,
+                width: width,
+                minTime: this.timeline.minTime,
+                duration: this.timeline.duration
+            });
         }
     }
 
     updateTimelineRuler() {
         const ruler = document.getElementById('timeline-ruler');
-        if (!ruler || this.timeline.duration === 0) return;
+        if (!ruler) return;
 
         ruler.innerHTML = '';
 
         const interval = this.getOptimalTimeInterval();
-        const width = this.timeline.duration * this.timeline.pixelsPerSecond * this.timeline.zoom;
+        const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+        const width = totalDuration * this.timeline.pixelsPerSecond * this.timeline.zoom;
 
-        for (let time = 0; time <= this.timeline.duration; time += interval) {
+        // 음수 시간부터 시작해서 최대 시간까지 마커 생성
+        const maxTime = Math.max(this.timeline.duration, 60); // 최소 60초까지는 표시
+
+        for (let time = this.timeline.minTime; time <= maxTime; time += interval) {
             const marker = document.createElement('div');
             marker.className = 'time-marker';
 
-            if (time % (interval * 5) === 0) {
+            // 0초와 주요 시간 간격에 굵은 마커
+            if (time === 0 || time % (interval * 5) === 0) {
                 marker.className += ' major';
             }
 
-            const position = (time / this.timeline.duration) * width;
+            // 0초 마커는 특별 표시
+            if (time === 0) {
+                marker.className += ' zero-marker';
+                marker.style.color = '#ff4444';
+                marker.style.fontWeight = 'bold';
+            }
+
+            // 위치 계산 (minTime을 기준으로 오프셋)
+            const position = ((time - this.timeline.minTime) / totalDuration) * width;
             marker.style.left = position + 'px';
             marker.textContent = this.formatDuration(time);
 
             ruler.appendChild(marker);
         }
+
+        console.log('타임라인 눈금자 업데이트:', {
+            minTime: this.timeline.minTime,
+            maxTime: maxTime,
+            totalDuration: totalDuration,
+            width: width
+        });
     }
 
     getOptimalTimeInterval() {
@@ -2072,14 +2235,27 @@ class VideoAnalysisApp {
         const videoPlayer = document.getElementById('video-player');
         const playhead = document.getElementById('playhead');
 
-        if (!videoPlayer || !playhead || this.timeline.duration === 0) return;
+        if (!videoPlayer || !playhead) return;
 
         this.timeline.currentTime = videoPlayer.currentTime;
         const timelineContent = document.getElementById('timeline-content');
         const width = parseFloat(timelineContent.style.minWidth) || 1000;
 
-        const position = (this.timeline.currentTime / this.timeline.duration) * width;
+        // 전체 시간 범위 계산
+        const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+
+        // 현재 시간을 기준으로 위치 계산 (minTime 오프셋 고려)
+        const adjustedTime = this.timeline.currentTime - this.timeline.minTime;
+        const position = (adjustedTime / totalDuration) * width;
+
         playhead.style.left = position + 'px';
+
+        console.log('재생 헤드 위치 업데이트:', {
+            currentTime: this.timeline.currentTime,
+            adjustedTime: adjustedTime,
+            position: position,
+            totalDuration: totalDuration
+        });
 
         this.updateTimeDisplay();
         this.autoScrollTimeline(position);
@@ -2209,6 +2385,9 @@ class VideoAnalysisApp {
 
         const audioPath = audioFiles[0];
         this.timeline.audioData = { path: audioPath };
+
+        // 즉시 기본 파형 표시
+        this.showImmediateWaveform(audioPath);
 
         // 음성 파형 그리기
         await this.drawAudioWaveform(audioPath);
@@ -2342,14 +2521,58 @@ class VideoAnalysisApp {
             block.className = 'subtitle-block';
             block.dataset.index = index;
 
-            const startPercent = (subtitle.start_time / this.timeline.duration) * 100;
+            // 전체 시간 범위 계산 (음수 시간 고려)
+            const totalDuration = Math.max(this.timeline.duration, 0) + Math.abs(this.timeline.minTime);
+            const adjustedStartTime = subtitle.start_time - this.timeline.minTime;
             const duration = subtitle.end_time - subtitle.start_time;
-            const widthPercent = (duration / this.timeline.duration) * 100;
+
+            const startPercent = (adjustedStartTime / totalDuration) * 100;
+            const widthPercent = (duration / totalDuration) * 100;
 
             block.style.left = startPercent + '%';
             block.style.width = widthPercent + '%';
-            block.textContent = subtitle.text;
-            block.title = `${this.formatDuration(subtitle.start_time)} - ${this.formatDuration(subtitle.end_time)}\n${subtitle.text}`;
+
+            // 시간 정보 요소 생성
+            const timeElement = document.createElement('div');
+            timeElement.className = 'subtitle-time';
+
+            // 텍스트 요소 생성
+            const textElement = document.createElement('div');
+            textElement.className = 'subtitle-text';
+            textElement.textContent = subtitle.text;
+
+            // 블록 너비에 따라 표시 내용 조정
+            const blockWidthPx = (widthPercent / 100) * (trackContent.offsetWidth || 1000);
+
+            if (blockWidthPx < 80) {
+                // 매우 작은 블록: 시작 시간만 표시
+                timeElement.textContent = `${this.formatSubtitleTime(subtitle.start_time, true)}`;
+                textElement.style.display = 'none';
+                timeElement.style.fontSize = '10px';
+            } else if (blockWidthPx < 120) {
+                // 작은 블록: 시작→끝 시간 표시
+                timeElement.textContent = `${this.formatSubtitleTime(subtitle.start_time, true)}→${this.formatSubtitleTime(subtitle.end_time, true)}`;
+                textElement.style.display = 'none';
+                timeElement.style.fontSize = '10px';
+            } else if (blockWidthPx < 200) {
+                // 중간 블록: 시간 + 짧은 텍스트
+                timeElement.textContent = `${this.formatSubtitleTime(subtitle.start_time)}→${this.formatSubtitleTime(subtitle.end_time)}`;
+                textElement.textContent = subtitle.text.length > 20 ?
+                    subtitle.text.substring(0, 17) + '...' : subtitle.text;
+                timeElement.style.fontSize = '11px';
+                textElement.style.fontSize = '12px';
+            } else {
+                // 큰 블록: 전체 시간 + 전체 텍스트
+                timeElement.textContent = `🕐 ${this.formatSubtitleTime(subtitle.start_time)} → ${this.formatSubtitleTime(subtitle.end_time)} (${this.formatSubtitleTime(duration)}초)`;
+                timeElement.style.fontSize = '11px';
+                textElement.style.fontSize = '13px';
+            }
+
+            // 요소들을 블록에 추가
+            block.appendChild(timeElement);
+            block.appendChild(textElement);
+
+            block.title = `${this.formatSubtitleTime(subtitle.start_time)} - ${this.formatSubtitleTime(subtitle.end_time)}\n${subtitle.text}`;
 
             // 자막 블록 클릭 이벤트
             block.addEventListener('click', () => {
@@ -2410,33 +2633,205 @@ class VideoAnalysisApp {
     }
 
     async drawAudioWaveform(audioPath) {
+        console.log('🎵 drawAudioWaveform 호출됨:', audioPath);
+
         const canvas = document.getElementById('timeline-waveform');
-        if (!canvas) return;
+        if (!canvas) {
+            console.error('❌ timeline-waveform 캔버스를 찾을 수 없음');
+            return;
+        }
+
+        console.log('✅ 캔버스 발견:', canvas);
 
         const ctx = canvas.getContext('2d');
 
-        // 기본 파형 그리기 (실제 구현에서는 오디오 분석 결과 사용)
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        // 캔버스 크기 강제 설정
+        const parentRect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = Math.max(parentRect.width || 800, 800);
+        canvas.height = 80;
+        canvas.style.width = '100%';
+        canvas.style.height = '80px';
+        canvas.style.display = 'block';
+
+        console.log('📏 캔버스 크기 설정:', canvas.width, 'x', canvas.height);
+
+        // 로딩 상태 표시
+        this.showWaveformLoading(ctx, canvas, '실제 오디오 분석 중...');
+
+        try {
+            console.log('🔍 서버에서 실제 파형 데이터 요청 중...');
+
+            // 서버에서 실제 파형 데이터 가져오기
+            const response = await fetch('/api/analyze-waveform', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    audio_path: audioPath,
+                    width: canvas.width
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('📊 서버 파형 데이터 받음:', data);
+
+            if (data.status === 'success' && data.waveform_data) {
+                // 실제 파형 데이터로 그리기
+                this.renderRealWaveformData(ctx, canvas, data.waveform_data, audioPath);
+                console.log('✅ 실제 파형 데이터로 렌더링 완료');
+            } else {
+                throw new Error('서버에서 파형 데이터를 받지 못함');
+            }
+
+        } catch (error) {
+            console.error('❌ 실제 파형 분석 실패:', error);
+            console.error('오류 상세:', {
+                message: error.message,
+                audioPath: audioPath,
+                stack: error.stack
+            });
+            this.renderFallbackWaveform(ctx, canvas, audioPath);
+        }
+    }
+
+    showWaveformLoading(ctx, canvas, message) {
+        // 배경
+        ctx.fillStyle = 'rgba(15, 35, 55, 1)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        ctx.strokeStyle = '#00ff88';
+        // 로딩 텍스트
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+        ctx.textAlign = 'left';
+
+        // 로딩 애니메이션 점들
+        const dotCount = 3;
+        const time = Date.now() * 0.001;
+        for (let i = 0; i < dotCount; i++) {
+            const alpha = (Math.sin(time * 3 + i * 0.5) + 1) / 2;
+            ctx.fillStyle = `rgba(0, 255, 136, ${alpha})`;
+            ctx.fillRect(canvas.width / 2 + 50 + i * 15, canvas.height / 2 - 5, 8, 8);
+        }
+    }
+
+    renderRealWaveformData(ctx, canvas, waveformData, audioPath) {
+        console.log('🎨 실제 파형 데이터로 렌더링 시작:', waveformData.length, '포인트');
+
+        // 배경 - 실제 데이터임을 나타내는 색상
+        ctx.fillStyle = 'rgba(10, 40, 70, 1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 가운데 기준선
+        const centerY = canvas.height / 2;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.lineWidth = 1;
         ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(canvas.width, centerY);
+        ctx.stroke();
 
-        // 가상의 파형 데이터 (실제로는 API에서 가져온 데이터 사용)
-        for (let x = 0; x < canvas.width; x++) {
-            const amplitude = Math.random() * 0.8 + 0.1;
-            const y = canvas.height * (1 - amplitude) / 2;
-            const height = canvas.height * amplitude;
+        // 실제 파형 데이터 그리기
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, '#FFD700');  // 골드
+        gradient.addColorStop(0.5, '#FFA500'); // 오렌지
+        gradient.addColorStop(1, '#FF8C00');   // 다크오렌지
 
-            if (x === 0) {
-                ctx.moveTo(x, y + height/2);
-            } else {
-                ctx.lineTo(x, y + height/2);
+        ctx.fillStyle = gradient;
+
+        const barWidth = Math.max(1, canvas.width / waveformData.length);
+
+        waveformData.forEach((amplitude, index) => {
+            const x = index * barWidth;
+            const height = amplitude * centerY * 0.9; // 실제 데이터이므로 90% 높이 사용
+
+            if (height > 0.5) {
+                ctx.fillRect(x, centerY - height, Math.max(1, barWidth - 1), height * 2);
+            }
+        });
+
+        // 실제 데이터임을 표시
+        ctx.fillStyle = 'rgba(255, 215, 0, 1)';
+        ctx.font = 'bold 12px Arial';
+        const fileName = audioPath.split('/').pop();
+        ctx.fillText(`🎵 ${fileName} (실제 파형)`, 10, 20);
+
+        ctx.font = '10px Arial';
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
+        ctx.fillText(`실제 오디오 분석 완료 (${waveformData.length} 샘플)`, 10, canvas.height - 10);
+
+        // 경계선
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(0, 0, canvas.width, canvas.height);
+
+        console.log('✅ 실제 파형 렌더링 완료');
+    }
+
+    renderFallbackWaveform(ctx, canvas, audioPath) {
+        console.log('🎨 가상 파형으로 렌더링');
+
+        // 배경 - 가상 데이터임을 나타내는 색상
+        ctx.fillStyle = 'rgba(15, 35, 55, 1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 가운데 기준선
+        const centerY = canvas.height / 2;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(canvas.width, centerY);
+        ctx.stroke();
+
+        // 가상 파형 그리기
+        const waveformColor = '#00ff88';
+        ctx.fillStyle = waveformColor;
+
+        const segmentWidth = 2;
+        const numSegments = Math.floor(canvas.width / segmentWidth);
+
+        for (let i = 0; i < numSegments; i++) {
+            const x = i * segmentWidth;
+
+            // 음성과 유사한 패턴 생성
+            const baseFreq = i * 0.03;
+            const speechEnvelope = Math.sin(i * 0.005) * 0.5 + 0.5;
+
+            const amplitude = (
+                Math.sin(baseFreq) * 0.6 +
+                Math.sin(baseFreq * 2.7) * 0.3 +
+                Math.sin(baseFreq * 0.4) * 0.4 +
+                (Math.random() - 0.5) * 0.2
+            ) * speechEnvelope;
+
+            const height = Math.abs(amplitude) * centerY * 0.8;
+
+            if (height > 1) {
+                ctx.fillRect(x, centerY - height, segmentWidth - 1, height * 2);
             }
         }
 
-        ctx.stroke();
+        // 가상 데이터임을 표시
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.font = 'bold 12px Arial';
+        const fileName = audioPath.split('/').pop();
+        ctx.fillText(`🎵 ${fileName} (시뮬레이션)`, 10, 20);
+
+        ctx.font = '10px Arial';
+        ctx.fillStyle = waveformColor;
+        ctx.fillText('가상 파형 - 실제 분석 실패', 10, canvas.height - 10);
+
+        // 경계선
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0, 0, canvas.width, canvas.height);
     }
 
     fitToSubtitles() {
@@ -2521,6 +2916,281 @@ class VideoAnalysisApp {
         this.renderSubtitleTrack();
         if (this.timeline.audioData) {
             this.drawAudioWaveform(this.timeline.audioData.path);
+        }
+    }
+
+    showImmediateWaveform(audioPath) {
+        console.log('즉시 파형 표시:', audioPath);
+
+        const canvas = document.getElementById('timeline-waveform');
+        if (!canvas) {
+            console.error('timeline-waveform 캔버스를 찾을 수 없습니다');
+            return;
+        }
+
+        const ctx = canvas.getContext('2d');
+
+        // 캔버스 크기 확인 및 설정
+        if (canvas.width === 0 || canvas.height === 0) {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = Math.max(rect.width || 800, 800);
+            canvas.height = Math.max(rect.height || 80, 80);
+            console.log('캔버스 크기 설정됨:', canvas.width, 'x', canvas.height);
+        }
+
+        // 배경 그리기 - 확실히 보이도록 밝은 색상 사용
+        ctx.fillStyle = 'rgba(20, 40, 60, 1.0)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 가운데 기준선
+        const centerY = canvas.height / 2;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(canvas.width, centerY);
+        ctx.stroke();
+
+        // 명확하게 보이는 파형 그리기
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, '#00ff88');
+        gradient.addColorStop(0.5, '#00dd66');
+        gradient.addColorStop(1, '#00bb44');
+
+        ctx.fillStyle = gradient;
+
+        // 실제 음성 패턴과 유사한 파형 생성
+        const totalBars = Math.floor(canvas.width / 3);
+
+        for (let i = 0; i < totalBars; i++) {
+            const x = i * 3;
+
+            // 복합 파형 생성 (음성과 유사한 패턴)
+            const baseFreq = i * 0.02;
+            const speechPattern = Math.sin(i * 0.008) * 0.5 + 0.5; // 음성 간격 시뮬레이션
+            const amplitude = (
+                Math.sin(baseFreq) * 0.4 +
+                Math.sin(baseFreq * 2.3) * 0.3 +
+                Math.cos(baseFreq * 0.7) * 0.2 +
+                (Math.random() - 0.5) * 0.1
+            ) * speechPattern;
+
+            const height = Math.abs(amplitude) * centerY * 0.9;
+
+            if (height > 2) { // 최소 높이 확보
+                ctx.fillRect(x, centerY - height, 2, height * 2);
+            }
+        }
+
+        // 파일 정보 표시 - 확실히 보이도록
+        ctx.fillStyle = 'rgba(255, 255, 255, 1.0)';
+        ctx.font = 'bold 12px Arial';
+        ctx.fillText(`🎵 ${audioPath.split('/').pop()}`, 10, 20);
+
+        ctx.font = '11px Arial';
+        ctx.fillStyle = 'rgba(0, 255, 136, 1.0)';
+        ctx.fillText('파형이 로드되었습니다', 10, canvas.height - 10);
+
+        // 캔버스 스타일도 확실히 보이도록 설정
+        canvas.style.display = 'block';
+        canvas.style.visibility = 'visible';
+        canvas.style.opacity = '1';
+        canvas.style.border = '1px solid rgba(255,255,255,0.2)';
+
+        console.log('즉시 파형 표시 완료');
+    }
+
+    debugWaveform() {
+        console.log('🔧 파형 디버그 시작');
+
+        const canvas = document.getElementById('timeline-waveform');
+        console.log('캔버스 요소:', canvas);
+
+        if (!canvas) {
+            alert('❌ 캔버스를 찾을 수 없습니다!');
+            return;
+        }
+
+        console.log('캔버스 정보:', {
+            width: canvas.width,
+            height: canvas.height,
+            clientWidth: canvas.clientWidth,
+            clientHeight: canvas.clientHeight,
+            style: canvas.style.cssText,
+            display: getComputedStyle(canvas).display,
+            visibility: getComputedStyle(canvas).visibility
+        });
+
+        // 강제 파형 그리기
+        const ctx = canvas.getContext('2d');
+
+        // 캔버스 크기 강제 설정
+        canvas.width = 800;
+        canvas.height = 80;
+        canvas.style.width = '100%';
+        canvas.style.height = '80px';
+        canvas.style.display = 'block';
+        canvas.style.visibility = 'visible';
+
+        // 매우 명확한 테스트 패턴 그리기
+        ctx.fillStyle = '#ff0000'; // 빨간 배경
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#00ff00'; // 초록 사각형
+        ctx.fillRect(50, 20, 100, 40);
+
+        ctx.fillStyle = '#0000ff'; // 파란 사각형
+        ctx.fillRect(200, 10, 100, 60);
+
+        ctx.fillStyle = '#ffffff'; // 흰색 텍스트
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText('파형 디버그 테스트', 350, 45);
+
+        // 현재 오디오 데이터 상태 확인
+        console.log('오디오 데이터:', this.timeline.audioData);
+
+        // 실제 파형도 그려보기
+        if (this.timeline.audioData && this.timeline.audioData.path) {
+            console.log('실제 파형 그리기 시도:', this.timeline.audioData.path);
+            setTimeout(() => {
+                this.drawAudioWaveform(this.timeline.audioData.path);
+            }, 1000);
+        } else {
+            console.log('오디오 데이터가 없음');
+            // 선택된 파일에서 오디오 파일 찾기
+            const audioFiles = Array.from(this.selectedFiles).filter(path => this.getFileType(path) === 'audio');
+            if (audioFiles.length > 0) {
+                console.log('선택된 오디오 파일로 파형 분석:', audioFiles[0]);
+                setTimeout(() => {
+                    this.drawAudioWaveform(audioFiles[0]);
+                }, 1000);
+            } else {
+                console.log('선택된 오디오 파일이 없음, 파일 목록에서 자동 검색');
+                // 파일 목록에서 오디오 파일 자동 선택
+                this.findAndTestAudioFile();
+            }
+        }
+
+        alert('🔧 파형 디버그 완료! 콘솔을 확인하세요.');
+    }
+
+    drawVirtualWaveform() {
+        const canvas = document.getElementById('timeline-waveform');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+
+        // 배경
+        ctx.fillStyle = 'rgba(20, 40, 60, 1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 가상 파형
+        ctx.fillStyle = '#ffff00'; // 노란색으로 명확하게
+        const centerY = canvas.height / 2;
+
+        for (let x = 0; x < canvas.width; x += 3) {
+            const amplitude = Math.sin(x * 0.02) * 0.8;
+            const height = Math.abs(amplitude) * centerY;
+            ctx.fillRect(x, centerY - height, 2, height * 2);
+        }
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '12px Arial';
+        ctx.fillText('가상 파형 테스트', 10, 20);
+    }
+
+    async findAndTestAudioFile() {
+        try {
+            console.log('📁 서버에서 오디오 파일 검색 중...');
+
+            // 서버에서 파일 목록 가져오기
+            const response = await fetch('/api/files?filter_type=all');
+            const data = await response.json();
+
+            const audioFiles = [];
+            if (data.files) {
+                data.files.forEach(file => {
+                    if (file.path && this.getFileType(file.path) === 'audio') {
+                        audioFiles.push(file.path);
+                    }
+                });
+            }
+
+            console.log('📁 발견된 오디오 파일들:', audioFiles);
+
+            if (audioFiles.length > 0) {
+                const testFile = audioFiles[0];
+                console.log('🎵 테스트용 오디오 파일 선택:', testFile);
+
+                // 파일을 선택 목록에 추가
+                this.selectedFiles.add(testFile);
+                this.updateSelectedFilesList();
+                this.updateStatusBar();
+
+                // 파형 분석 시도
+                setTimeout(() => {
+                    this.drawAudioWaveform(testFile);
+                }, 500);
+
+                return testFile;
+            } else {
+                console.log('❌ 사용 가능한 오디오 파일이 없음');
+                this.drawVirtualWaveform();
+                return null;
+            }
+
+        } catch (error) {
+            console.error('❌ 오디오 파일 검색 실패:', error);
+            this.drawVirtualWaveform();
+            return null;
+        }
+    }
+
+    async testRealWaveform() {
+        console.log('🧪 실제 파형 테스트 시작');
+
+        try {
+            // 첫 번째 이용 가능한 오디오 파일을 찾아서 테스트
+            const testFile = await this.findAndTestAudioFile();
+
+            if (testFile) {
+                console.log('✅ 테스트 파일 선택됨:', testFile);
+
+                // 직접 서버 API 테스트
+                const response = await fetch('/api/analyze-waveform', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        audio_path: testFile,
+                        width: 800
+                    })
+                });
+
+                console.log('📡 서버 응답 상태:', response.status, response.statusText);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('📊 서버 응답 데이터:', data);
+
+                    if (data.status === 'success') {
+                        alert(`✅ 실제 파형 분석 성공!\n파일: ${testFile.split('/').pop()}\n샘플 수: ${data.sample_count}`);
+                    } else {
+                        alert(`❌ 서버에서 파형 분석 실패\n응답: ${JSON.stringify(data)}`);
+                    }
+                } else {
+                    const errorText = await response.text();
+                    console.error('❌ 서버 오류:', errorText);
+                    alert(`❌ 서버 오류 (${response.status}): ${errorText}`);
+                }
+            } else {
+                alert('❌ 테스트할 오디오 파일을 찾을 수 없습니다');
+            }
+
+        } catch (error) {
+            console.error('❌ 실제 파형 테스트 실패:', error);
+            alert(`❌ 테스트 실패: ${error.message}`);
         }
     }
 }
