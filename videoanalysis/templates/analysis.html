@@ -87,6 +87,7 @@
             <button class="tab-btn active" data-tab="audio">🎵 음성 분석</button>
             <button class="tab-btn" data-tab="subtitle">📝 자막 분석 & 편집</button>
             <button class="tab-btn" data-tab="stt">🎤 음성→자막</button>
+            <button class="tab-btn" data-tab="extract-audio">🎬 음성 추출</button>
             <button class="tab-btn" data-tab="video-edit">🎬 영상 편집</button>
             <button class="tab-btn" data-tab="text-overlay">🖊️ 텍스트 오버레이</button>
             <button class="tab-btn" data-tab="compare">⚖️ 비교 분석</button>
@@ -299,29 +300,144 @@
                 </div>
             </div>
 
+            <!-- 🎬 음성 추출 탭 -->
+            <div class="tab-content" id="extract-audio-tab">
+                <div class="extract-audio-controls">
+                    <div class="info-section">
+                        <h4>🎵 영상에서 음성 파일 분리</h4>
+                        <p>선택된 영상 파일들에서 음성을 추출하여 별도의 음성 파일로 저장합니다.</p>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>🎼 출력 형식</label>
+                        <select id="audio-output-format">
+                            <option value="wav">WAV (고품질, 무손실)</option>
+                            <option value="mp3">MP3 (압축, 호환성)</option>
+                            <option value="m4a">M4A (효율적 압축)</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>📊 품질 설정</label>
+                        <div class="quality-info">
+                            <span class="quality-item">📈 샘플레이트: 48kHz</span>
+                            <span class="quality-item">🔊 채널: 스테레오</span>
+                            <span class="quality-item">💿 비트레이트: 192kbps (MP3/M4A)</span>
+                        </div>
+                    </div>
+
+                    <button class="analyze-btn primary" id="start-audio-extraction">🎵 음성 추출 시작</button>
+                </div>
+
+                <div class="extraction-progress" id="extraction-progress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="extraction-progress-fill" style="width: 0%"></div>
+                    </div>
+                    <span class="progress-text" id="extraction-progress-text">대기 중...</span>
+                </div>
+
+                <div class="extraction-results" id="extraction-results" style="display: none;">
+                    <div class="result-header">
+                        <h4>🎵 추출된 음성 파일</h4>
+                        <div class="result-actions">
+                            <button class="action-btn" id="refresh-file-list">🔄 파일 목록 새로고침</button>
+                            <button class="action-btn" id="open-extracted-folder">📁 폴더 열기</button>
+                        </div>
+                    </div>
+
+                    <div class="extracted-files-list" id="extracted-files-list">
+                        <!-- 추출된 파일 목록이 여기에 표시됩니다 -->
+                    </div>
+                </div>
+            </div>
+
             <!-- 🎬 영상 편집 탭 -->
             <div class="tab-content" id="video-edit-tab">
                 <div class="video-edit-controls">
                     <div class="control-section">
-                        <h4>🎥 영상 & 음성 동시 재생</h4>
+                        <h4>🎥 고급 영상 편집기</h4>
+
+                        <!-- 비디오 플레이어 -->
                         <div class="video-player-container">
                             <video id="video-player" controls style="width: 100%; max-width: 800px;" crossorigin="anonymous">
                                 <source src="" type="video/webm">
                                 <source src="" type="video/mp4">
                                 비디오를 불러올 수 없습니다.
                             </video>
-                            <div class="audio-visualizer">
-                                <canvas id="video-audio-waveform" width="800" height="150"></canvas>
+                        </div>
+
+                        <!-- 타임라인 편집기 -->
+                        <div class="timeline-editor">
+                            <div class="timeline-controls">
+                                <div class="playback-controls">
+                                    <button id="play-pause-btn">⏯️</button>
+                                    <button id="stop-btn">⏹️</button>
+                                    <button id="rewind-btn">⏪</button>
+                                    <button id="forward-btn">⏩</button>
+                                </div>
+
+                                <div class="zoom-controls">
+                                    <label>🔍 타임라인 확대/축소:</label>
+                                    <input type="range" id="timeline-zoom" min="1" max="20" value="1" step="0.5">
+                                    <span id="zoom-display">1x</span>
+                                    <button id="fit-to-subtitles">📝 자막에 맞춤</button>
+                                </div>
+
+                                <div class="time-display">
+                                    <span id="current-time">00:00</span> / <span id="total-time">00:00</span>
+                                </div>
+                            </div>
+
+                            <!-- 스크롤 가능한 타임라인 컨테이너 -->
+                            <div class="timeline-container" id="timeline-container">
+                                <div class="timeline-content" id="timeline-content">
+
+                                    <!-- 시간 눈금자 -->
+                                    <div class="timeline-ruler" id="timeline-ruler">
+                                        <!-- 시간 마커들이 여기에 동적으로 생성됩니다 -->
+                                    </div>
+
+                                    <!-- 영상 트랙 -->
+                                    <div class="timeline-track video-track">
+                                        <div class="track-header">📹 영상</div>
+                                        <div class="track-content" id="video-track">
+                                            <!-- 영상 클립이 여기에 표시됩니다 -->
+                                        </div>
+                                    </div>
+
+                                    <!-- 음성 파형 트랙 -->
+                                    <div class="timeline-track audio-track">
+                                        <div class="track-header">🎵 음성</div>
+                                        <div class="track-content" id="audio-track">
+                                            <canvas id="timeline-waveform" height="80"></canvas>
+                                        </div>
+                                    </div>
+
+                                    <!-- 자막 트랙 -->
+                                    <div class="timeline-track subtitle-track">
+                                        <div class="track-header">📝 자막</div>
+                                        <div class="track-content" id="subtitle-track">
+                                            <!-- 자막 블록들이 여기에 표시됩니다 -->
+                                        </div>
+                                    </div>
+
+                                    <!-- 재생 헤드 -->
+                                    <div class="playhead" id="playhead"></div>
+                                </div>
                             </div>
                         </div>
 
+                        <!-- 현재 자막 표시 -->
+                        <div class="subtitle-display no-subtitle" id="current-subtitle">
+                            자막이 로드되지 않았습니다
+                        </div>
+
                         <div class="sync-controls">
-                            <button class="sync-btn" id="sync-video-srt">📝 자막과 동기화</button>
-                            <button class="sync-btn" id="sync-video-audio">🎵 음성 분석과 동기화</button>
-                            <input type="range" id="video-timeline" min="0" max="100" value="0" class="timeline-slider">
-                            <div class="time-display">
-                                <span id="current-time">00:00</span> / <span id="total-time">00:00</span>
-                            </div>
+                            <button class="sync-btn" id="load-video-file">📹 영상 파일 로드</button>
+                            <button class="sync-btn" id="load-audio-file">🎵 음성 파일 로드</button>
+                            <button class="sync-btn" id="load-subtitle-file">📝 자막 파일 로드</button>
+                            <button class="sync-btn primary" id="simultaneous-play">🎥 영상+음성 동시 재생</button>
+                            <button class="sync-btn secondary" id="bundle-audio">🎵 음성 묶음 편집</button>
                         </div>
                     </div>
 

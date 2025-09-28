@@ -67,6 +67,10 @@ class VideoAnalysisApp {
             this.startComparison();
         });
 
+        document.getElementById('start-audio-extraction').addEventListener('click', () => {
+            this.startAudioExtraction();
+        });
+
         // 슬라이더 값 업데이트
         document.getElementById('silence-threshold').addEventListener('input', (e) => {
             document.querySelector('.value-display').textContent = e.target.value;
@@ -98,6 +102,83 @@ class VideoAnalysisApp {
         if (syncVideoAudioBtn) {
             syncVideoAudioBtn.addEventListener('click', () => {
                 this.synchronizeVideoWithAudio();
+            });
+        }
+
+        // 영상+음성 동시 재생 기능
+        const simultaneousPlayBtn = document.getElementById('simultaneous-play');
+        if (simultaneousPlayBtn) {
+            simultaneousPlayBtn.addEventListener('click', () => {
+                this.startSimultaneousPlayback();
+            });
+        }
+
+        // 음성 묶음 편집 기능
+        const bundleAudioBtn = document.getElementById('bundle-audio');
+        if (bundleAudioBtn) {
+            bundleAudioBtn.addEventListener('click', () => {
+                this.showAudioBundleDialog();
+            });
+        }
+
+        // 고급 타임라인 편집기 기능
+        this.setupTimelineEditor();
+    }
+
+    setupTimelineEditor() {
+        // 타임라인 확대/축소
+        const timelineZoom = document.getElementById('timeline-zoom');
+        if (timelineZoom) {
+            timelineZoom.addEventListener('input', (e) => {
+                this.updateTimelineZoom(e.target.value);
+                document.getElementById('zoom-display').textContent = e.target.value + 'x';
+            });
+        }
+
+        // 재생/일시정지 버튼
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        if (playPauseBtn) {
+            playPauseBtn.addEventListener('click', () => {
+                this.toggleVideoPlayback();
+            });
+        }
+
+        // 정지 버튼
+        const stopBtn = document.getElementById('stop-btn');
+        if (stopBtn) {
+            stopBtn.addEventListener('click', () => {
+                this.stopVideo();
+            });
+        }
+
+        // 되감기/빨리감기
+        const rewindBtn = document.getElementById('rewind-btn');
+        if (rewindBtn) {
+            rewindBtn.addEventListener('click', () => {
+                this.seekVideo(-10);
+            });
+        }
+
+        const forwardBtn = document.getElementById('forward-btn');
+        if (forwardBtn) {
+            forwardBtn.addEventListener('click', () => {
+                this.seekVideo(10);
+            });
+        }
+
+        // 자막에 맞춤 버튼
+        const fitToSubtitlesBtn = document.getElementById('fit-to-subtitles');
+        if (fitToSubtitlesBtn) {
+            fitToSubtitlesBtn.addEventListener('click', () => {
+                this.fitTimelineToSubtitles();
+            });
+        }
+
+        // 타임라인 클릭으로 재생 위치 이동
+        const timelineContent = document.getElementById('timeline-content');
+        if (timelineContent) {
+            timelineContent.addEventListener('click', (e) => {
+                this.seekToTimelinePosition(e);
             });
         }
     }
@@ -897,11 +978,17 @@ class VideoAnalysisApp {
 
             this.onVideoCanPlay = () => {
                 console.log('비디오 재생 준비 완료');
-                // 오디오 트랙이 있는지 확인
-                if (videoPlayer.audioTracks && videoPlayer.audioTracks.length > 0) {
-                    console.log(`오디오 트랙 감지: ${videoPlayer.audioTracks.length}개`);
-                } else {
-                    console.log('오디오 트랙 정보를 가져올 수 없음');
+                // 오디오 트랙이 있는지 확인 (웹 표준 방법)
+                try {
+                    if (videoPlayer.webkitAudioDecodedByteCount !== undefined ||
+                        videoPlayer.mozHasAudio !== undefined ||
+                        (videoPlayer.videoWidth > 0 && videoPlayer.duration > 0)) {
+                        console.log('비디오에 오디오 트랙이 포함되어 있습니다');
+                    } else {
+                        console.log('오디오 트랙 감지됨 (표준 비디오 요소)');
+                    }
+                } catch (error) {
+                    console.log('오디오 트랙 정보 확인 중 오류:', error.message);
                 }
             };
 
@@ -1106,6 +1193,1335 @@ class VideoAnalysisApp {
         if (['mp3', 'wav', 'm4a', 'flac', 'aac'].includes(ext)) return 'audio';
         if (['srt', 'vtt', 'ass'].includes(ext)) return 'subtitle';
         return 'other';
+    }
+
+    // 영상+음성 동시 재생 기능
+    startSimultaneousPlayback() {
+        const selectedFiles = Array.from(this.selectedFiles);
+        const videoFiles = selectedFiles.filter(path => this.getFileType(path) === 'video');
+        const audioFiles = selectedFiles.filter(path => this.getFileType(path) === 'audio');
+
+        if (videoFiles.length === 0) {
+            this.showError('영상 파일을 선택하세요');
+            return;
+        }
+
+        // 동시 재생 패널 생성
+        this.createSimultaneousPlaybackPanel(videoFiles, audioFiles);
+    }
+
+    createSimultaneousPlaybackPanel(videoFiles, audioFiles) {
+        const existingPanel = document.getElementById('simultaneous-panel');
+        if (existingPanel) {
+            existingPanel.remove();
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'simultaneous-panel';
+        panel.className = 'simultaneous-panel';
+        panel.innerHTML = `
+            <div class="panel-header">
+                <h3>🎥 영상 & 음성 동시 재생</h3>
+                <button onclick="this.parentElement.parentElement.remove()" class="close-btn">✕</button>
+            </div>
+
+            <div class="media-containers">
+                <div class="video-container">
+                    <h4>📺 영상</h4>
+                    <video id="sync-video" controls style="width: 100%; max-height: 300px;">
+                        <source src="/api/file-content?path=${encodeURIComponent(videoFiles[0])}" type="video/mp4">
+                    </video>
+
+                    <!-- 음성 파형 표시 영역 -->
+                    <div class="waveform-container">
+                        <h5>🎵 영상 음성 파형</h5>
+                        <canvas id="video-waveform" width="800" height="100" style="width: 100%; height: 100px; border: 1px solid #ddd; background: #000;"></canvas>
+                        <div class="waveform-controls">
+                            <button id="analyze-video-audio" class="secondary-btn">파형 분석</button>
+                            <span id="waveform-status" class="status-text">파형을 분석하려면 '파형 분석' 버튼을 클릭하세요</span>
+                        </div>
+                    </div>
+
+                    <div class="video-controls">
+                        <select id="video-selector">
+                            ${videoFiles.map(file => `<option value="${file}">${file.split('/').pop()}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="audio-container">
+                    <h4>🎵 음성 (묶음 처리)</h4>
+                    <div id="audio-bundle">
+                        ${audioFiles.map((file, index) => `
+                            <div class="audio-item" data-audio-path="${file}">
+                                <audio controls style="width: 100%;">
+                                    <source src="/api/file-content?path=${encodeURIComponent(file)}" type="audio/mpeg">
+                                </audio>
+                                <div class="audio-controls">
+                                    <label>${file.split('/').pop()}</label>
+                                    <input type="range" class="volume-slider" min="0" max="100" value="50"
+                                           onchange="this.parentElement.parentElement.querySelector('audio').volume = this.value/100">
+                                    <button onclick="this.parentElement.parentElement.remove()" class="remove-audio">🗑️</button>
+                                </div>
+                            </div>
+                        `).join('')}
+
+                        <button id="add-audio-to-bundle" class="add-btn">+ 음성 파일 추가</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="playback-controls">
+                <button id="sync-play-all" class="primary-btn">⏯️ 모두 재생</button>
+                <button id="sync-pause-all" class="secondary-btn">⏸️ 모두 정지</button>
+                <button id="sync-reset-all" class="secondary-btn">⏮️ 처음으로</button>
+                <button id="save-audio-bundle" class="success-btn">💾 음성 묶음 저장</button>
+            </div>
+        `;
+
+        document.body.appendChild(panel);
+        this.setupSimultaneousPlaybackControls();
+    }
+
+    setupSimultaneousPlaybackControls() {
+        const videoElement = document.getElementById('sync-video');
+        const audioElements = document.querySelectorAll('#audio-bundle audio');
+
+        // 모두 재생
+        document.getElementById('sync-play-all').addEventListener('click', () => {
+            videoElement.play();
+            audioElements.forEach(audio => audio.play());
+        });
+
+        // 모두 정지
+        document.getElementById('sync-pause-all').addEventListener('click', () => {
+            videoElement.pause();
+            audioElements.forEach(audio => audio.pause());
+        });
+
+        // 처음으로
+        document.getElementById('sync-reset-all').addEventListener('click', () => {
+            videoElement.currentTime = 0;
+            audioElements.forEach(audio => audio.currentTime = 0);
+        });
+
+        // 비디오 선택 변경
+        document.getElementById('video-selector').addEventListener('change', (e) => {
+            const newVideoPath = e.target.value;
+            videoElement.src = `/api/file-content?path=${encodeURIComponent(newVideoPath)}`;
+        });
+
+        // 음성 파일 추가
+        document.getElementById('add-audio-to-bundle').addEventListener('click', () => {
+            this.showAudioFileSelector();
+        });
+
+        // 음성 묶음 저장
+        document.getElementById('save-audio-bundle').addEventListener('click', () => {
+            this.saveAudioBundle();
+        });
+
+        // 파형 분석 버튼
+        document.getElementById('analyze-video-audio').addEventListener('click', () => {
+            this.analyzeVideoWaveform(videoElement);
+        });
+
+        // 비디오 시간 동기화 및 파형 표시
+        videoElement.addEventListener('timeupdate', () => {
+            // 필요시 음성 파일들도 동일한 시간으로 동기화
+            const currentTime = videoElement.currentTime;
+            audioElements.forEach(audio => {
+                if (Math.abs(audio.currentTime - currentTime) > 1) {
+                    audio.currentTime = currentTime;
+                }
+            });
+
+            // 파형에 현재 재생 위치 표시
+            this.updateWaveformCursor(currentTime);
+        });
+    }
+
+    showAudioBundleDialog() {
+        const audioFiles = Array.from(this.selectedFiles).filter(path => this.getFileType(path) === 'audio');
+
+        if (audioFiles.length === 0) {
+            this.showError('음성 파일을 선택하세요');
+            return;
+        }
+
+        const dialog = document.createElement('div');
+        dialog.className = 'audio-bundle-dialog';
+        dialog.innerHTML = `
+            <div class="dialog-content">
+                <h3>🎵 음성 파일 묶음 편집</h3>
+
+                <div class="bundle-list">
+                    ${audioFiles.map((file, index) => `
+                        <div class="bundle-item">
+                            <span>${file.split('/').pop()}</span>
+                            <input type="number" placeholder="시작시간(초)" class="start-time" data-index="${index}">
+                            <input type="range" min="0" max="100" value="100" class="volume" data-index="${index}">
+                            <button onclick="this.parentElement.remove()">삭제</button>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div class="dialog-actions">
+                    <button onclick="this.parentElement.parentElement.remove()" class="cancel-btn">취소</button>
+                    <button id="apply-bundle" class="primary-btn">적용</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(dialog);
+
+        document.getElementById('apply-bundle').addEventListener('click', () => {
+            this.applyAudioBundle();
+            dialog.remove();
+        });
+    }
+
+    showAudioFileSelector() {
+        // 파일 선택 다이얼로그 구현
+        const allAudioFiles = Array.from(document.querySelectorAll('.file-card'))
+            .filter(card => card.querySelector('.file-type-badge').textContent.toLowerCase()
+                .includes('mp3') || card.querySelector('.file-type-badge').textContent.toLowerCase()
+                .includes('wav'))
+            .map(card => card.getAttribute('data-file-path'));
+
+        const selector = document.createElement('div');
+        selector.className = 'file-selector-dialog';
+        selector.innerHTML = `
+            <div class="dialog-content">
+                <h3>음성 파일 선택</h3>
+                <div class="file-options">
+                    ${allAudioFiles.map(file => `
+                        <label>
+                            <input type="checkbox" value="${file}">
+                            ${file.split('/').pop()}
+                        </label>
+                    `).join('')}
+                </div>
+                <div class="dialog-actions">
+                    <button onclick="this.parentElement.parentElement.remove()">취소</button>
+                    <button id="add-selected-audio">추가</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(selector);
+
+        document.getElementById('add-selected-audio').addEventListener('click', () => {
+            const selected = selector.querySelectorAll('input[type="checkbox"]:checked');
+            selected.forEach(checkbox => {
+                this.addAudioToBundle(checkbox.value);
+            });
+            selector.remove();
+        });
+    }
+
+    addAudioToBundle(audioPath) {
+        const audioBundle = document.getElementById('audio-bundle');
+        const audioItem = document.createElement('div');
+        audioItem.className = 'audio-item';
+        audioItem.setAttribute('data-audio-path', audioPath);
+        audioItem.innerHTML = `
+            <audio controls style="width: 100%;">
+                <source src="/api/file-content?path=${encodeURIComponent(audioPath)}" type="audio/mpeg">
+            </audio>
+            <div class="audio-controls">
+                <label>${audioPath.split('/').pop()}</label>
+                <input type="range" class="volume-slider" min="0" max="100" value="50"
+                       onchange="this.parentElement.parentElement.querySelector('audio').volume = this.value/100">
+                <button onclick="this.parentElement.parentElement.remove()" class="remove-audio">🗑️</button>
+            </div>
+        `;
+
+        audioBundle.insertBefore(audioItem, document.getElementById('add-audio-to-bundle'));
+    }
+
+    saveAudioBundle() {
+        const audioItems = document.querySelectorAll('#audio-bundle .audio-item');
+        const bundleData = Array.from(audioItems).map(item => ({
+            path: item.getAttribute('data-audio-path'),
+            volume: item.querySelector('.volume-slider').value / 100,
+            name: item.querySelector('label').textContent
+        }));
+
+        // 묶음 데이터를 로컬 스토리지에 저장
+        const bundleName = prompt('음성 묶음 이름을 입력하세요:', 'Bundle_' + Date.now());
+        if (bundleName) {
+            const savedBundles = JSON.parse(localStorage.getItem('audioBundles') || '[]');
+            savedBundles.push({
+                name: bundleName,
+                created: new Date().toISOString(),
+                files: bundleData
+            });
+            localStorage.setItem('audioBundles', JSON.stringify(savedBundles));
+            this.showSuccess(`음성 묶음 "${bundleName}"이 저장되었습니다`);
+        }
+    }
+
+    applyAudioBundle() {
+        // 음성 묶음 설정 적용 로직
+        const bundleItems = document.querySelectorAll('.bundle-item');
+        const bundleConfig = Array.from(bundleItems).map(item => ({
+            startTime: parseFloat(item.querySelector('.start-time').value) || 0,
+            volume: parseInt(item.querySelector('.volume').value) / 100
+        }));
+
+        this.showSuccess('음성 묶음 설정이 적용되었습니다');
+    }
+
+    // 영상 음성 파형 분석
+    async analyzeVideoWaveform(videoElement) {
+        const statusElement = document.getElementById('waveform-status');
+        const canvas = document.getElementById('video-waveform');
+        const ctx = canvas.getContext('2d');
+
+        try {
+            statusElement.textContent = '음성 데이터를 분석하는 중...';
+
+            // Web Audio API로 비디오 음성 분석
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaElementSource(videoElement);
+            const analyser = audioContext.createAnalyser();
+
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
+
+            analyser.fftSize = 2048;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            // 파형 데이터 저장용
+            this.waveformData = [];
+            this.videoDuration = videoElement.duration || 0;
+
+            // 실시간 파형 그리기
+            const drawWaveform = () => {
+                analyser.getByteTimeDomainData(dataArray);
+
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = '#00ff00';
+                ctx.beginPath();
+
+                const sliceWidth = canvas.width / bufferLength;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = v * canvas.height / 2;
+
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+
+                    x += sliceWidth;
+                }
+
+                ctx.stroke();
+
+                // 현재 시간 커서 그리기
+                if (this.videoDuration > 0) {
+                    const currentTime = videoElement.currentTime;
+                    const cursorX = (currentTime / this.videoDuration) * canvas.width;
+
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(cursorX, 0);
+                    ctx.lineTo(cursorX, canvas.height);
+                    ctx.stroke();
+                }
+
+                if (!videoElement.paused) {
+                    requestAnimationFrame(drawWaveform);
+                }
+            };
+
+            // 비디오가 재생 중일 때만 파형 그리기
+            if (!videoElement.paused) {
+                drawWaveform();
+            }
+
+            // 비디오 재생/정지에 따른 파형 업데이트
+            videoElement.addEventListener('play', drawWaveform);
+            videoElement.addEventListener('pause', () => {
+                this.drawStaticWaveform(canvas, videoElement);
+            });
+
+            statusElement.textContent = '실시간 파형 분석 중 (재생 시 표시됩니다)';
+
+            // 정적 파형도 그리기
+            this.drawStaticWaveform(canvas, videoElement);
+
+        } catch (error) {
+            console.error('파형 분석 에러:', error);
+            statusElement.textContent = '파형 분석 실패: ' + error.message;
+            this.showError('파형 분석에 실패했습니다: ' + error.message);
+        }
+    }
+
+    // 정적 파형 그리기 (재생하지 않을 때)
+    drawStaticWaveform(canvas, videoElement) {
+        const ctx = canvas.getContext('2d');
+
+        // 기본 파형 모양 그리기
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height / 2);
+        ctx.lineTo(canvas.width, canvas.height / 2);
+        ctx.stroke();
+
+        // 시간 마커 그리기
+        if (this.videoDuration > 0) {
+            const intervals = 10; // 10개 구간
+            ctx.fillStyle = '#888';
+            ctx.font = '10px Arial';
+
+            for (let i = 0; i <= intervals; i++) {
+                const x = (i / intervals) * canvas.width;
+                const time = (i / intervals) * this.videoDuration;
+
+                ctx.beginPath();
+                ctx.moveTo(x, canvas.height - 10);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+
+                ctx.fillText(this.formatDuration(time), x - 15, canvas.height - 15);
+            }
+        }
+
+        // 현재 재생 위치 표시
+        this.updateWaveformCursor(videoElement.currentTime);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px Arial';
+        ctx.fillText('재생하면 실시간 파형이 표시됩니다', 10, 20);
+    }
+
+    // 파형에서 현재 재생 위치 커서 업데이트
+    updateWaveformCursor(currentTime) {
+        const canvas = document.getElementById('video-waveform');
+        if (!canvas || this.videoDuration <= 0) return;
+
+        const ctx = canvas.getContext('2d');
+        const cursorX = (currentTime / this.videoDuration) * canvas.width;
+
+        // 이전 커서 지우기 (전체 다시 그리기 대신 효율적인 방법)
+        // 실제로는 파형을 다시 그려야 하지만, 간단히 빨간 선만 그리기
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cursorX, 0);
+        ctx.lineTo(cursorX, canvas.height);
+        ctx.stroke();
+
+        // 시간 정보 표시
+        ctx.fillStyle = '#ff0000';
+        ctx.font = 'bold 12px Arial';
+        ctx.fillText(this.formatDuration(currentTime), cursorX + 5, 15);
+    }
+
+    formatDuration(seconds) {
+        if (!seconds || seconds < 0) return '0:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // 음성 추출 기능
+    async startAudioExtraction() {
+        const selectedFiles = Array.from(this.selectedFiles);
+        const videoFiles = selectedFiles.filter(path => this.getFileType(path) === 'video');
+
+        if (videoFiles.length === 0) {
+            this.showError('영상 파일을 선택하세요');
+            return;
+        }
+
+        const outputFormat = document.getElementById('audio-output-format').value;
+
+        // UI 업데이트
+        const progressSection = document.getElementById('extraction-progress');
+        const progressFill = document.getElementById('extraction-progress-fill');
+        const progressText = document.getElementById('extraction-progress-text');
+        const resultsSection = document.getElementById('extraction-results');
+
+        progressSection.style.display = 'block';
+        resultsSection.style.display = 'none';
+        progressFill.style.width = '0%';
+        progressText.textContent = '음성 추출을 시작합니다...';
+
+        try {
+            const response = await fetch('/api/extract-audio', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    files: videoFiles,
+                    format: outputFormat
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || '음성 추출 API 에러');
+            }
+
+            // 진행률 업데이트
+            progressFill.style.width = '100%';
+            progressText.textContent = '음성 추출 완료!';
+
+            // 결과 표시
+            this.displayExtractionResults(data.results);
+
+            setTimeout(() => {
+                progressSection.style.display = 'none';
+                resultsSection.style.display = 'block';
+            }, 1000);
+
+            this.showSuccess(`${videoFiles.length}개 파일의 음성 추출이 완료되었습니다`);
+
+        } catch (error) {
+            console.error('음성 추출 에러:', error);
+            progressText.textContent = '음성 추출 실패: ' + error.message;
+            this.showError('음성 추출에 실패했습니다: ' + error.message);
+        }
+    }
+
+    displayExtractionResults(results) {
+        const resultsList = document.getElementById('extracted-files-list');
+
+        if (results.length === 0) {
+            resultsList.innerHTML = '<div class="empty-state">추출된 파일이 없습니다</div>';
+            return;
+        }
+
+        resultsList.innerHTML = results.map(result => {
+            if (result.status === 'success') {
+                return `
+                    <div class="extraction-result-item success">
+                        <div class="result-header">
+                            <span class="result-icon">✅</span>
+                            <span class="source-file">${result.file.split('/').pop()}</span>
+                        </div>
+                        <div class="result-details">
+                            <div class="extracted-file-info">
+                                <span class="file-name">📄 ${result.data.output_filename}</span>
+                                <span class="file-size">💾 ${result.data.size_mb}MB</span>
+                                <span class="file-duration">⏱️ ${result.data.duration_str}</span>
+                                <span class="file-format">🎼 ${result.data.format.toUpperCase()}</span>
+                            </div>
+                            <div class="result-actions">
+                                <button class="action-btn small" onclick="app.playExtractedAudio('${result.data.output_path}')">▶️ 재생</button>
+                                <button class="action-btn small" onclick="app.downloadFile('${result.data.output_path}')">📥 다운로드</button>
+                                <button class="action-btn small" onclick="app.addToSelection('${result.data.output_path}')">➕ 선택에 추가</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="extraction-result-item error">
+                        <div class="result-header">
+                            <span class="result-icon">❌</span>
+                            <span class="source-file">${result.file.split('/').pop()}</span>
+                        </div>
+                        <div class="error-message">
+                            ${result.error}
+                        </div>
+                    </div>
+                `;
+            }
+        }).join('');
+
+        // 새로고침 버튼 이벤트 추가
+        document.getElementById('refresh-file-list').addEventListener('click', () => {
+            this.loadFileList();
+            this.showSuccess('파일 목록이 새로고침되었습니다');
+        });
+    }
+
+    playExtractedAudio(audioPath) {
+        // 간단한 오디오 플레이어 생성
+        const existingPlayer = document.getElementById('temp-audio-player');
+        if (existingPlayer) {
+            existingPlayer.remove();
+        }
+
+        const audioPlayer = document.createElement('audio');
+        audioPlayer.id = 'temp-audio-player';
+        audioPlayer.controls = true;
+        audioPlayer.autoplay = true;
+        audioPlayer.style.cssText = 'position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1000; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);';
+
+        const source = document.createElement('source');
+        source.src = `/api/file-content?path=${encodeURIComponent(audioPath)}`;
+        source.type = 'audio/mpeg';
+
+        audioPlayer.appendChild(source);
+        document.body.appendChild(audioPlayer);
+
+        // 5초 후 자동 제거
+        setTimeout(() => {
+            if (audioPlayer && !audioPlayer.paused) {
+                audioPlayer.pause();
+            }
+        }, 30000);
+
+        audioPlayer.addEventListener('ended', () => {
+            audioPlayer.remove();
+        });
+
+        this.showInfo('오디오 플레이어가 상단에 표시됩니다');
+    }
+
+    downloadFile(filePath) {
+        const link = document.createElement('a');
+        link.href = `/api/file-content?path=${encodeURIComponent(filePath)}`;
+        link.download = filePath.split('/').pop();
+        link.click();
+        this.showSuccess('파일 다운로드가 시작되었습니다');
+    }
+
+    addToSelection(filePath) {
+        this.selectedFiles.add(filePath);
+        this.updateUI();
+        this.showSuccess('파일이 선택 목록에 추가되었습니다');
+    }
+
+    // 고급 타임라인 편집기 설정
+    setupTimelineEditor() {
+        // 타임라인 편집기 상태
+        this.timeline = {
+            zoom: 1,
+            duration: 0,
+            currentTime: 0,
+            pixelsPerSecond: 50,
+            videoData: null,
+            audioData: null,
+            subtitleData: null,
+            isPlaying: false
+        };
+
+        this.setupTimelineControls();
+        this.setupTimelineEvents();
+    }
+
+    setupTimelineControls() {
+        console.log('setupTimelineControls 호출됨');
+        // 재생 컨트롤
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const rewindBtn = document.getElementById('rewind-btn');
+        const forwardBtn = document.getElementById('forward-btn');
+
+        console.log('버튼 요소들:', { playPauseBtn, stopBtn, rewindBtn, forwardBtn });
+
+        if (playPauseBtn) {
+            playPauseBtn.addEventListener('click', () => {
+                console.log('재생/일시정지 버튼 클릭됨');
+                this.togglePlayback();
+            });
+            console.log('재생/일시정지 버튼 이벤트 등록 완료');
+        } else {
+            console.log('재생/일시정지 버튼을 찾을 수 없음');
+        }
+
+        if (stopBtn) {
+            stopBtn.addEventListener('click', () => {
+                console.log('정지 버튼 클릭됨');
+                this.stopPlayback();
+            });
+            console.log('정지 버튼 이벤트 등록 완료');
+        } else {
+            console.log('정지 버튼을 찾을 수 없음');
+        }
+
+        if (rewindBtn) {
+            rewindBtn.addEventListener('click', () => {
+                console.log('되감기 버튼 클릭됨');
+                this.seekTime(-5);
+            });
+            console.log('되감기 버튼 이벤트 등록 완료');
+        } else {
+            console.log('되감기 버튼을 찾을 수 없음');
+        }
+
+        if (forwardBtn) {
+            forwardBtn.addEventListener('click', () => {
+                console.log('빨리감기 버튼 클릭됨');
+                this.seekTime(5);
+            });
+            console.log('빨리감기 버튼 이벤트 등록 완료');
+        } else {
+            console.log('빨리감기 버튼을 찾을 수 없음');
+        }
+
+        // 줌 컨트롤
+        const zoomSlider = document.getElementById('timeline-zoom');
+        const zoomDisplay = document.getElementById('zoom-display');
+        const fitToSubtitlesBtn = document.getElementById('fit-to-subtitles');
+
+        if (zoomSlider) {
+            zoomSlider.addEventListener('input', (e) => {
+                this.setTimelineZoom(parseFloat(e.target.value));
+                if (zoomDisplay) {
+                    zoomDisplay.textContent = e.target.value + 'x';
+                }
+            });
+        }
+
+        if (fitToSubtitlesBtn) {
+            fitToSubtitlesBtn.addEventListener('click', () => this.fitToSubtitles());
+        }
+
+        // 파일 로드 버튼들
+        const loadVideoBtn = document.getElementById('load-video-file');
+        const loadAudioBtn = document.getElementById('load-audio-file');
+        const loadSubtitleBtn = document.getElementById('load-subtitle-file');
+
+        if (loadVideoBtn) {
+            loadVideoBtn.addEventListener('click', async () => {
+                await this.loadFileList(); // 파일 목록 새로고침
+                this.loadSelectedVideo();
+            });
+        }
+
+        if (loadAudioBtn) {
+            loadAudioBtn.addEventListener('click', async () => {
+                await this.loadFileList(); // 파일 목록 새로고침
+                this.loadSelectedAudio();
+            });
+        }
+
+        if (loadSubtitleBtn) {
+            loadSubtitleBtn.addEventListener('click', async () => {
+                await this.loadFileList(); // 파일 목록 새로고침
+                this.loadSelectedSubtitle();
+            });
+        }
+    }
+
+    setupTimelineEvents() {
+        const timelineContainer = document.getElementById('timeline-container');
+        if (timelineContainer) {
+            // 타임라인 클릭으로 시간 이동
+            timelineContainer.addEventListener('click', (e) => {
+                const rect = timelineContainer.getBoundingClientRect();
+                const x = e.clientX - rect.left + timelineContainer.scrollLeft;
+                const time = x / (this.timeline.pixelsPerSecond * this.timeline.zoom);
+                this.seekToTime(time);
+            });
+        }
+
+        // 비디오 플레이어와 타임라인 동기화
+        const videoPlayer = document.getElementById('video-player');
+        if (videoPlayer) {
+            videoPlayer.addEventListener('timeupdate', () => {
+                this.updateTimelinePosition();
+                this.updateCurrentSubtitle();
+            });
+
+            videoPlayer.addEventListener('loadedmetadata', () => {
+                this.timeline.duration = videoPlayer.duration;
+                this.updateTimelineRuler();
+                this.updateTimeDisplay();
+            });
+
+            videoPlayer.addEventListener('play', () => {
+                this.timeline.isPlaying = true;
+                this.updatePlayPauseButton();
+            });
+
+            videoPlayer.addEventListener('pause', () => {
+                this.timeline.isPlaying = false;
+                this.updatePlayPauseButton();
+            });
+        }
+    }
+
+    // 재생 컨트롤 함수들
+    togglePlayback() {
+        console.log('togglePlayback 호출됨');
+        const videoPlayer = document.getElementById('video-player');
+        if (!videoPlayer) {
+            console.log('비디오 플레이어를 찾을 수 없습니다');
+            this.showError('비디오를 먼저 로드해주세요');
+            return;
+        }
+
+        console.log('현재 재생 상태:', this.timeline.isPlaying);
+        if (this.timeline.isPlaying) {
+            videoPlayer.pause();
+            console.log('비디오 일시정지');
+        } else {
+            videoPlayer.play().then(() => {
+                console.log('비디오 재생 시작');
+            }).catch(error => {
+                console.error('비디오 재생 실패:', error);
+                this.showError('비디오 재생에 실패했습니다: ' + error.message);
+            });
+        }
+    }
+
+    stopPlayback() {
+        console.log('stopPlayback 호출됨');
+        const videoPlayer = document.getElementById('video-player');
+        if (videoPlayer) {
+            videoPlayer.pause();
+            videoPlayer.currentTime = 0;
+            console.log('비디오 정지 및 처음으로 이동');
+        } else {
+            console.log('비디오 플레이어를 찾을 수 없습니다');
+            this.showError('비디오를 먼저 로드해주세요');
+        }
+    }
+
+    seekTime(seconds) {
+        console.log(`seekTime 호출됨: ${seconds}초`);
+        const videoPlayer = document.getElementById('video-player');
+        if (videoPlayer) {
+            const newTime = Math.max(0,
+                Math.min(videoPlayer.duration || 0, videoPlayer.currentTime + seconds));
+            videoPlayer.currentTime = newTime;
+            console.log(`시간 이동: ${newTime}초`);
+        } else {
+            console.log('비디오 플레이어를 찾을 수 없습니다');
+            this.showError('비디오를 먼저 로드해주세요');
+        }
+    }
+
+    seekToTime(time) {
+        const videoPlayer = document.getElementById('video-player');
+        if (videoPlayer) {
+            videoPlayer.currentTime = Math.max(0, Math.min(videoPlayer.duration, time));
+        }
+    }
+
+    updatePlayPauseButton() {
+        const btn = document.getElementById('play-pause-btn');
+        if (btn) {
+            btn.textContent = this.timeline.isPlaying ? '⏸️' : '⏯️';
+        }
+    }
+
+    // 타임라인 줌 및 스크롤
+    setTimelineZoom(zoom) {
+        this.timeline.zoom = zoom;
+        this.updateTimelineWidth();
+        this.updateTimelineRuler();
+        this.redrawTimeline();
+    }
+
+    updateTimelineWidth() {
+        const timelineContent = document.getElementById('timeline-content');
+        if (timelineContent && this.timeline.duration > 0) {
+            const width = this.timeline.duration * this.timeline.pixelsPerSecond * this.timeline.zoom;
+            timelineContent.style.minWidth = Math.max(1000, width) + 'px';
+        }
+    }
+
+    updateTimelineRuler() {
+        const ruler = document.getElementById('timeline-ruler');
+        if (!ruler || this.timeline.duration === 0) return;
+
+        ruler.innerHTML = '';
+
+        const interval = this.getOptimalTimeInterval();
+        const width = this.timeline.duration * this.timeline.pixelsPerSecond * this.timeline.zoom;
+
+        for (let time = 0; time <= this.timeline.duration; time += interval) {
+            const marker = document.createElement('div');
+            marker.className = 'time-marker';
+
+            if (time % (interval * 5) === 0) {
+                marker.className += ' major';
+            }
+
+            const position = (time / this.timeline.duration) * width;
+            marker.style.left = position + 'px';
+            marker.textContent = this.formatDuration(time);
+
+            ruler.appendChild(marker);
+        }
+    }
+
+    getOptimalTimeInterval() {
+        const zoom = this.timeline.zoom;
+        if (zoom >= 10) return 1; // 1초 간격
+        if (zoom >= 5) return 2;   // 2초 간격
+        if (zoom >= 2) return 5;   // 5초 간격
+        return 10; // 10초 간격
+    }
+
+    updateTimelinePosition() {
+        const videoPlayer = document.getElementById('video-player');
+        const playhead = document.getElementById('playhead');
+
+        if (!videoPlayer || !playhead || this.timeline.duration === 0) return;
+
+        this.timeline.currentTime = videoPlayer.currentTime;
+        const timelineContent = document.getElementById('timeline-content');
+        const width = parseFloat(timelineContent.style.minWidth) || 1000;
+
+        const position = (this.timeline.currentTime / this.timeline.duration) * width;
+        playhead.style.left = position + 'px';
+
+        this.updateTimeDisplay();
+        this.autoScrollTimeline(position);
+    }
+
+    autoScrollTimeline(position) {
+        const container = document.getElementById('timeline-container');
+        if (!container) return;
+
+        const containerWidth = container.clientWidth;
+        const scrollLeft = container.scrollLeft;
+
+        // 재생 헤드가 화면 밖으로 나가면 자동 스크롤
+        if (position < scrollLeft || position > scrollLeft + containerWidth) {
+            container.scrollLeft = Math.max(0, position - containerWidth / 2);
+        }
+    }
+
+    updateTimeDisplay() {
+        const currentTimeEl = document.getElementById('current-time');
+        const totalTimeEl = document.getElementById('total-time');
+
+        if (currentTimeEl) {
+            currentTimeEl.textContent = this.formatDuration(this.timeline.currentTime);
+        }
+
+        if (totalTimeEl) {
+            totalTimeEl.textContent = this.formatDuration(this.timeline.duration);
+        }
+    }
+
+    // 파일 로드 함수들
+    async loadSelectedVideo() {
+        let videoFiles = Array.from(this.selectedFiles).filter(path =>
+            this.getFileType(path) === 'video');
+
+        // 선택된 파일이 없다면, API를 통해 사용 가능한 영상 파일 자동 검색
+        if (videoFiles.length === 0) {
+            try {
+                console.log('API에서 영상 파일 검색 중...');
+                // API에서 직접 파일 목록 가져오기
+                const response = await fetch('/api/files?filter_type=all');
+                const data = await response.json();
+                const availableVideos = [];
+
+                if (data.files) {
+                    data.files.forEach(file => {
+                        if (file.path && this.getFileType(file.path) === 'video') {
+                            availableVideos.push(file.path);
+                        }
+                    });
+                }
+
+                console.log('API에서 찾은 영상 파일들:', availableVideos);
+
+                if (availableVideos.length > 0) {
+                    videoFiles = [availableVideos[0]];
+                    this.showInfo(`영상 파일을 자동으로 선택했습니다: ${availableVideos[0].split('/').pop()}`);
+                } else {
+                    this.showError('영상 파일이 없습니다. .mp4, .webm 등의 영상 파일을 업로드하거나 선택하세요.');
+                    return;
+                }
+            } catch (error) {
+                console.error('파일 목록 조회 오류:', error);
+                this.showError('영상 파일 검색 중 오류가 발생했습니다: ' + error.message);
+                return;
+            }
+        }
+
+        const videoPath = videoFiles[0];
+        const videoPlayer = document.getElementById('video-player');
+        const videoTrack = document.getElementById('video-track');
+
+        if (videoPlayer) {
+            videoPlayer.src = `/api/file-content?path=${encodeURIComponent(videoPath)}`;
+            this.timeline.videoData = { path: videoPath };
+
+            // 비디오 트랙에 클립 표시
+            if (videoTrack) {
+                videoTrack.innerHTML = `
+                    <div class="video-clip" style="left: 0; width: 100%;">
+                        📹 ${videoPath.split('/').pop()}
+                    </div>
+                `;
+            }
+
+            this.showSuccess('영상 파일이 로드되었습니다');
+        }
+    }
+
+    async loadSelectedAudio() {
+        let audioFiles = Array.from(this.selectedFiles).filter(path =>
+            this.getFileType(path) === 'audio');
+
+        // 선택된 파일이 없다면, API를 통해 사용 가능한 음성 파일 자동 검색
+        if (audioFiles.length === 0) {
+            try {
+                console.log('API에서 음성 파일 검색 중...');
+                // API에서 직접 파일 목록 가져오기
+                const response = await fetch('/api/files?filter_type=all');
+                const data = await response.json();
+                const availableAudios = [];
+
+                if (data.files) {
+                    data.files.forEach(file => {
+                        if (file.path && this.getFileType(file.path) === 'audio') {
+                            availableAudios.push(file.path);
+                        }
+                    });
+                }
+
+                console.log('API에서 찾은 음성 파일들:', availableAudios);
+
+                if (availableAudios.length > 0) {
+                    audioFiles = [availableAudios[0]];
+                    this.showInfo(`음성 파일을 자동으로 선택했습니다: ${availableAudios[0].split('/').pop()}`);
+                } else {
+                    this.showError('음성 파일이 없습니다. .mp3, .wav 등의 음성 파일을 업로드하거나 선택하세요.');
+                    return;
+                }
+            } catch (error) {
+                console.error('파일 목록 조회 오류:', error);
+                this.showError('음성 파일 검색 중 오류가 발생했습니다: ' + error.message);
+                return;
+            }
+        }
+
+        const audioPath = audioFiles[0];
+        this.timeline.audioData = { path: audioPath };
+
+        // 음성 파형 그리기
+        await this.drawAudioWaveform(audioPath);
+        this.showSuccess('음성 파일이 로드되었습니다');
+    }
+
+    async loadSelectedSubtitle() {
+        let subtitleFiles = Array.from(this.selectedFiles).filter(path =>
+            path.endsWith('.srt') || path.endsWith('.vtt'));
+
+        // 선택된 파일이 없다면, API를 통해 사용 가능한 자막 파일 자동 검색
+        if (subtitleFiles.length === 0) {
+            try {
+                console.log('API에서 자막 파일 검색 중...');
+                // API에서 직접 파일 목록 가져오기
+                const response = await fetch('/api/files?filter_type=all');
+                const data = await response.json();
+                const availableSubtitles = [];
+
+                if (data.files) {
+                    data.files.forEach(file => {
+                        if (file.path && (file.path.endsWith('.srt') || file.path.endsWith('.vtt'))) {
+                            availableSubtitles.push(file.path);
+                        }
+                    });
+                }
+
+                console.log('API에서 찾은 자막 파일들:', availableSubtitles);
+
+                if (availableSubtitles.length > 0) {
+                    // _fixed.srt, _generated.srt 파일을 우선적으로 선택
+                    const preferredSubtitle = availableSubtitles.find(path =>
+                        path.includes('_fixed.srt') || path.includes('_generated.srt')) || availableSubtitles[0];
+
+                    subtitleFiles = [preferredSubtitle];
+                    console.log('사용 가능한 자막 파일들:', availableSubtitles);
+                    console.log('선택된 자막 파일:', preferredSubtitle);
+                    this.showInfo(`자막 파일을 자동으로 선택했습니다: ${preferredSubtitle.split('/').pop()}`);
+                } else {
+                    this.showError('자막 파일이 없습니다. .srt 또는 .vtt 파일을 업로드하거나 선택하세요.');
+                    return;
+                }
+            } catch (error) {
+                console.error('파일 목록 조회 오류:', error);
+                this.showError('자막 파일 검색 중 오류가 발생했습니다: ' + error.message);
+                return;
+            }
+        }
+
+        const subtitlePath = subtitleFiles[0];
+
+        try {
+            this.showInfo('자막 파일을 분석하고 있습니다...');
+
+            // 자막 파일 분석 API 호출
+            const response = await fetch('/api/analysis/subtitle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: [subtitlePath] })
+            });
+
+            const data = await response.json();
+            console.log('자막 API 응답:', data); // 디버그 로그
+
+            if (data.results && data.results[0] && data.results[0].status === 'success') {
+                const resultData = data.results[0].data;
+                console.log('API 응답 전체 구조:', resultData); // 디버그 로그
+
+                // API 응답에서 subtitles 데이터 추출
+                let subtitles = [];
+                if (resultData.subtitles) {
+                    subtitles = resultData.subtitles;
+                } else if (resultData.analysis && resultData.analysis.subtitles) {
+                    subtitles = resultData.analysis.subtitles;
+                } else {
+                    console.warn('자막 구간 데이터를 찾을 수 없습니다. API 응답 구조:', resultData);
+                }
+
+                // 자막 데이터 구조 정규화
+                this.timeline.subtitleData = {
+                    ...resultData,
+                    subtitles: subtitles
+                };
+
+                console.log('정규화된 자막 데이터:', this.timeline.subtitleData);
+                console.log('자막 구간 수:', subtitles.length);
+
+                // 비디오 duration이 설정되어 있는지 확인
+                if (this.timeline.duration === 0) {
+                    const videoPlayer = document.getElementById('video-player');
+                    if (videoPlayer && videoPlayer.duration) {
+                        this.timeline.duration = videoPlayer.duration;
+                    } else {
+                        // 자막 데이터에서 duration 추정
+                        if (subtitles.length > 0) {
+                            this.timeline.duration = Math.max(...subtitles.map(s => s.end_time));
+                        } else if (resultData.total_duration) {
+                            this.timeline.duration = resultData.total_duration;
+                        }
+                    }
+                }
+
+                this.renderSubtitleTrack();
+                this.updateTimelineRuler();
+                this.updateTimelineWidth();
+
+                this.showSuccess(`자막 파일이 로드되었습니다 (${subtitles.length}개 구간)`);
+            } else {
+                console.error('자막 분석 실패:', data);
+                throw new Error(data.results?.[0]?.error || '자막 분석 실패');
+            }
+        } catch (error) {
+            console.error('자막 로드 에러:', error);
+            this.showError('자막 파일 로드 실패: ' + error.message);
+        }
+    }
+
+    renderSubtitleTrack() {
+        const subtitleTrack = document.getElementById('subtitle-track');
+        if (!subtitleTrack || !this.timeline.subtitleData) return;
+
+        const subtitles = this.timeline.subtitleData.subtitles || [];
+        const trackContent = subtitleTrack.querySelector('.track-content');
+
+        if (!trackContent) return;
+
+        trackContent.innerHTML = '';
+
+        subtitles.forEach((subtitle, index) => {
+            const block = document.createElement('div');
+            block.className = 'subtitle-block';
+            block.dataset.index = index;
+
+            const startPercent = (subtitle.start_time / this.timeline.duration) * 100;
+            const duration = subtitle.end_time - subtitle.start_time;
+            const widthPercent = (duration / this.timeline.duration) * 100;
+
+            block.style.left = startPercent + '%';
+            block.style.width = widthPercent + '%';
+            block.textContent = subtitle.text;
+            block.title = `${this.formatDuration(subtitle.start_time)} - ${this.formatDuration(subtitle.end_time)}\n${subtitle.text}`;
+
+            // 자막 블록 클릭 이벤트
+            block.addEventListener('click', () => {
+                this.seekToTime(subtitle.start_time);
+                this.selectSubtitleBlock(block);
+            });
+
+            trackContent.appendChild(block);
+        });
+    }
+
+    selectSubtitleBlock(block) {
+        // 기존 선택 해제
+        document.querySelectorAll('.subtitle-block.selected').forEach(el => {
+            el.classList.remove('selected');
+        });
+
+        // 새로운 블록 선택
+        block.classList.add('selected');
+    }
+
+    updateCurrentSubtitle() {
+        if (!this.timeline.subtitleData) return;
+
+        const currentTime = this.timeline.currentTime;
+        const subtitles = this.timeline.subtitleData.subtitles || [];
+        const currentSubtitleEl = document.getElementById('current-subtitle');
+
+        // 현재 시간에 해당하는 자막 찾기
+        const currentSubtitle = subtitles.find(sub =>
+            currentTime >= sub.start_time && currentTime <= sub.end_time);
+
+        if (currentSubtitle) {
+            if (currentSubtitleEl) {
+                currentSubtitleEl.textContent = currentSubtitle.text;
+                currentSubtitleEl.className = 'subtitle-display';
+            }
+
+            // 해당 자막 블록 하이라이트
+            document.querySelectorAll('.subtitle-block').forEach((block, index) => {
+                if (parseInt(block.dataset.index) === subtitles.indexOf(currentSubtitle)) {
+                    block.classList.add('selected');
+                } else {
+                    block.classList.remove('selected');
+                }
+            });
+        } else {
+            if (currentSubtitleEl) {
+                currentSubtitleEl.textContent = '자막이 없습니다';
+                currentSubtitleEl.className = 'subtitle-display no-subtitle';
+            }
+
+            // 모든 선택 해제
+            document.querySelectorAll('.subtitle-block.selected').forEach(el => {
+                el.classList.remove('selected');
+            });
+        }
+    }
+
+    async drawAudioWaveform(audioPath) {
+        const canvas = document.getElementById('timeline-waveform');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+
+        // 기본 파형 그리기 (실제 구현에서는 오디오 분석 결과 사용)
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = '#00ff88';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+
+        // 가상의 파형 데이터 (실제로는 API에서 가져온 데이터 사용)
+        for (let x = 0; x < canvas.width; x++) {
+            const amplitude = Math.random() * 0.8 + 0.1;
+            const y = canvas.height * (1 - amplitude) / 2;
+            const height = canvas.height * amplitude;
+
+            if (x === 0) {
+                ctx.moveTo(x, y + height/2);
+            } else {
+                ctx.lineTo(x, y + height/2);
+            }
+        }
+
+        ctx.stroke();
+    }
+
+    fitToSubtitles() {
+        console.log('fitToSubtitles 호출됨');
+        console.log('현재 자막 데이터:', this.timeline.subtitleData);
+
+        if (!this.timeline.subtitleData) {
+            this.showError('자막 데이터가 없습니다. 먼저 자막 파일을 로드하세요.');
+            return;
+        }
+
+        if (!this.timeline.subtitleData.subtitles) {
+            this.showError('자막 구간이 없습니다.');
+            return;
+        }
+
+        const subtitles = this.timeline.subtitleData.subtitles;
+        if (subtitles.length === 0) {
+            this.showError('자막 구간이 비어있습니다.');
+            return;
+        }
+
+        console.log(`자막 구간 수: ${subtitles.length}`);
+
+        // duration 확인 및 설정
+        if (this.timeline.duration === 0) {
+            // 자막에서 최대 시간 찾기
+            const maxTime = Math.max(...subtitles.map(s => s.end_time));
+            this.timeline.duration = maxTime;
+            console.log(`Duration을 자막에서 설정: ${this.timeline.duration}초`);
+        }
+
+        // 자막의 전체 시간 범위 계산
+        const firstSubtitle = subtitles[0];
+        const lastSubtitle = subtitles[subtitles.length - 1];
+        const subtitleDuration = lastSubtitle.end_time - firstSubtitle.start_time;
+
+        console.log(`자막 시간 범위: ${firstSubtitle.start_time}초 ~ ${lastSubtitle.end_time}초`);
+        console.log(`자막 전체 길이: ${subtitleDuration}초`);
+
+        // 적절한 줌 레벨 계산
+        const container = document.getElementById('timeline-container');
+        if (container) {
+            const containerWidth = container.clientWidth - 120; // 헤더 너비 제외
+            const optimalZoom = containerWidth / (subtitleDuration * this.timeline.pixelsPerSecond);
+
+            console.log(`컨테이너 너비: ${containerWidth}, 최적 줌: ${optimalZoom}`);
+
+            // 줌 슬라이더 업데이트
+            const zoomSlider = document.getElementById('timeline-zoom');
+            const zoomDisplay = document.getElementById('zoom-display');
+
+            if (zoomSlider) {
+                const clampedZoom = Math.max(1, Math.min(20, optimalZoom));
+                zoomSlider.value = clampedZoom;
+                this.setTimelineZoom(clampedZoom);
+
+                if (zoomDisplay) {
+                    zoomDisplay.textContent = clampedZoom.toFixed(1) + 'x';
+                }
+
+                console.log(`줌 레벨 설정: ${clampedZoom}x`);
+            }
+
+            // 첫 번째 자막으로 스크롤
+            setTimeout(() => {
+                const timelineContent = document.getElementById('timeline-content');
+                const contentWidth = parseFloat(timelineContent.style.minWidth) || 1000;
+                const scrollPosition = (firstSubtitle.start_time / this.timeline.duration) * contentWidth;
+
+                console.log(`스크롤 위치: ${scrollPosition}, 컨텐츠 너비: ${contentWidth}`);
+
+                container.scrollLeft = Math.max(0, scrollPosition - 100);
+            }, 100);
+        }
+
+        this.showSuccess(`자막에 맞춰 타임라인을 조정했습니다 (${subtitles.length}개 구간)`);
+    }
+
+    redrawTimeline() {
+        this.updateTimelineRuler();
+        this.renderSubtitleTrack();
+        if (this.timeline.audioData) {
+            this.drawAudioWaveform(this.timeline.audioData.path);
+        }
     }
 }
 

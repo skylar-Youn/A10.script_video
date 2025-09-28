@@ -1026,3 +1026,931 @@ textarea:focus {
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }
+
+/* 영상+음성 동시 재생 패널 */
+.simultaneous-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    width: 90vw;
+    max-width: 1200px;
+    max-height: 90vh;
+    overflow-y: auto;
+    backdrop-filter: blur(10px);
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-primary);
+}
+
+.panel-header h3 {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.close-btn {
+    background: var(--error-color);
+    color: white;
+    border: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.close-btn:hover {
+    background: #cc0000;
+    transform: scale(1.1);
+}
+
+.media-containers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    padding: 1.5rem;
+}
+
+.video-container, .audio-container {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 1rem;
+}
+
+.video-container h4, .audio-container h4 {
+    margin: 0 0 1rem 0;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+}
+
+/* 파형 컨테이너 */
+.waveform-container {
+    margin-top: 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: var(--radius);
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+}
+
+.waveform-container h5 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.waveform-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.5rem;
+    gap: 1rem;
+}
+
+.status-text {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+/* 음성 묶음 관련 */
+.audio-bundle {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.audio-item {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+}
+
+.audio-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.audio-controls label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.volume-slider {
+    width: 80px;
+    margin: 0 0.5rem;
+}
+
+.remove-audio {
+    background: var(--error-color);
+    color: white;
+    border: none;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: var(--transition);
+}
+
+.remove-audio:hover {
+    background: #cc0000;
+}
+
+.add-btn {
+    background: var(--success-color);
+    color: white;
+    border: none;
+    padding: 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: var(--transition);
+    border: 2px dashed rgba(255, 255, 255, 0.3);
+}
+
+.add-btn:hover {
+    background: #00cc66;
+    border-color: var(--success-color);
+}
+
+/* 재생 컨트롤 */
+.playback-controls {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.primary-btn {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-weight: 500;
+    transition: var(--transition);
+}
+
+.primary-btn:hover {
+    background: var(--primary-dark);
+    transform: translateY(-1px);
+}
+
+.secondary-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.secondary-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: var(--primary-color);
+}
+
+.success-btn {
+    background: var(--success-color);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-weight: 500;
+    transition: var(--transition);
+}
+
+.success-btn:hover {
+    background: #00cc66;
+    transform: translateY(-1px);
+}
+
+/* 다이얼로그 */
+.audio-bundle-dialog, .file-selector-dialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(5px);
+}
+
+.dialog-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 2rem;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.dialog-content h3 {
+    margin: 0 0 1.5rem 0;
+    color: var(--text-primary);
+}
+
+.bundle-list, .file-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.bundle-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+
+.bundle-item span {
+    flex: 1;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.bundle-item input {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.bundle-item button {
+    background: var(--error-color);
+    color: white;
+    border: none;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.dialog-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+}
+
+.cancel-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.file-options label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: var(--transition);
+}
+
+.file-options label:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.file-options input[type="checkbox"] {
+    margin: 0;
+}
+
+/* 알림 */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 1rem 1.5rem;
+    border-radius: var(--radius);
+    color: white;
+    z-index: 1200;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    animation: slideIn 0.3s ease;
+}
+
+.notification.success {
+    background: var(--success-color);
+}
+
+.notification.info {
+    background: var(--primary-color);
+}
+
+.notification.warning {
+    background: var(--warning-color);
+}
+
+.notification.error {
+    background: var(--error-color);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* 반응형 - 동시 재생 패널 */
+@media (max-width: 768px) {
+    .simultaneous-panel {
+        width: 95vw;
+        height: 95vh;
+    }
+
+    .media-containers {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        padding: 1rem;
+    }
+
+    .playback-controls {
+        gap: 0.5rem;
+        padding: 1rem;
+    }
+
+    .primary-btn, .secondary-btn, .success-btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+
+    .audio-controls {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+
+    .volume-slider {
+        width: 60px;
+    }
+}
+
+/* 음성 추출 관련 스타일 */
+.extract-audio-controls {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.info-section {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: rgba(74, 158, 255, 0.1);
+    border-left: 4px solid var(--primary-color);
+    border-radius: 4px;
+}
+
+.info-section h4 {
+    margin: 0 0 0.5rem 0;
+    color: var(--primary-color);
+    font-size: 1.1rem;
+}
+
+.info-section p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.setting-group {
+    margin-bottom: 1rem;
+}
+
+.setting-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.quality-info {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+}
+
+.quality-item {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.25rem 0.75rem;
+    border-radius: 16px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.extraction-progress, .extraction-results {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-top: 1rem;
+}
+
+.extracted-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.extraction-result-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 1rem;
+    transition: var(--transition);
+}
+
+.extraction-result-item.success {
+    border-left: 4px solid var(--success-color);
+}
+
+.extraction-result-item.error {
+    border-left: 4px solid var(--error-color);
+}
+
+.extraction-result-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateY(-1px);
+}
+
+.extraction-result-item .result-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.result-icon {
+    font-size: 1.2rem;
+}
+
+.source-file {
+    color: var(--text-primary);
+    font-weight: 500;
+    flex: 1;
+}
+
+.result-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.extracted-file-info {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.extracted-file-info span {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.25rem 0.75rem;
+    border-radius: 16px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.file-name {
+    color: var(--primary-color) !important;
+    font-weight: 500;
+}
+
+.result-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.action-btn.small {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    border-radius: 4px;
+}
+
+.error-message {
+    color: var(--error-color);
+    font-size: 0.9rem;
+    font-style: italic;
+    margin-top: 0.5rem;
+}
+
+/* 반응형 - 음성 추출 */
+@media (max-width: 768px) {
+    .quality-info {
+        gap: 0.5rem;
+    }
+
+    .result-details {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .extracted-file-info {
+        gap: 0.5rem;
+    }
+
+    .result-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .action-btn.small {
+        flex: 1;
+        text-align: center;
+    }
+}
+
+/* 고급 타임라인 편집기 스타일 */
+.timeline-editor {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-top: 1rem;
+    overflow: hidden;
+}
+
+.timeline-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.playback-controls {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.playback-controls button {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: var(--transition);
+    font-size: 1rem;
+}
+
+.playback-controls button:hover {
+    background: var(--primary-dark);
+    transform: scale(1.05);
+}
+
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.zoom-controls label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.zoom-controls input[type="range"] {
+    width: 120px;
+}
+
+#zoom-display {
+    color: var(--primary-color);
+    font-weight: bold;
+    min-width: 30px;
+}
+
+#fit-to-subtitles {
+    background: var(--success-color);
+    color: white;
+    border: none;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: var(--transition);
+}
+
+#fit-to-subtitles:hover {
+    background: #00cc66;
+}
+
+/* 타임라인 컨테이너 - 가로 스크롤 */
+.timeline-container {
+    width: 100%;
+    height: 300px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    position: relative;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.timeline-content {
+    min-width: 1000px;
+    height: 100%;
+    position: relative;
+    background: linear-gradient(90deg,
+        rgba(255,255,255,0.05) 0%,
+        rgba(255,255,255,0.02) 50%,
+        rgba(255,255,255,0.05) 100%);
+}
+
+/* 시간 눈금자 */
+.timeline-ruler {
+    height: 30px;
+    background: rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid var(--border-color);
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+}
+
+.time-marker {
+    position: absolute;
+    bottom: 0;
+    height: 20px;
+    border-left: 1px solid var(--text-muted);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    padding-left: 2px;
+    white-space: nowrap;
+}
+
+.time-marker.major {
+    height: 30px;
+    border-left: 2px solid var(--text-primary);
+    color: var(--text-primary);
+    font-weight: bold;
+}
+
+/* 타임라인 트랙 */
+.timeline-track {
+    height: 60px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    position: relative;
+}
+
+.track-header {
+    width: 120px;
+    background: rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-weight: 500;
+    border-right: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.track-content {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+/* 비디오 트랙 */
+.video-track .track-content {
+    background: linear-gradient(135deg, rgba(74, 158, 255, 0.2), rgba(74, 158, 255, 0.1));
+}
+
+.video-clip {
+    position: absolute;
+    top: 5px;
+    height: 50px;
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.8rem;
+    font-weight: bold;
+    cursor: pointer;
+    overflow: hidden;
+}
+
+/* 음성 트랙 */
+.audio-track .track-content {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 255, 136, 0.1));
+}
+
+#timeline-waveform {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* 자막 트랙 */
+.subtitle-track .track-content {
+    background: linear-gradient(135deg, rgba(255, 165, 0, 0.2), rgba(255, 165, 0, 0.1));
+}
+
+.subtitle-block {
+    position: absolute;
+    top: 5px;
+    height: 50px;
+    background: linear-gradient(135deg, var(--warning-color), #cc8800);
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 500;
+    cursor: pointer;
+    overflow: hidden;
+    padding: 2px 4px;
+    text-align: center;
+    line-height: 1.2;
+}
+
+.subtitle-block:hover {
+    background: linear-gradient(135deg, #ffcc00, var(--warning-color));
+    transform: scale(1.02);
+    z-index: 10;
+}
+
+.subtitle-block.selected {
+    background: linear-gradient(135deg, var(--success-color), #00cc66);
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}
+
+/* 재생 헤드 */
+.playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--error-color);
+    z-index: 100;
+    pointer-events: none;
+}
+
+.playhead::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -6px;
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 10px solid var(--error-color);
+}
+
+/* 자막 텍스트 표시 패널 */
+.subtitle-display {
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 1rem;
+    border-radius: var(--radius);
+    margin-top: 1rem;
+    min-height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.5;
+    border: 2px solid var(--warning-color);
+}
+
+.subtitle-display.no-subtitle {
+    color: var(--text-muted);
+    font-style: italic;
+    border-color: var(--border-color);
+}
+
+/* 반응형 - 타임라인 */
+@media (max-width: 1200px) {
+    .timeline-controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+
+    .playback-controls, .zoom-controls {
+        justify-content: center;
+    }
+
+    .track-header {
+        width: 80px;
+        font-size: 0.8rem;
+    }
+
+    .timeline-container {
+        height: 250px;
+    }
+
+    .timeline-track {
+        height: 50px;
+    }
+}
+
+@media (max-width: 768px) {
+    .timeline-editor {
+        padding: 0.5rem;
+    }
+
+    .timeline-controls {
+        padding: 0.5rem;
+    }
+
+    .playback-controls button {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.9rem;
+    }
+
+    .zoom-controls input[type="range"] {
+        width: 80px;
+    }
+
+    .track-header {
+        width: 60px;
+        font-size: 0.7rem;
+    }
+
+    .timeline-container {
+        height: 200px;
+    }
+
+    .timeline-track {
+        height: 40px;
+    }
+
+    .subtitle-block {
+        font-size: 0.6rem;
+        height: 35px;
+    }
+}

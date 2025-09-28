@@ -52,6 +52,83 @@ async def favicon():
     return Response(status_code=204)
 
 
+@app.post("/api/extract-audio")
+async def extract_audio_from_video_api(request: dict = Body(...)):
+    """영상 파일에서 음성을 분리하여 저장"""
+    try:
+        video_paths = request.get("files", [])
+        output_format = request.get("format", "wav")  # wav, mp3, m4a
+
+        results = []
+
+        for video_path in video_paths:
+            try:
+                if not os.path.exists(video_path):
+                    results.append({
+                        "file": video_path,
+                        "status": "error",
+                        "error": "파일을 찾을 수 없습니다"
+                    })
+                    continue
+
+                # 비디오 파일인지 확인
+                video_ext = os.path.splitext(video_path)[1].lower()
+                if video_ext not in ['.mp4', '.webm', '.avi', '.mov', '.mkv']:
+                    results.append({
+                        "file": video_path,
+                        "status": "error",
+                        "error": "지원되지 않는 비디오 형식입니다"
+                    })
+                    continue
+
+                # 출력 파일 경로 생성
+                base_name = os.path.splitext(os.path.basename(video_path))[0]
+                output_dir = os.path.dirname(video_path)
+                output_path = os.path.join(output_dir, f"{base_name}_extracted.{output_format}")
+
+                # FFmpeg를 사용하여 음성 추출
+                success = extract_audio_to_file(video_path, output_path, output_format)
+
+                if success:
+                    # 파일 정보 가져오기
+                    file_size = os.path.getsize(output_path)
+                    duration = get_media_duration(Path(output_path))
+
+                    results.append({
+                        "file": video_path,
+                        "status": "success",
+                        "data": {
+                            "output_path": output_path,
+                            "output_filename": os.path.basename(output_path),
+                            "format": output_format,
+                            "size_bytes": file_size,
+                            "size_mb": round(file_size / (1024 * 1024), 2),
+                            "duration": duration,
+                            "duration_str": format_duration_str(duration) if duration else "알 수 없음"
+                        }
+                    })
+                else:
+                    results.append({
+                        "file": video_path,
+                        "status": "error",
+                        "error": "음성 추출에 실패했습니다"
+                    })
+
+            except Exception as e:
+                logger.exception(f"음성 추출 에러 - {video_path}: {e}")
+                results.append({
+                    "file": video_path,
+                    "status": "error",
+                    "error": str(e)
+                })
+
+        return {"results": results}
+
+    except Exception as e:
+        logger.exception(f"배치 음성 추출 에러: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/files")
 async def get_files(
     path: str = Query(str(DOWNLOAD_DIR), description="탐색할 폴더 경로"),
@@ -307,11 +384,13 @@ async def analyze_subtitle(request: dict = Body(...)):
                 subtitles = parse_srt_file(file_path)
                 analysis_result = analyze_subtitle_timing(subtitles)
 
+                # 자막 구간 데이터를 data에 포함
+                analysis_result["subtitles"] = subtitles
+
                 results.append({
                     "file": file_path,
                     "status": "success",
-                    "data": analysis_result,
-                    "subtitles": subtitles[:5]  # 처음 5개만 미리보기
+                    "data": analysis_result
                 })
 
             except Exception as e:
@@ -846,6 +925,63 @@ def calculate_quality_score(original_analysis: Dict, generated_analysis: Dict) -
         score -= 20
 
     return max(0, score)
+
+
+def extract_audio_to_file(video_path: str, output_path: str, output_format: str = "wav") -> bool:
+    """영상 파일에서 음성을 추출하여 파일로 저장"""
+    try:
+        # FFmpeg 명령어 구성
+        if output_format.lower() == "wav":
+            cmd = [
+                'ffmpeg', '-y', '-i', video_path,
+                '-vn', '-acodec', 'pcm_s16le',
+                '-ar', '48000', '-ac', '2',
+                output_path
+            ]
+        elif output_format.lower() == "mp3":
+            cmd = [
+                'ffmpeg', '-y', '-i', video_path,
+                '-vn', '-acodec', 'libmp3lame',
+                '-ab', '192k', '-ar', '48000',
+                output_path
+            ]
+        elif output_format.lower() == "m4a":
+            cmd = [
+                'ffmpeg', '-y', '-i', video_path,
+                '-vn', '-acodec', 'aac',
+                '-ab', '192k', '-ar', '48000',
+                output_path
+            ]
+        else:
+            logger.error(f"지원되지 않는 출력 형식: {output_format}")
+            return False
+
+        # FFmpeg 실행
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        logger.info(f"음성 추출 완료: {video_path} -> {output_path}")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg 에러: {e.stderr}")
+        return False
+    except Exception as e:
+        logger.error(f"음성 추출 실패: {e}")
+        return False
+
+
+def format_duration_str(seconds: float) -> str:
+    """시간을 문자열로 포맷"""
+    if not seconds or seconds < 0:
+        return "0:00"
+
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    else:
+        return f"{minutes}:{secs:02d}"
 
 
 if __name__ == "__main__":
