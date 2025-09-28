@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>유튜브 콘텐츠 분석 도구</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/analysis.css">
+</head>
+<body>
+<div class="container analysis-container">
+    <!-- 헤더 & 네비게이션 -->
+    <header class="header">
+        <h1>📊 유튜브 콘텐츠 분석 도구</h1>
+        <nav class="nav-links">
+            <a href="/ytdl" class="nav-link">⬇️ 다운로드 도구</a>
+            <a href="/analysis" class="nav-link active">📊 분석 도구</a>
+            <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
+        </nav>
+        <p class="page-description">
+            다운로드된 유튜브 콘텐츠의 음성과 자막을 분석하고 편집하여 완벽한 콘텐츠를 만들어보세요.
+        </p>
+    </header>
+
+    <!-- 파일 탐색기 패널 -->
+    <section class="panel file-explorer-panel">
+        <h2>📂 파일 탐색기</h2>
+        <div class="explorer-layout">
+            <div class="folder-tree">
+                <h3>폴더 구조</h3>
+                <div class="tree-view" id="folder-tree">
+                    <div class="loading">파일 목록을 불러오는 중...</div>
+                </div>
+            </div>
+            <div class="file-list">
+                <div class="file-controls">
+                    <input type="text" id="file-search" placeholder="파일 검색...">
+                    <select id="file-filter">
+                        <option value="all">모든 파일</option>
+                        <option value="video">비디오 (.webm, .mp4)</option>
+                        <option value="subtitle">자막 (.srt)</option>
+                        <option value="audio">오디오 (.mp3, .wav)</option>
+                    </select>
+                </div>
+                <div class="file-grid" id="file-grid">
+                    <div class="loading">파일 목록을 불러오는 중...</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 선택된 파일 & 배치 옵션 -->
+    <section class="panel selection-panel">
+        <h2>🎯 분석 대상</h2>
+        <div class="selection-layout">
+            <div class="selected-files">
+                <h3>선택된 파일 (<span id="selected-count">0</span>개)</h3>
+                <div class="selected-list" id="selected-files-list">
+                    <div class="empty-state">분석할 파일을 선택하세요</div>
+                </div>
+            </div>
+            <div class="batch-options">
+                <h3>배치 분석 옵션</h3>
+                <div class="option-group">
+                    <label>
+                        <input type="checkbox" id="auto-pair-files" checked>
+                        관련 파일 자동 매칭 (비디오↔자막)
+                    </label>
+                    <label>
+                        <input type="checkbox" id="parallel-processing">
+                        병렬 처리 (빠른 분석)
+                    </label>
+                    <label>
+                        <input type="checkbox" id="save-results" checked>
+                        결과 자동 저장
+                    </label>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 분석 도구 탭들 -->
+    <section class="panel analysis-tools-panel">
+        <h2>📊 분석 & 편집 도구</h2>
+        <div class="tool-tabs">
+            <button class="tab-btn active" data-tab="audio">🎵 음성 분석</button>
+            <button class="tab-btn" data-tab="subtitle">📝 자막 분석 & 편집</button>
+            <button class="tab-btn" data-tab="stt">🎤 음성→자막</button>
+            <button class="tab-btn" data-tab="video-edit">🎬 영상 편집</button>
+            <button class="tab-btn" data-tab="text-overlay">📝 텍스트 오버레이</button>
+            <button class="tab-btn" data-tab="compare">⚖️ 비교 분석</button>
+        </div>
+
+        <div class="tab-contents">
+            <!-- 음성 분석 탭 -->
+            <div class="tab-content active" id="audio-tab">
+                <div class="analysis-controls">
+                    <div class="control-group">
+                        <label>무음 구간 감지 임계값</label>
+                        <div class="input-group">
+                            <input type="range" id="silence-threshold" min="0.01" max="0.1" step="0.01" value="0.05">
+                            <span class="value-display">0.05</span>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <label>최소 갭 길이 (초)</label>
+                        <input type="number" id="min-gap" value="0.15" step="0.05" min="0.1">
+                    </div>
+
+                    <button class="analyze-btn primary" id="start-audio-analysis">🔍 음성 분석 시작</button>
+                </div>
+
+                <div class="analysis-output" id="audio-results" style="display: none;">
+                    <div class="results-summary">
+                        <div class="stat-card">
+                            <h4>총 길이</h4>
+                            <span class="stat-value" id="audio-duration">-</span>
+                        </div>
+                        <div class="stat-card">
+                            <h4>무음 구간</h4>
+                            <span class="stat-value" id="silence-count">-</span>
+                        </div>
+                        <div class="stat-card">
+                            <h4>음성 비율</h4>
+                            <span class="stat-value" id="voice-percentage">-</span>
+                        </div>
+                    </div>
+
+                    <div class="timeline-visualizer" id="audio-timeline">
+                        <canvas id="audio-waveform-canvas" width="800" height="150"></canvas>
+                    </div>
+
+                    <div class="gap-list">
+                        <h4>감지된 무음 구간</h4>
+                        <div id="detected-gaps"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 자막 분석 & 편집 탭 -->
+            <div class="tab-content" id="subtitle-tab">
+                <div class="subtitle-analysis-edit">
+                    <!-- 기본 분석 정보 -->
+                    <div class="analysis-section">
+                        <div class="srt-info">
+                            <h4>SRT 파일 정보</h4>
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <label>총 자막 수</label>
+                                    <span id="subtitle-count">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <label>갭 수</label>
+                                    <span id="gap-count" class="warning">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <label>겹침 수</label>
+                                    <span id="overlap-count" class="error">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <label>총 길이</label>
+                                    <span id="subtitle-duration">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="analysis-actions">
+                            <button class="analysis-btn" id="analyze-srt">🔍 상세 분석</button>
+                            <button class="analysis-btn" id="compare-with-audio">🎵 음성과 비교</button>
+                            <button class="analysis-btn" id="export-analysis">📊 분석 결과 내보내기</button>
+                        </div>
+                    </div>
+
+                    <!-- 고급 편집 기능 -->
+                    <div class="editing-section" style="display: none;" id="subtitle-editing-tools">
+                        <h4>🛠️ 자막 편집 도구</h4>
+
+                        <!-- 타임라인 시각화 및 편집 -->
+                        <div class="timeline-editor">
+                            <h5>📊 자막 타임라인 편집기</h5>
+                            <div class="timeline-container">
+                                <div class="timeline-header" id="timeline-header">
+                                    <!-- 시간 마커들이 동적으로 생성됨 -->
+                                </div>
+                                <div class="timeline-track" id="subtitle-timeline-track">
+                                    <!-- 자막 블록들이 여기에 표시됨 -->
+                                </div>
+                                <div class="timeline-controls">
+                                    <button class="timeline-btn" id="zoom-in">🔍 확대</button>
+                                    <button class="timeline-btn" id="zoom-out">🔍 축소</button>
+                                    <button class="timeline-btn" id="play-timeline">▶️ 재생</button>
+                                    <input type="range" id="timeline-cursor" min="0" max="100" value="0">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 겹침/갭 해결 도구 -->
+                        <div class="overlap-gap-tools">
+                            <h5>⚡ 자동 수정 도구</h5>
+                            <div class="auto-fix-controls">
+                                <div class="fix-option">
+                                    <label>
+                                        <input type="checkbox" id="fix-overlaps" checked>
+                                        🔄 겹침 자동 해결
+                                    </label>
+                                    <div class="fix-settings">
+                                        <label>간격: <input type="number" id="overlap-gap" value="0.1" step="0.1" min="0">초</label>
+                                    </div>
+                                </div>
+
+                                <div class="fix-option">
+                                    <label>
+                                        <input type="checkbox" id="fill-gaps">
+                                        📏 갭 자동 채우기
+                                    </label>
+                                    <div class="fix-settings">
+                                        <label>최대 갭: <input type="number" id="max-gap-fill" value="0.5" step="0.1">초</label>
+                                    </div>
+                                </div>
+
+                                <button class="apply-fixes-btn" id="apply-all-fixes">🔧 자동 수정 적용</button>
+                            </div>
+                        </div>
+
+                        <!-- 개별 자막 편집 -->
+                        <div class="individual-edit">
+                            <h5>✏️ 개별 자막 편집</h5>
+                            <div class="subtitle-editor">
+                                <div class="subtitle-list" id="editable-subtitle-list">
+                                    <!-- 편집 가능한 자막 목록 -->
+                                </div>
+                                <div class="edit-controls">
+                                    <button class="edit-btn" id="add-subtitle">➕ 자막 추가</button>
+                                    <button class="edit-btn" id="split-subtitle">✂️ 자막 분할</button>
+                                    <button class="edit-btn" id="merge-subtitles">🔗 자막 병합</button>
+                                    <button class="edit-btn" id="delete-subtitle">🗑️ 자막 삭제</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 권장사항 -->
+                    <div class="recommendations">
+                        <h4>💡 개선 권장사항</h4>
+                        <ul class="recommendation-list" id="subtitle-recommendations">
+                            <!-- 권장사항들이 동적으로 추가됨 -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 음성→자막 탭 -->
+            <div class="tab-content" id="stt-tab">
+                <div class="stt-controls">
+                    <div class="setting-group">
+                        <label>인식 언어</label>
+                        <select id="stt-language">
+                            <option value="ko-KR">한국어</option>
+                            <option value="en-US">English</option>
+                            <option value="ja-JP">日本語</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>분할 단위 (초)</label>
+                        <input type="number" id="segment-duration" value="5" min="1" max="10">
+                    </div>
+
+                    <button class="analyze-btn primary" id="start-stt">🎤 음성 인식 시작</button>
+                </div>
+
+                <div class="stt-progress" id="stt-progress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="stt-progress-fill" style="width: 0%"></div>
+                    </div>
+                    <span class="progress-text" id="stt-progress-text">대기 중...</span>
+                </div>
+
+                <div class="stt-results" id="stt-results" style="display: none;">
+                    <div class="result-header">
+                        <h4>생성된 SRT</h4>
+                        <div class="result-actions">
+                            <button class="action-btn" id="download-srt">📥 다운로드</button>
+                            <button class="action-btn" id="open-in-timeline">🎬 타임라인 편집기로</button>
+                        </div>
+                    </div>
+
+                    <div class="srt-preview">
+                        <pre class="srt-content" id="generated-srt-content"></pre>
+                    </div>
+
+                    <div class="accuracy-info">
+                        <span class="accuracy-badge" id="recognition-accuracy">인식률: -%</span>
+                        <span class="segments-badge" id="recognition-segments">-/- 구간 성공</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 영상 편집 탭 -->
+            <div class="tab-content" id="video-edit-tab">
+                <div class="video-edit-controls">
+                    <div class="control-section">
+                        <h4>🎥 영상 & 음성 동시 재생</h4>
+                        <div class="video-player-container">
+                            <video id="video-player" controls style="width: 100%; max-width: 800px;">
+                                <source src="" type="video/webm">
+                                비디오를 불러올 수 없습니다.
+                            </video>
+                            <div class="audio-visualizer">
+                                <canvas id="video-audio-waveform" width="800" height="150"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="sync-controls">
+                            <button class="sync-btn" id="sync-video-srt">📝 자막과 동기화</button>
+                            <button class="sync-btn" id="sync-video-audio">🎵 음성 분석과 동기화</button>
+                            <input type="range" id="video-timeline" min="0" max="100" value="0" class="timeline-slider">
+                            <div class="time-display">
+                                <span id="current-time">00:00</span> / <span id="total-time">00:00</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="control-section">
+                        <h4>🔇 부분 묵음 처리</h4>
+                        <div class="silence-editor">
+                            <div class="silence-regions" id="silence-regions">
+                                <p class="placeholder">비디오를 선택하면 묵음 구간이 표시됩니다</p>
+                            </div>
+                            <div class="silence-controls">
+                                <button class="control-btn" id="add-silence">➕ 묵음 구간 추가</button>
+                                <button class="control-btn" id="remove-silence">➖ 묵음 구간 제거</button>
+                                <button class="control-btn" id="replace-audio">🔄 다른 음성으로 교체</button>
+                                <input type="file" id="replacement-audio-input" accept="audio/*" style="display:none">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 텍스트 오버레이 탭 -->
+            <div class="tab-content" id="text-overlay-tab">
+                <div class="text-edit-controls">
+                    <div class="control-section">
+                        <h4>📝 영상 글자 지우기</h4>
+                        <div class="text-removal">
+                            <div class="video-canvas-container">
+                                <canvas id="video-canvas" width="800" height="450"></canvas>
+                                <div class="overlay-controls">
+                                    <button class="overlay-btn" id="select-text-region">🎯 텍스트 영역 선택</button>
+                                    <button class="overlay-btn" id="auto-detect-text">🤖 자동 텍스트 감지</button>
+                                    <button class="overlay-btn" id="remove-text">🗑️ 선택 텍스트 제거</button>
+                                </div>
+                            </div>
+
+                            <div class="text-regions">
+                                <h5>감지된 텍스트 영역</h5>
+                                <div class="regions-list" id="detected-text-regions">
+                                    <p class="placeholder">텍스트 영역을 선택하거나 자동 감지를 실행하세요</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="control-section">
+                        <h4>➕ 새 텍스트 추가</h4>
+                        <div class="text-addition">
+                            <div class="text-input-area">
+                                <textarea id="new-text-content" placeholder="추가할 텍스트 입력..."></textarea>
+                                <div class="text-timing">
+                                    <label>시작 시간: <input type="number" id="text-start-time" step="0.1" value="0">초</label>
+                                    <label>지속 시간: <input type="number" id="text-duration" step="0.1" value="3">초</label>
+                                </div>
+                            </div>
+
+                            <div class="text-styling">
+                                <h5>텍스트 스타일</h5>
+                                <div class="style-controls">
+                                    <div class="style-group">
+                                        <label>폰트:</label>
+                                        <select id="text-font">
+                                            <option value="Arial">Arial</option>
+                                            <option value="나눔고딕">나눔고딕</option>
+                                            <option value="맑은고딕">맑은고딕</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="style-group">
+                                        <label>크기:</label>
+                                        <input type="range" id="text-size" min="12" max="72" value="24">
+                                        <span id="size-display">24px</span>
+                                    </div>
+
+                                    <div class="style-group">
+                                        <label>색상:</label>
+                                        <input type="color" id="text-color" value="#ffffff">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button class="add-text-btn" id="add-text-overlay">➕ 텍스트 추가</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 비교 분석 탭 -->
+            <div class="tab-content" id="compare-tab">
+                <div class="compare-setup">
+                    <div class="compare-source">
+                        <h4>원본 SRT</h4>
+                        <select id="original-srt">
+                            <option value="">SRT 파일을 선택하세요...</option>
+                        </select>
+                    </div>
+
+                    <div class="compare-target">
+                        <h4>음성 인식 결과</h4>
+                        <select id="generated-srt">
+                            <option value="">생성된 SRT 파일을 선택하세요...</option>
+                        </select>
+                    </div>
+
+                    <button class="analyze-btn primary" id="start-comparison">📊 비교 분석</button>
+                </div>
+
+                <div class="compare-results" id="comparison-results" style="display: none;">
+                    <div class="comparison-stats">
+                        <div class="stat-comparison">
+                            <div class="stat-item original">
+                                <h5>원본</h5>
+                                <span class="value" id="original-subtitle-count">- 개 자막</span>
+                                <span class="detail" id="original-details">-, - 개 겹침</span>
+                            </div>
+                            <div class="stat-divider">VS</div>
+                            <div class="stat-item generated">
+                                <h5>생성됨</h5>
+                                <span class="value" id="generated-subtitle-count">- 개 자막</span>
+                                <span class="detail" id="generated-details">-, 갭 없음</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="side-by-side-comparison">
+                        <div class="comparison-pane">
+                            <h5>원본 SRT</h5>
+                            <div class="subtitle-list original" id="original-subtitle-list"></div>
+                        </div>
+                        <div class="comparison-pane">
+                            <h5>음성 인식 결과</h5>
+                            <div class="subtitle-list generated" id="generated-subtitle-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 분석 결과 영역 -->
+    <section class="panel results-panel">
+        <h2>📈 분석 결과</h2>
+        <div class="results-layout">
+            <div class="progress-section">
+                <h3>진행 상황</h3>
+                <div class="overall-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="overall-progress-fill" style="width: 0%"></div>
+                    </div>
+                    <span class="progress-text" id="overall-progress-text">대기 중...</span>
+                </div>
+                <div class="task-queue" id="task-queue">
+                    <div class="empty-state">진행 중인 작업이 없습니다</div>
+                </div>
+            </div>
+
+            <div class="visualization-section">
+                <h3>결과 시각화</h3>
+                <div class="chart-container" id="chart-container">
+                    <p class="placeholder">분석을 시작하면 결과가 여기에 표시됩니다.</p>
+                </div>
+            </div>
+
+            <div class="actions-section">
+                <h3>결과 활용</h3>
+                <div class="action-buttons">
+                    <button class="action-btn primary" id="export-results">📁 결과 내보내기</button>
+                    <button class="action-btn secondary" id="open-timeline">🎬 타임라인 편집기</button>
+                    <button class="action-btn secondary" id="save-report">💾 보고서 저장</button>
+                    <button class="action-btn outline" id="clear-results">🗑️ 결과 지우기</button>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- 하단 고정 상태바 -->
+<div class="status-bar">
+    <div class="status-info">
+        <span id="status-text">준비됨</span>
+        <span class="separator">|</span>
+        <span id="file-count">파일 0개 선택</span>
+        <span class="separator">|</span>
+        <span id="analysis-status">분석 대기 중</span>
+    </div>
+    <div class="status-actions">
+        <button class="quick-action" id="select-all">전체 선택</button>
+        <button class="quick-action" id="clear-selection">선택 해제</button>
+    </div>
+</div>
+
+<script src="/static/analysis.js"></script>
+</body>
+</html>
