@@ -1996,6 +1996,14 @@ class VideoAnalysisApp {
                 this.loadSelectedSubtitle();
             });
         }
+
+        // 자막 번호 테스트 버튼
+        const testSubtitleBtn = document.getElementById('test-subtitle-numbers');
+        if (testSubtitleBtn) {
+            testSubtitleBtn.addEventListener('click', () => {
+                this.testSubtitleNumberDisplay();
+            });
+        }
     }
 
     setupTimelineEvents() {
@@ -2504,7 +2512,16 @@ class VideoAnalysisApp {
                     }
                 }
 
-                this.renderSubtitleTrack();
+                console.log('📝 자막 데이터 로드 완료, 렌더링 시작...');
+                console.log('자막 데이터:', this.timeline.subtitleData);
+
+                try {
+                    this.renderSubtitleTrack();
+                    console.log('✅ renderSubtitleTrack 완료');
+                } catch (error) {
+                    console.error('❌ renderSubtitleTrack 에러:', error);
+                }
+
                 this.updateTimelineRuler();
                 this.updateTimelineWidth();
 
@@ -2520,14 +2537,29 @@ class VideoAnalysisApp {
     }
 
     renderSubtitleTrack() {
+        console.log('🎬 renderSubtitleTrack 호출됨');
+
         const subtitleTrack = document.getElementById('subtitle-track');
-        if (!subtitleTrack || !this.timeline.subtitleData) return;
+        if (!subtitleTrack) {
+            console.error('❌ subtitle-track 요소를 찾을 수 없습니다');
+            return;
+        }
+
+        if (!this.timeline.subtitleData) {
+            console.error('❌ timeline.subtitleData가 없습니다');
+            return;
+        }
 
         const subtitles = this.timeline.subtitleData.subtitles || [];
+        console.log(`📝 자막 수: ${subtitles.length}`);
+
         const trackContent = subtitleTrack.querySelector('.track-content');
+        if (!trackContent) {
+            console.error('❌ track-content 요소를 찾을 수 없습니다');
+            return;
+        }
 
-        if (!trackContent) return;
-
+        console.log('🧹 기존 내용 지우기');
         trackContent.innerHTML = '';
 
         subtitles.forEach((subtitle, index) => {
@@ -2550,17 +2582,44 @@ class VideoAnalysisApp {
             block.style.left = startPercent + '%';
             block.style.width = widthPercent + '%';
 
-            // 번호 표시 요소 생성
+            // 번호 표시 요소 생성 - 더 강력한 스타일링
             const numberElement = document.createElement('div');
             numberElement.className = 'subtitle-number';
             numberElement.textContent = `#${index + 1}`;
+            numberElement.setAttribute('data-number', index + 1);
 
-            // 강제 스타일 적용 (CSS가 안 먹을 경우 대비)
-            numberElement.style.display = 'block';
-            numberElement.style.visibility = 'visible';
-            numberElement.style.opacity = '1';
-            numberElement.style.position = 'relative';
-            numberElement.style.zIndex = '20';
+            // 모든 브라우저에서 확실히 보이도록 강력한 인라인 스타일
+            const numberStyles = {
+                'display': 'block',
+                'visibility': 'visible',
+                'opacity': '1',
+                'position': 'relative',
+                'z-index': '999',
+                'background-color': 'rgb(255, 165, 0)',
+                'color': 'white',
+                'font-weight': '900',
+                'font-size': '10px',
+                'padding': '3px 5px',
+                'border-radius': '4px',
+                'text-align': 'center',
+                'min-width': '22px',
+                'margin-bottom': '2px',
+                'border': '1px solid white',
+                'box-sizing': 'border-box',
+                'line-height': '1',
+                'white-space': 'nowrap'
+            };
+
+            // 스타일 직접 적용
+            Object.keys(numberStyles).forEach(property => {
+                numberElement.style.setProperty(property, numberStyles[property], 'important');
+            });
+
+            console.log(`🏷️ 번호 요소 #${index + 1} 생성:`, {
+                텍스트: numberElement.textContent,
+                클래스: numberElement.className,
+                스타일: numberElement.style.cssText
+            });
 
             // 시간 정보 요소 생성
             const timeElement = document.createElement('div');
@@ -2574,36 +2633,50 @@ class VideoAnalysisApp {
             // 블록 너비에 따라 표시 내용 조정
             const blockWidthPx = (widthPercent / 100) * (trackContent.offsetWidth || 1000);
 
-            if (blockWidthPx < 40) {
+            if (blockWidthPx < 25) {
+                // 극극소 블록: 번호만 표시 (더 작게)
+                numberElement.style.fontSize = '7px';
+                numberElement.style.padding = '1px';
+                numberElement.style.minWidth = '15px';
+                numberElement.textContent = `${index + 1}`;
+                timeElement.style.display = 'none';
+                textElement.style.display = 'none';
+            } else if (blockWidthPx < 50) {
                 // 극소 블록: 번호만 표시
                 numberElement.style.fontSize = '8px';
                 numberElement.style.padding = '1px 2px';
                 timeElement.style.display = 'none';
                 textElement.style.display = 'none';
             } else if (blockWidthPx < 80) {
-                // 매우 작은 블록: 번호 + 시작 시간
+                // 작은 블록: 번호 + 시작 시간만
                 numberElement.style.fontSize = '9px';
                 timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}`;
+                timeElement.style.display = 'block';
                 textElement.style.display = 'none';
-                timeElement.style.fontSize = '9px';
+                timeElement.style.fontSize = '8px';
             } else if (blockWidthPx < 120) {
-                // 작은 블록: 번호 + 시작→끝 시간
+                // 중소 블록: 번호 + 시작→끝 시간
                 numberElement.style.fontSize = '9px';
                 timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}→${this.formatSubtitleTime(endTime, true)}`;
+                timeElement.style.display = 'block';
                 textElement.style.display = 'none';
-                timeElement.style.fontSize = '9px';
+                timeElement.style.fontSize = '8px';
             } else if (blockWidthPx < 200) {
                 // 중간 블록: 번호 + 시간 + 짧은 텍스트
                 numberElement.style.fontSize = '10px';
                 timeElement.textContent = `${this.formatSubtitleTime(startTime)}→${this.formatSubtitleTime(endTime)}`;
+                timeElement.style.display = 'block';
+                textElement.style.display = 'block';
                 textElement.textContent = subtitle.text.length > 15 ?
                     subtitle.text.substring(0, 12) + '...' : subtitle.text;
-                timeElement.style.fontSize = '10px';
-                textElement.style.fontSize = '11px';
+                timeElement.style.fontSize = '9px';
+                textElement.style.fontSize = '10px';
             } else {
                 // 큰 블록: 번호 + 전체 시간 + 전체 텍스트
                 numberElement.style.fontSize = '11px';
                 timeElement.textContent = `🕐 ${this.formatSubtitleTime(startTime)} → ${this.formatSubtitleTime(endTime)} (${this.formatSubtitleTime(duration)}초)`;
+                timeElement.style.display = 'block';
+                textElement.style.display = 'block';
                 timeElement.style.fontSize = '10px';
                 textElement.style.fontSize = '12px';
             }
@@ -2613,22 +2686,73 @@ class VideoAnalysisApp {
             block.appendChild(timeElement);
             block.appendChild(textElement);
 
-            console.log(`자막 블록 #${index + 1} 생성됨:`, {
-                번호요소: numberElement.textContent,
+            console.log(`🔍 자막 블록 #${index + 1} 디버깅:`, {
+                번호요소텍스트: numberElement.textContent,
+                번호요소클래스: numberElement.className,
                 블록너비: blockWidthPx + 'px',
-                번호표시여부: numberElement.style.display !== 'none'
+                번호표시여부: numberElement.style.display,
+                번호가시성: numberElement.style.visibility,
+                번호투명도: numberElement.style.opacity,
+                번호배경색: numberElement.style.backgroundColor,
+                부모블록: block,
+                자식요소수: block.children.length
             });
+
+            // DOM에 실제로 추가되었는지 확인
+            setTimeout(() => {
+                const addedElement = block.querySelector('.subtitle-number');
+                console.log(`✅ DOM 추가 확인 #${index + 1}:`, {
+                    찾은요소: addedElement,
+                    표시여부: addedElement ? addedElement.style.display : 'null',
+                    실제텍스트: addedElement ? addedElement.textContent : 'null'
+                });
+            }, 100);
 
             block.title = `#${index + 1}: ${this.formatSubtitleTime(startTime)} - ${this.formatSubtitleTime(endTime)}\n${subtitle.text}`;
 
-            // 자막 블록 클릭 이벤트
-            block.addEventListener('click', () => {
+            // 자막 블록 클릭 이벤트 (구간 편집 기능 포함)
+            block.addEventListener('click', (e) => {
+                // 단일 클릭: 재생 위치 이동 및 선택
                 this.seekToTime(subtitle.start_time);
                 this.selectSubtitleBlock(block);
+
+                // 편집 정보 표시
+                this.showSubtitleEditInfo(subtitle, index);
+            });
+
+            // 자막 블록 더블클릭 이벤트 (구간 편집)
+            block.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+                this.editSubtitleSegment(subtitle, index);
+            });
+
+            // 자막 블록 우클릭 이벤트 (컨텍스트 메뉴)
+            block.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                this.showSubtitleContextMenu(e, subtitle, index);
             });
 
             trackContent.appendChild(block);
         });
+
+        // 렌더링 완료 후 전체 확인
+        console.log('🎯 자막 트랙 렌더링 완료');
+        console.log(`📊 생성된 블록 수: ${trackContent.children.length}`);
+
+        // 각 블록의 번호 요소 확인
+        setTimeout(() => {
+            const blocks = trackContent.querySelectorAll('.subtitle-block');
+            console.log(`🔍 DOM 확인 - 총 블록 수: ${blocks.length}`);
+
+            blocks.forEach((block, index) => {
+                const numberEl = block.querySelector('.subtitle-number');
+                console.log(`Block #${index + 1}:`, {
+                    번호요소: numberEl,
+                    표시여부: numberEl ? numberEl.style.display : 'none',
+                    텍스트: numberEl ? numberEl.textContent : 'empty'
+                });
+            });
+        }, 200);
     }
 
     selectSubtitleBlock(block) {
@@ -2639,6 +2763,282 @@ class VideoAnalysisApp {
 
         // 새로운 블록 선택
         block.classList.add('selected');
+    }
+
+    showSubtitleEditInfo(subtitle, index) {
+        // 선택된 자막의 편집 정보를 표시
+        const infoText = `선택된 자막 #${index + 1}: ${this.formatSubtitleTime(subtitle.start_time)} → ${this.formatSubtitleTime(subtitle.end_time)}`;
+        this.showInfo(infoText);
+
+        // 콘솔에 상세 정보 출력
+        console.log('선택된 자막 구간:', {
+            번호: index + 1,
+            시작시간: subtitle.start_time,
+            종료시간: subtitle.end_time,
+            텍스트: subtitle.text,
+            길이: subtitle.end_time - subtitle.start_time
+        });
+    }
+
+    editSubtitleSegment(subtitle, index) {
+        // 자막 구간 편집 다이얼로그 표시
+        const currentStart = subtitle.start_time;
+        const currentEnd = subtitle.end_time;
+
+        const newStartTime = prompt(
+            `자막 #${index + 1} 시작 시간을 입력하세요 (초):`,
+            currentStart.toFixed(2)
+        );
+
+        if (newStartTime === null) return; // 취소
+
+        const newEndTime = prompt(
+            `자막 #${index + 1} 종료 시간을 입력하세요 (초):`,
+            currentEnd.toFixed(2)
+        );
+
+        if (newEndTime === null) return; // 취소
+
+        const startTime = parseFloat(newStartTime);
+        const endTime = parseFloat(newEndTime);
+
+        // 유효성 검사
+        if (isNaN(startTime) || isNaN(endTime)) {
+            this.showError('올바른 숫자를 입력하세요.');
+            return;
+        }
+
+        if (startTime >= endTime) {
+            this.showError('시작 시간은 종료 시간보다 작아야 합니다.');
+            return;
+        }
+
+        if (startTime < 0) {
+            this.showError('시작 시간은 0 이상이어야 합니다.');
+            return;
+        }
+
+        // 자막 시간 업데이트
+        subtitle.start_time = startTime;
+        subtitle.end_time = endTime;
+
+        // 타임라인 다시 그리기
+        this.renderSubtitleTrack();
+
+        this.showSuccess(`자막 #${index + 1} 구간이 수정되었습니다: ${this.formatSubtitleTime(startTime)} → ${this.formatSubtitleTime(endTime)}`);
+    }
+
+    showSubtitleContextMenu(event, subtitle, index) {
+        // 기존 컨텍스트 메뉴 제거
+        const existingMenu = document.querySelector('.subtitle-context-menu');
+        if (existingMenu) {
+            existingMenu.remove();
+        }
+
+        // 컨텍스트 메뉴 생성
+        const menu = document.createElement('div');
+        menu.className = 'subtitle-context-menu';
+        menu.style.position = 'absolute';
+        menu.style.left = event.pageX + 'px';
+        menu.style.top = event.pageY + 'px';
+        menu.style.background = 'rgba(20, 30, 50, 0.95)';
+        menu.style.border = '1px solid #4a9eff';
+        menu.style.borderRadius = '8px';
+        menu.style.padding = '8px';
+        menu.style.zIndex = '1000';
+        menu.style.minWidth = '180px';
+        menu.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.3)';
+
+        const menuItems = [
+            { text: '🎯 이 구간으로 이동', action: () => this.seekToTime(subtitle.start_time) },
+            { text: '✏️ 구간 시간 편집', action: () => this.editSubtitleSegment(subtitle, index) },
+            { text: '➕ 앞에 구간 추가', action: () => this.addSubtitleBefore(index) },
+            { text: '➕ 뒤에 구간 추가', action: () => this.addSubtitleAfter(index) },
+            { text: '✂️ 구간 분할', action: () => this.splitSubtitle(subtitle, index) },
+            { text: '🗑️ 구간 삭제', action: () => this.deleteSubtitle(index) }
+        ];
+
+        menuItems.forEach((item, i) => {
+            const menuItem = document.createElement('div');
+            menuItem.textContent = item.text;
+            menuItem.style.padding = '6px 10px';
+            menuItem.style.cursor = 'pointer';
+            menuItem.style.color = '#ffffff';
+            menuItem.style.borderRadius = '4px';
+            menuItem.style.fontSize = '13px';
+
+            if (i > 0) {
+                menuItem.style.borderTop = '1px solid rgba(255, 255, 255, 0.1)';
+            }
+
+            menuItem.addEventListener('mouseenter', () => {
+                menuItem.style.background = 'rgba(74, 158, 255, 0.3)';
+            });
+
+            menuItem.addEventListener('mouseleave', () => {
+                menuItem.style.background = 'transparent';
+            });
+
+            menuItem.addEventListener('click', () => {
+                item.action();
+                menu.remove();
+            });
+
+            menu.appendChild(menuItem);
+        });
+
+        document.body.appendChild(menu);
+
+        // 메뉴 외부 클릭 시 닫기
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+
+        setTimeout(() => {
+            document.addEventListener('click', closeMenu);
+        }, 100);
+    }
+
+    addSubtitleBefore(index) {
+        if (!this.timeline.subtitleData || !this.timeline.subtitleData.subtitles) return;
+
+        const subtitles = this.timeline.subtitleData.subtitles;
+        const prevEndTime = index > 0 ? subtitles[index - 1].end_time : 0;
+        const currentStartTime = subtitles[index].start_time;
+
+        const newStartTime = prevEndTime;
+        const newEndTime = Math.min(currentStartTime, prevEndTime + 2); // 기본 2초 길이
+
+        const newSubtitle = {
+            start_time: newStartTime,
+            end_time: newEndTime,
+            text: '새 자막'
+        };
+
+        subtitles.splice(index, 0, newSubtitle);
+        this.renderSubtitleTrack();
+        this.showSuccess(`자막 #${index + 1} 앞에 새 구간이 추가되었습니다.`);
+    }
+
+    addSubtitleAfter(index) {
+        if (!this.timeline.subtitleData || !this.timeline.subtitleData.subtitles) return;
+
+        const subtitles = this.timeline.subtitleData.subtitles;
+        const currentEndTime = subtitles[index].end_time;
+        const nextStartTime = index < subtitles.length - 1 ? subtitles[index + 1].start_time : currentEndTime + 5;
+
+        const newStartTime = currentEndTime;
+        const newEndTime = Math.min(nextStartTime, currentEndTime + 2); // 기본 2초 길이
+
+        const newSubtitle = {
+            start_time: newStartTime,
+            end_time: newEndTime,
+            text: '새 자막'
+        };
+
+        subtitles.splice(index + 1, 0, newSubtitle);
+        this.renderSubtitleTrack();
+        this.showSuccess(`자막 #${index + 1} 뒤에 새 구간이 추가되었습니다.`);
+    }
+
+    splitSubtitle(subtitle, index) {
+        if (!this.timeline.subtitleData || !this.timeline.subtitleData.subtitles) return;
+
+        const splitTime = prompt(
+            `자막 #${index + 1}을 분할할 시간을 입력하세요 (초):`,
+            ((subtitle.start_time + subtitle.end_time) / 2).toFixed(2)
+        );
+
+        if (splitTime === null) return;
+
+        const splitTimeNum = parseFloat(splitTime);
+        if (isNaN(splitTimeNum) || splitTimeNum <= subtitle.start_time || splitTimeNum >= subtitle.end_time) {
+            this.showError('분할 시간은 자막 구간 내에 있어야 합니다.');
+            return;
+        }
+
+        const subtitles = this.timeline.subtitleData.subtitles;
+
+        // 원본 자막 시간 단축
+        subtitle.end_time = splitTimeNum;
+
+        // 새 자막 생성
+        const newSubtitle = {
+            start_time: splitTimeNum,
+            end_time: subtitles[index].end_time, // 원래 종료 시간 사용
+            text: subtitle.text + ' (분할됨)'
+        };
+
+        subtitles.splice(index + 1, 0, newSubtitle);
+        this.renderSubtitleTrack();
+        this.showSuccess(`자막 #${index + 1}이 ${this.formatSubtitleTime(splitTimeNum)}에서 분할되었습니다.`);
+    }
+
+    deleteSubtitle(index) {
+        if (!this.timeline.subtitleData || !this.timeline.subtitleData.subtitles) return;
+
+        const subtitles = this.timeline.subtitleData.subtitles;
+        if (index < 0 || index >= subtitles.length) return;
+
+        const confirmed = confirm(`자막 #${index + 1}을 삭제하시겠습니까?\n"${subtitles[index].text}"`);
+        if (!confirmed) return;
+
+        subtitles.splice(index, 1);
+        this.renderSubtitleTrack();
+        this.showSuccess(`자막 #${index + 1}이 삭제되었습니다.`);
+    }
+
+    // 디버깅을 위한 테스트 함수
+    testSubtitleNumberDisplay() {
+        console.log('🧪 자막 번호 표시 테스트 시작');
+
+        const subtitleTrack = document.getElementById('subtitle-track');
+        const trackContent = subtitleTrack ? subtitleTrack.querySelector('.track-content') : null;
+
+        console.log('자막 트랙 요소:', subtitleTrack);
+        console.log('트랙 콘텐츠:', trackContent);
+
+        if (!trackContent) {
+            console.error('❌ track-content를 찾을 수 없음');
+            console.log('사용 가능한 요소들:');
+            console.log('- subtitle-track:', document.getElementById('subtitle-track'));
+            console.log('- .timeline-track:', document.querySelectorAll('.timeline-track'));
+            return;
+        }
+
+        // 테스트용 자막 블록 생성
+        const testBlock = document.createElement('div');
+        testBlock.className = 'subtitle-block';
+        testBlock.style.left = '10%';
+        testBlock.style.width = '20%';
+        testBlock.style.position = 'absolute';
+        testBlock.style.top = '5px';
+        testBlock.style.height = '50px';
+
+        // 테스트 번호 요소
+        const testNumber = document.createElement('div');
+        testNumber.className = 'subtitle-number';
+        testNumber.textContent = '#TEST';
+        testNumber.style.setProperty('display', 'block', 'important');
+        testNumber.style.setProperty('background-color', 'rgb(255, 0, 0)', 'important');
+        testNumber.style.setProperty('color', 'white', 'important');
+        testNumber.style.setProperty('font-size', '12px', 'important');
+        testNumber.style.setProperty('padding', '5px', 'important');
+        testNumber.style.setProperty('z-index', '1000', 'important');
+
+        testBlock.appendChild(testNumber);
+        trackContent.appendChild(testBlock);
+
+        console.log('✅ 테스트 블록 추가됨');
+
+        // 3초 후 제거
+        setTimeout(() => {
+            testBlock.remove();
+            console.log('🗑️ 테스트 블록 제거됨');
+        }, 3000);
     }
 
     updateCurrentSubtitle() {
@@ -3282,3 +3682,45 @@ function applyToTimeline(startTime, endTime) {
 function executeRecommendation(action) {
     app.executeRecommendation(action);
 }
+
+// 전역 디버깅 함수들
+window.debugSubtitleTrack = function() {
+    console.log('🔍 자막 트랙 디버깅 시작');
+    const subtitleTrack = document.getElementById('subtitle-track');
+    const trackContent = subtitleTrack ? subtitleTrack.querySelector('.track-content') : null;
+
+    console.log('자막 트랙 요소:', subtitleTrack);
+    console.log('트랙 콘텐츠:', trackContent);
+    console.log('전체 타임라인 트랙들:', document.querySelectorAll('.timeline-track'));
+
+    if (trackContent) {
+        const blocks = trackContent.querySelectorAll('.subtitle-block');
+        console.log(`생성된 블록 수: ${blocks.length}`);
+
+        blocks.forEach((block, index) => {
+            const numberEl = block.querySelector('.subtitle-number');
+            console.log(`블록 #${index + 1}:`, {
+                블록: block,
+                번호요소: numberEl,
+                번호텍스트: numberEl ? numberEl.textContent : 'null',
+                번호표시: numberEl ? getComputedStyle(numberEl).display : 'null',
+                번호가시성: numberEl ? getComputedStyle(numberEl).visibility : 'null',
+                번호스타일: numberEl ? numberEl.style.cssText : 'null'
+            });
+        });
+    }
+};
+
+window.forceRenderSubtitles = function() {
+    console.log('🔄 강제 자막 렌더링 실행');
+    if (window.app && window.app.timeline && window.app.timeline.subtitleData) {
+        window.app.renderSubtitleTrack();
+    } else {
+        console.error('자막 데이터가 없습니다');
+        console.log('앱 상태:', {
+            app: window.app,
+            timeline: window.app ? window.app.timeline : null,
+            subtitleData: window.app && window.app.timeline ? window.app.timeline.subtitleData : null
+        });
+    }
+};

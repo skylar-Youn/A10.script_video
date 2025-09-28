@@ -2019,24 +2019,44 @@ textarea:focus {
     box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
 }
 
-/* 자막 블록 내 번호 표시 */
+/* 자막 블록 내 번호 표시 - 강화된 스타일 */
 .subtitle-number {
-    font-size: 0.8rem;
-    font-weight: 900;
+    font-size: 0.8rem !important;
+    font-weight: 900 !important;
     color: rgba(255, 255, 255, 1.0) !important;
-    background: rgba(255, 165, 0, 0.9) !important;
-    padding: 2px 5px;
-    border-radius: 4px;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 1);
-    letter-spacing: 0.3px;
-    border: 2px solid rgba(255, 255, 255, 0.8);
-    margin-bottom: 2px;
-    text-align: center;
-    min-width: 25px;
-    white-space: nowrap;
+    background: rgba(255, 165, 0, 0.95) !important;
+    padding: 3px 6px !important;
+    border-radius: 4px !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 1) !important;
+    letter-spacing: 0.3px !important;
+    border: 2px solid rgba(255, 255, 255, 0.9) !important;
+    margin-bottom: 2px !important;
+    text-align: center !important;
+    min-width: 25px !important;
+    white-space: nowrap !important;
     display: block !important;
-    position: relative;
-    z-index: 10;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: relative !important;
+    z-index: 100 !important;
+    box-sizing: border-box !important;
+    line-height: 1.2 !important;
+}
+
+/* 강제 표시를 위한 추가 스타일 */
+.subtitle-block .subtitle-number {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* 작은 화면에서도 번호가 보이도록 */
+@media (max-width: 768px) {
+    .subtitle-number {
+        font-size: 0.7rem !important;
+        padding: 2px 4px !important;
+        min-width: 20px !important;
+    }
 }
 
 /* 자막 블록 내 시간 표시 */
