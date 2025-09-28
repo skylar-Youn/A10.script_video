@@ -178,8 +178,16 @@ class VideoAnalysisApp {
         const stopBtn = document.getElementById('stop-btn');
         if (stopBtn) {
             stopBtn.addEventListener('click', () => {
-                this.stopVideo();
+                this.stopPlayback();
             });
+
+            // 더블클릭으로 0초로 리셋
+            stopBtn.addEventListener('dblclick', () => {
+                this.resetToStart();
+            });
+
+            // 툴팁 업데이트
+            stopBtn.title = '클릭: 현재 위치에서 정지 | 더블클릭: 처음(0초)으로 이동';
         }
 
         // 되감기/빨리감기
@@ -194,6 +202,21 @@ class VideoAnalysisApp {
         if (forwardBtn) {
             forwardBtn.addEventListener('click', () => {
                 this.seekVideo(10);
+            });
+        }
+
+        // 맨 처음으로/맨 끝으로 가기
+        const skipToStartBtn = document.getElementById('skip-to-start-btn');
+        if (skipToStartBtn) {
+            skipToStartBtn.addEventListener('click', () => {
+                this.skipToStart();
+            });
+        }
+
+        const skipToEndBtn = document.getElementById('skip-to-end-btn');
+        if (skipToEndBtn) {
+            skipToEndBtn.addEventListener('click', () => {
+                this.skipToEnd();
             });
         }
 
@@ -425,6 +448,23 @@ class VideoAnalysisApp {
                     this.showTrackSettings(trackType);
                 });
             }
+
+            // 축소된 트랙 헤더 클릭 시 펼치기
+            const trackHeader = document.querySelector(`#${trackType}-subtitle-track .track-header`);
+            if (trackHeader) {
+                trackHeader.addEventListener('click', (e) => {
+                    // 버튼 클릭이 아닌 헤더 영역 클릭만 처리
+                    if (!e.target.classList.contains('track-toggle') &&
+                        !e.target.classList.contains('track-lock') &&
+                        !e.target.classList.contains('track-settings')) {
+
+                        const track = document.getElementById(`${trackType}-subtitle-track`);
+                        if (track && track.classList.contains('collapsed')) {
+                            this.toggleTrackVisibility(trackType);
+                        }
+                    }
+                });
+            }
         });
     }
 
@@ -436,15 +476,24 @@ class VideoAnalysisApp {
         // UI 업데이트
         const toggleBtn = document.querySelector(`.track-toggle[data-track="${trackType}"]`);
         const track = document.getElementById(`${trackType}-subtitle-track`);
+        const trackContent = track ? track.querySelector('.track-content') : null;
 
         if (this.trackStates[trackType].visible) {
+            // 트랙 보이기
             toggleBtn.textContent = '👁️';
             toggleBtn.title = '트랙 숨기기';
-            if (track) track.style.display = 'block';
+            if (track) {
+                track.classList.remove('collapsed');
+                track.style.height = '80px'; // 원래 높이로 복원
+            }
         } else {
-            toggleBtn.textContent = '🚫';
+            // 트랙 숨기기 (축소 상태로)
+            toggleBtn.textContent = '👁️‍🗨️';
             toggleBtn.title = '트랙 보이기';
-            if (track) track.style.display = 'none';
+            if (track) {
+                track.classList.add('collapsed');
+                track.style.height = '35px'; // 헤더만 보이는 높이로 축소
+            }
         }
 
         // 자막 다시 렌더링
@@ -2216,6 +2265,8 @@ class VideoAnalysisApp {
 
         if (this.timeline.isPlaying) {
             videoPlayer.pause();
+            // 실시간 동기화 중지
+            this.stopRealtimeWaveformSync();
             console.log('비디오 일시정지 - 현재 위치:', videoPlayer.currentTime);
         } else {
             // 현재 타임라인 위치로 비디오 시간 설정
@@ -2226,6 +2277,8 @@ class VideoAnalysisApp {
 
             videoPlayer.play().then(() => {
                 console.log('비디오 재생 시작 - 위치:', videoPlayer.currentTime);
+                // 실시간 파형-자막 동기화 시작
+                this.startRealtimeWaveformSync();
             }).catch(error => {
                 console.error('비디오 재생 실패:', error);
                 this.showError('비디오 재생에 실패했습니다: ' + error.message);
@@ -2236,14 +2289,132 @@ class VideoAnalysisApp {
     stopPlayback() {
         console.log('stopPlayback 호출됨');
         const videoPlayer = document.getElementById('video-player');
+        const audioPlayer = document.getElementById('audio-player');
+        let currentPos = 0;
+
+        // 비디오와 오디오 플레이어 정지
+        if (videoPlayer) {
+            currentPos = videoPlayer.currentTime;
+            videoPlayer.pause();
+            console.log(`비디오 정지 - 현재 위치 유지: ${currentPos}초`);
+        }
+
+        if (audioPlayer) {
+            if (!videoPlayer) {
+                currentPos = audioPlayer.currentTime;
+            }
+            audioPlayer.pause();
+            console.log(`오디오 정지 - 현재 위치 유지: ${currentPos}초`);
+        }
+
+        if (!videoPlayer && !audioPlayer) {
+            console.log('비디오 또는 오디오 플레이어를 찾을 수 없습니다');
+            this.showError('미디어를 먼저 로드해주세요');
+            return;
+        }
+
+        // 타임라인 상태도 정지로 업데이트
+        this.timeline.isPlaying = false;
+        this.timeline.currentTime = currentPos;
+
+        // UI 업데이트
+        this.updatePlayPauseButton();
+
+        // 실시간 동기화 중지
+        this.stopRealtimeWaveformSync();
+    }
+
+    // 🔄 처음으로 돌아가기 (0초로 리셋)
+    resetToStart() {
+        console.log('resetToStart 호출됨 - 0초로 이동');
+        const videoPlayer = document.getElementById('video-player');
+        const audioPlayer = document.getElementById('audio-player');
+
+        // 비디오와 오디오를 0초로 이동
         if (videoPlayer) {
             videoPlayer.pause();
             videoPlayer.currentTime = 0;
-            console.log('비디오 정지 및 처음으로 이동');
-        } else {
-            console.log('비디오 플레이어를 찾을 수 없습니다');
-            this.showError('비디오를 먼저 로드해주세요');
+            console.log('비디오를 0초로 리셋');
         }
+
+        if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            console.log('오디오를 0초로 리셋');
+        }
+
+        // 타임라인 상태 리셋
+        this.timeline.isPlaying = false;
+        this.timeline.currentTime = 0;
+
+        // UI 업데이트
+        this.updatePlayPauseButton();
+
+        // 실시간 동기화 중지
+        this.stopRealtimeWaveformSync();
+    }
+
+    // ⏮️ 맨 처음으로 가기 (0초)
+    skipToStart() {
+        console.log('skipToStart 호출됨 - 0초로 이동');
+        const videoPlayer = document.getElementById('video-player');
+        const audioPlayer = document.getElementById('audio-player');
+
+        // 비디오와 오디오를 0초로 이동 (재생 상태 유지)
+        if (videoPlayer) {
+            videoPlayer.currentTime = 0;
+            console.log('비디오를 0초로 이동');
+        }
+
+        if (audioPlayer) {
+            audioPlayer.currentTime = 0;
+            console.log('오디오를 0초로 이동');
+        }
+
+        // 타임라인 시간 업데이트
+        this.timeline.currentTime = 0;
+
+        // UI 업데이트
+        this.updateTimelinePosition();
+    }
+
+    // ⏭️ 맨 끝으로 가기
+    skipToEnd() {
+        console.log('skipToEnd 호출됨 - 끝으로 이동');
+        const videoPlayer = document.getElementById('video-player');
+        const audioPlayer = document.getElementById('audio-player');
+
+        let endTime = 0;
+
+        // 재생 시간의 끝을 찾기
+        if (videoPlayer && videoPlayer.duration) {
+            endTime = videoPlayer.duration;
+        } else if (audioPlayer && audioPlayer.duration) {
+            endTime = audioPlayer.duration;
+        } else if (this.timeline.duration) {
+            endTime = this.timeline.duration;
+        } else {
+            console.log('끝 시간을 찾을 수 없습니다');
+            this.showError('미디어의 끝 시간을 확인할 수 없습니다');
+            return;
+        }
+
+        // 비디오와 오디오를 끝으로 이동
+        if (videoPlayer) {
+            videoPlayer.currentTime = Math.max(0, endTime - 0.1); // 0.1초 전으로 (완전히 끝나지 않도록)
+            console.log(`비디오를 ${endTime}초로 이동`);
+        }
+
+        if (audioPlayer) {
+            audioPlayer.currentTime = Math.max(0, endTime - 0.1);
+            console.log(`오디오를 ${endTime}초로 이동`);
+        }
+
+        // 타임라인 시간 업데이트
+        this.timeline.currentTime = endTime;
+
+        // UI 업데이트
+        this.updateTimelinePosition();
     }
 
     seekTime(seconds) {
@@ -2968,10 +3139,15 @@ class VideoAnalysisApp {
             if (this.trackStates[trackType].visible) {
                 this.renderTrackSubtitles(trackType, classifiedSubtitles[trackType]);
             } else {
-                // 숨겨진 트랙은 비우기
+                // 축소된 트랙은 내용 비우기 (헤더는 유지)
                 this.clearTrackContent(trackType);
             }
         });
+
+        // 오디오 데이터가 있으면 파형 강도 기반 시각화 적용
+        setTimeout(() => {
+            this.updateSubtitleAppearanceByAudio();
+        }, 500);
 
         console.log('✅ 하이브리드 자막 트랙 렌더링 완료');
     }
@@ -2979,6 +3155,9 @@ class VideoAnalysisApp {
     // 특정 트랙의 자막들을 렌더링
     renderTrackSubtitles(trackType, subtitles) {
         console.log(`🎯 ${trackType} 트랙 렌더링: ${subtitles.length}개 자막`);
+
+        // 트랙 헤더에 자막 개수 업데이트
+        this.updateTrackSubtitleCount(trackType, subtitles.length);
 
         const track = document.getElementById(`${trackType}-subtitle-track`);
         if (!track) {
@@ -3085,11 +3264,65 @@ class VideoAnalysisApp {
                 'lineHeight': '1.2'
             });
 
-            // 블록에 번호 추가
-            block.appendChild(numberElement);
+            // 텍스트 표시 요소 생성 (크기별 다르게)
+            const textElement = document.createElement('div');
+            textElement.className = 'subtitle-text-display';
 
-            // 이벤트 리스너 추가 (편집 기능)
+            // 블록 너비에 따른 텍스트 길이 조정
+            const blockWidthPx = (widthPercent / 100) * (trackContent.offsetWidth || 1000);
+            let displayText = subtitle.text;
+            let fontSize = '8px';
+
+            if (blockWidthPx < 40) {
+                // 매우 작은 블록: 텍스트 숨김
+                displayText = '';
+            } else if (blockWidthPx < 80) {
+                // 작은 블록: 매우 짧게
+                displayText = subtitle.text.substring(0, 8) + (subtitle.text.length > 8 ? '…' : '');
+                fontSize = '7px';
+            } else if (blockWidthPx < 120) {
+                // 중간 블록: 적당히
+                displayText = subtitle.text.substring(0, 15) + (subtitle.text.length > 15 ? '…' : '');
+                fontSize = '8px';
+            } else if (blockWidthPx < 200) {
+                // 큰 블록: 대부분
+                displayText = subtitle.text.substring(0, 25) + (subtitle.text.length > 25 ? '…' : '');
+                fontSize = '9px';
+            } else {
+                // 매우 큰 블록: 전체 또는 많이
+                displayText = subtitle.text.substring(0, 40) + (subtitle.text.length > 40 ? '…' : '');
+                fontSize = '10px';
+            }
+
+            textElement.textContent = displayText;
+
+            Object.assign(textElement.style, {
+                'position': 'absolute',
+                'left': '20px',
+                'top': '2px',
+                'right': '2px',
+                'bottom': '2px',
+                'fontSize': fontSize,
+                'color': 'white',
+                'fontWeight': '500',
+                'overflow': 'hidden',
+                'textOverflow': 'ellipsis',
+                'whiteSpace': 'nowrap',
+                'backgroundColor': 'rgba(0, 0, 0, 0.4)',
+                'padding': '1px 3px',
+                'borderRadius': '2px',
+                'zIndex': '24',
+                'display': displayText ? 'flex' : 'none',
+                'alignItems': 'center'
+            });
+
+            // 블록에 번호와 텍스트 추가
+            block.appendChild(numberElement);
+            block.appendChild(textElement);
+
+            // 이벤트 리스너 추가 (편집 기능 + 드래그)
             this.addSubtitleBlockEvents(block, subtitle, subtitle.originalIndex || index);
+            this.addDragFunctionality(block, subtitle, subtitle.originalIndex || index);
 
             // 트랙에 블록 추가
             trackContent.appendChild(block);
@@ -3107,6 +3340,26 @@ class VideoAnalysisApp {
                 trackContent.innerHTML = '';
             }
         }
+
+        // 자막 개수도 0으로 업데이트
+        this.updateTrackSubtitleCount(trackType, 0);
+    }
+
+    // 트랙 헤더에 자막 개수 표시 업데이트
+    updateTrackSubtitleCount(trackType, count) {
+        const track = document.getElementById(`${trackType}-subtitle-track`);
+        if (!track) return;
+
+        const trackTitle = track.querySelector('.track-title');
+        if (!trackTitle) return;
+
+        // 기존 개수 표시 제거
+        trackTitle.textContent = trackTitle.textContent.replace(/\s*\(\d+\)$/, '');
+
+        // 새로운 개수 표시 추가
+        if (count > 0) {
+            trackTitle.textContent += ` (${count})`;
+        }
     }
 
     // 자막 블록에 이벤트 리스너 추가
@@ -3114,8 +3367,22 @@ class VideoAnalysisApp {
         // 클릭 시 재생 위치 이동
         block.addEventListener('click', (e) => {
             e.stopPropagation();
+
+            // 기존 활성화된 자막 블록 비활성화
+            document.querySelectorAll('.hybrid-subtitle.active').forEach(activeBlock => {
+                activeBlock.classList.remove('active');
+            });
+
+            // 현재 블록 활성화
+            block.classList.add('active');
+
             this.seekToTime(subtitle.start_time);
             this.showSubtitleEditInfo(subtitle, index);
+            // 파형과 자막 매칭 하이라이트
+            this.highlightWaveformForSubtitle(subtitle);
+
+            // 오디오 분석 정보 표시
+            this.showAudioAnalysisInfo(subtitle, block);
         });
 
         // 더블클릭 시 편집
@@ -3132,6 +3399,854 @@ class VideoAnalysisApp {
             if (!this.trackStates[block.dataset.trackType]?.locked) {
                 this.showSubtitleContextMenu(e, index);
             }
+        });
+
+        // 마우스 호버 시 파형 연결 표시
+        block.addEventListener('mouseenter', () => {
+            this.showWaveformConnection(subtitle);
+        });
+
+        block.addEventListener('mouseleave', () => {
+            this.hideWaveformConnection();
+        });
+    }
+
+    // 🖱️ 자막 블록 드래그 기능 추가
+    addDragFunctionality(block, subtitle, subtitleIndex) {
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartTime = 0;
+        let originalLeft = 0;
+
+        // 드래그 핸들러 - 번호 부분을 드래그 핸들로 사용
+        const numberElement = block.querySelector('.subtitle-number');
+        if (numberElement) {
+            numberElement.style.cursor = 'grab';
+
+            // 마우스 다운 - 드래그 시작
+            numberElement.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                // 트랙이 잠겨있으면 드래그 불가
+                if (this.trackStates[block.dataset.trackType]?.locked) {
+                    return;
+                }
+
+                isDragging = true;
+                dragStartX = e.clientX;
+                dragStartTime = subtitle.start_time;
+                originalLeft = parseFloat(block.style.left);
+
+                numberElement.style.cursor = 'grabbing';
+                block.classList.add('dragging');
+
+                // 드래그 시작 시각적 피드백
+                this.showDragFeedback(block, true);
+
+                console.log(`🖱️ 자막 #${subtitleIndex + 1} 드래그 시작`);
+            });
+        }
+
+        // 전역 마우스 이벤트 - 드래그 중
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+
+            e.preventDefault();
+
+            const deltaX = e.clientX - dragStartX;
+            const trackContent = block.parentElement;
+            const trackWidth = trackContent.offsetWidth;
+            const totalDuration = Math.max(this.timeline.duration, 60);
+
+            // 픽셀 이동을 시간으로 변환
+            const timePerPixel = totalDuration / trackWidth;
+            const deltaTime = deltaX * timePerPixel;
+            let newStartTime = Math.max(0, dragStartTime + deltaTime);
+
+            // 스냅핑 기능: 다른 자막과 자동 정렬
+            newStartTime = this.snapToNearbySubtitles(newStartTime, subtitleIndex);
+
+            // 새로운 위치 계산
+            const newLeft = (newStartTime / totalDuration) * 100;
+
+            // 블록 위치 업데이트
+            block.style.left = newLeft + '%';
+
+            // 실시간 시간 표시 업데이트
+            this.updateDragTimeDisplay(block, newStartTime);
+
+            // 드래그 가이드라인 표시
+            this.showDragGuidelines(newStartTime);
+
+            // 충돌 감지 및 경고
+            this.checkCollisionWarning(newStartTime, subtitleIndex, block);
+        });
+
+        // 전역 마우스 업 - 드래그 종료
+        document.addEventListener('mouseup', (e) => {
+            if (!isDragging) return;
+
+            isDragging = false;
+
+            if (numberElement) {
+                numberElement.style.cursor = 'grab';
+            }
+
+            block.classList.remove('dragging');
+
+            // 드래그 피드백 제거
+            this.showDragFeedback(block, false);
+            this.hideDragGuidelines();
+
+            // 최종 위치에서 시간 계산 및 업데이트
+            const finalTime = this.calculateTimeFromPosition(block);
+            this.updateSubtitleTime(subtitleIndex, finalTime);
+
+            console.log(`🖱️ 자막 #${subtitleIndex + 1} 드래그 완료: ${this.formatSubtitleTime(finalTime)}`);
+        });
+    }
+
+    // 드래그 시각적 피드백
+    showDragFeedback(block, show) {
+        if (show) {
+            block.style.boxShadow = '0 4px 20px rgba(255, 215, 0, 0.8)';
+            block.style.transform = 'scale(1.05) translateY(-3px)';
+            block.style.zIndex = '50';
+            block.style.border = '2px solid rgba(255, 215, 0, 1)';
+        } else {
+            block.style.boxShadow = '';
+            block.style.transform = '';
+            block.style.zIndex = '';
+            block.style.border = '';
+        }
+    }
+
+    // 드래그 중 시간 표시 업데이트
+    updateDragTimeDisplay(block, newStartTime) {
+        let timeDisplay = block.querySelector('.drag-time-display');
+        if (!timeDisplay) {
+            timeDisplay = document.createElement('div');
+            timeDisplay.className = 'drag-time-display';
+            timeDisplay.style.cssText = `
+                position: absolute;
+                top: -25px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(255, 215, 0, 0.95);
+                color: black;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-size: 10px;
+                font-weight: bold;
+                z-index: 60;
+                white-space: nowrap;
+                pointer-events: none;
+            `;
+            block.appendChild(timeDisplay);
+        }
+
+        timeDisplay.textContent = `${this.formatSubtitleTime(newStartTime)}`;
+    }
+
+    // 드래그 가이드라인 표시
+    showDragGuidelines(currentTime) {
+        // 기존 가이드라인 제거
+        this.hideDragGuidelines();
+
+        const audioTrack = document.getElementById('audio-track');
+        if (!audioTrack) return;
+
+        const totalDuration = Math.max(this.timeline.duration, 60);
+        const currentPercent = (currentTime / totalDuration) * 100;
+
+        // 현재 위치 가이드라인
+        const guideline = document.createElement('div');
+        guideline.className = 'drag-guideline';
+        guideline.style.cssText = `
+            position: absolute;
+            left: ${currentPercent}%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: rgba(255, 215, 0, 0.8);
+            z-index: 30;
+            pointer-events: none;
+            box-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+        `;
+
+        // 시간 라벨
+        const timeLabel = document.createElement('div');
+        timeLabel.className = 'drag-time-label';
+        timeLabel.textContent = this.formatSubtitleTime(currentTime);
+        timeLabel.style.cssText = `
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 215, 0, 0.9);
+            color: black;
+            padding: 1px 4px;
+            border-radius: 2px;
+            font-size: 9px;
+            font-weight: bold;
+            white-space: nowrap;
+        `;
+
+        guideline.appendChild(timeLabel);
+        audioTrack.appendChild(guideline);
+    }
+
+    hideDragGuidelines() {
+        document.querySelectorAll('.drag-guideline').forEach(el => el.remove());
+        document.querySelectorAll('.drag-time-display').forEach(el => el.remove());
+    }
+
+    // 위치에서 시간 계산
+    calculateTimeFromPosition(block) {
+        const leftPercent = parseFloat(block.style.left);
+        const totalDuration = Math.max(this.timeline.duration, 60);
+        return (leftPercent / 100) * totalDuration;
+    }
+
+    // 자막 시간 업데이트
+    updateSubtitleTime(subtitleIndex, newStartTime) {
+        if (!this.timeline.subtitleData || !this.timeline.subtitleData.subtitles[subtitleIndex]) {
+            return;
+        }
+
+        const subtitle = this.timeline.subtitleData.subtitles[subtitleIndex];
+        const duration = subtitle.end_time - subtitle.start_time;
+
+        // 시작 시간과 종료 시간 업데이트
+        subtitle.start_time = newStartTime;
+        subtitle.end_time = newStartTime + duration;
+
+        console.log(`⏰ 자막 #${subtitleIndex + 1} 시간 업데이트: ${this.formatSubtitleTime(newStartTime)} - ${this.formatSubtitleTime(subtitle.end_time)}`);
+
+        // 블록 툴팁 업데이트
+        const blocks = document.querySelectorAll(`[data-index="${subtitleIndex}"]`);
+        blocks.forEach(block => {
+            block.title = `#${subtitleIndex + 1}: ${this.formatSubtitleTime(newStartTime)} - ${this.formatSubtitleTime(subtitle.end_time)}\n${subtitle.text}`;
+        });
+
+        // 파형 매칭도 업데이트
+        setTimeout(() => {
+            this.updateSubtitleAppearanceByAudio();
+        }, 100);
+    }
+
+    // 🧲 스냅핑 기능: 다른 자막과 자동 정렬
+    snapToNearbySubtitles(targetTime, currentIndex) {
+        if (!this.timeline.subtitleData) return targetTime;
+
+        const subtitles = this.timeline.subtitleData.subtitles;
+        const snapThreshold = 0.5; // 0.5초 이내면 스냅
+
+        let bestSnapTime = targetTime;
+        let minDistance = snapThreshold;
+
+        // 다른 자막들과 비교
+        subtitles.forEach((subtitle, index) => {
+            if (index === currentIndex) return;
+
+            // 시작 시간과의 거리
+            const startDistance = Math.abs(targetTime - subtitle.start_time);
+            if (startDistance < minDistance) {
+                minDistance = startDistance;
+                bestSnapTime = subtitle.start_time;
+            }
+
+            // 종료 시간과의 거리
+            const endDistance = Math.abs(targetTime - subtitle.end_time);
+            if (endDistance < minDistance) {
+                minDistance = endDistance;
+                bestSnapTime = subtitle.end_time;
+            }
+        });
+
+        // 정수 초와의 스냅핑 (1초, 2초, 3초 등)
+        const roundedTime = Math.round(targetTime);
+        const roundDistance = Math.abs(targetTime - roundedTime);
+        if (roundDistance < 0.3 && roundDistance < minDistance) {
+            bestSnapTime = roundedTime;
+        }
+
+        return bestSnapTime;
+    }
+
+    // ⚠️ 충돌 감지 및 경고
+    checkCollisionWarning(newStartTime, currentIndex, dragBlock) {
+        if (!this.timeline.subtitleData) return;
+
+        const currentSubtitle = this.timeline.subtitleData.subtitles[currentIndex];
+        if (!currentSubtitle) return;
+
+        const newEndTime = newStartTime + (currentSubtitle.end_time - currentSubtitle.start_time);
+        let hasCollision = false;
+
+        // 다른 자막과 겹침 확인
+        this.timeline.subtitleData.subtitles.forEach((subtitle, index) => {
+            if (index === currentIndex) return;
+
+            const overlap = !(newEndTime <= subtitle.start_time || newStartTime >= subtitle.end_time);
+            if (overlap) {
+                hasCollision = true;
+            }
+        });
+
+        // 충돌 시각적 표시
+        if (hasCollision) {
+            dragBlock.style.borderColor = 'rgba(255, 0, 0, 1)';
+            dragBlock.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+        } else {
+            dragBlock.style.borderColor = 'rgba(255, 215, 0, 1)';
+            dragBlock.style.backgroundColor = '';
+        }
+    }
+
+    // 🎵 자막과 파형 매칭 시스템
+    highlightWaveformForSubtitle(subtitle) {
+        console.log('🎵 자막-파형 매칭 하이라이트:', subtitle.text);
+
+        const audioTrack = document.getElementById('audio-track');
+        if (!audioTrack) {
+            console.log('❌ 오디오 트랙을 찾을 수 없습니다');
+            return;
+        }
+
+        // 기존 하이라이트 제거
+        this.clearWaveformHighlight();
+
+        // 자막 시간 범위 계산
+        const startTime = Math.max(0, subtitle.start_time);
+        const endTime = Math.max(0, subtitle.end_time);
+        const totalDuration = Math.max(this.timeline.duration, 60);
+
+        // 파형에서 해당 구간 하이라이트
+        const startPercent = (startTime / totalDuration) * 100;
+        const widthPercent = ((endTime - startTime) / totalDuration) * 100;
+
+        // 하이라이트 오버레이 생성
+        const highlight = document.createElement('div');
+        highlight.className = 'waveform-subtitle-highlight';
+        highlight.style.cssText = `
+            position: absolute;
+            left: ${startPercent}%;
+            width: ${Math.max(widthPercent, 1)}%;
+            top: 0;
+            bottom: 0;
+            background: rgba(255, 215, 0, 0.4);
+            border: 2px solid rgba(255, 215, 0, 0.8);
+            border-radius: 3px;
+            z-index: 15;
+            pointer-events: none;
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.6);
+            animation: pulseHighlight 1.5s ease-in-out infinite;
+        `;
+
+        // 시간 정보 표시
+        const timeLabel = document.createElement('div');
+        timeLabel.className = 'waveform-time-label';
+        timeLabel.textContent = `${this.formatSubtitleTime(startTime)} - ${this.formatSubtitleTime(endTime)}`;
+        timeLabel.style.cssText = `
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 215, 0, 0.9);
+            color: black;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+            z-index: 20;
+        `;
+
+        highlight.appendChild(timeLabel);
+        audioTrack.appendChild(highlight);
+
+        // 자막 텍스트도 하이라이트
+        this.highlightSubtitleText(subtitle.text);
+
+        // 3초 후 자동 제거
+        setTimeout(() => {
+            this.clearWaveformHighlight();
+        }, 3000);
+    }
+
+    showWaveformConnection(subtitle) {
+        console.log('🔗 파형 연결선 표시:', subtitle.text);
+
+        const audioTrack = document.getElementById('audio-track');
+        if (!audioTrack) return;
+
+        // 기존 연결선 제거
+        this.hideWaveformConnection();
+
+        const startTime = Math.max(0, subtitle.start_time);
+        const endTime = Math.max(0, subtitle.end_time);
+        const totalDuration = Math.max(this.timeline.duration, 60);
+
+        const startPercent = (startTime / totalDuration) * 100;
+        const widthPercent = ((endTime - startTime) / totalDuration) * 100;
+
+        // 부드러운 연결선 오버레이
+        const connection = document.createElement('div');
+        connection.className = 'waveform-connection';
+        connection.style.cssText = `
+            position: absolute;
+            left: ${startPercent}%;
+            width: ${Math.max(widthPercent, 0.5)}%;
+            top: 0;
+            bottom: 0;
+            background: linear-gradient(45deg,
+                rgba(74, 158, 255, 0.3) 0%,
+                rgba(74, 158, 255, 0.6) 50%,
+                rgba(74, 158, 255, 0.3) 100%);
+            border-left: 2px solid rgba(74, 158, 255, 0.8);
+            border-right: 2px solid rgba(74, 158, 255, 0.8);
+            z-index: 12;
+            pointer-events: none;
+            transition: all 0.3s ease;
+        `;
+
+        audioTrack.appendChild(connection);
+    }
+
+    hideWaveformConnection() {
+        const connections = document.querySelectorAll('.waveform-connection');
+        connections.forEach(conn => conn.remove());
+    }
+
+    clearWaveformHighlight() {
+        const highlights = document.querySelectorAll('.waveform-subtitle-highlight');
+        highlights.forEach(highlight => highlight.remove());
+
+        // 자막 텍스트 하이라이트도 제거
+        this.clearSubtitleTextHighlight();
+    }
+
+    highlightSubtitleText(text) {
+        // 화면 상단에 현재 자막 텍스트 표시
+        let textDisplay = document.getElementById('current-subtitle-display');
+        if (!textDisplay) {
+            textDisplay = document.createElement('div');
+            textDisplay.id = 'current-subtitle-display';
+            textDisplay.style.cssText = `
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: bold;
+                z-index: 1000;
+                max-width: 80%;
+                text-align: center;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+                animation: fadeInScale 0.3s ease-out;
+            `;
+            document.body.appendChild(textDisplay);
+        }
+
+        textDisplay.textContent = text;
+        textDisplay.style.display = 'block';
+    }
+
+    clearSubtitleTextHighlight() {
+        const textDisplay = document.getElementById('current-subtitle-display');
+        if (textDisplay) {
+            textDisplay.style.display = 'none';
+        }
+    }
+
+    // 📊 자막 구간별 오디오 분석
+    analyzeAudioForSubtitle(subtitle) {
+        console.log('📊 자막 구간 오디오 분석:', subtitle.text);
+
+        if (!this.timeline.audioData) {
+            console.log('❌ 오디오 데이터가 없습니다');
+            return null;
+        }
+
+        const startTime = Math.max(0, subtitle.start_time);
+        const endTime = Math.max(0, subtitle.end_time);
+        const duration = endTime - startTime;
+
+        // 해당 구간의 오디오 데이터 추출
+        const sampleRate = this.timeline.audioData.sampleRate || 44100;
+        const startSample = Math.floor(startTime * sampleRate);
+        const endSample = Math.floor(endTime * sampleRate);
+
+        if (this.timeline.audioData.channelData) {
+            const segmentData = this.timeline.audioData.channelData.slice(startSample, endSample);
+
+            // 오디오 특성 분석
+            const analysis = this.computeAudioFeatures(segmentData, sampleRate);
+
+            return {
+                duration: duration,
+                averageAmplitude: analysis.avgAmplitude,
+                peakAmplitude: analysis.peakAmplitude,
+                zeroCrossings: analysis.zeroCrossings,
+                spectralCentroid: analysis.spectralCentroid,
+                energy: analysis.energy,
+                silenceRatio: analysis.silenceRatio
+            };
+        }
+
+        return null;
+    }
+
+    computeAudioFeatures(audioData, sampleRate) {
+        if (!audioData || audioData.length === 0) {
+            return {
+                avgAmplitude: 0,
+                peakAmplitude: 0,
+                zeroCrossings: 0,
+                spectralCentroid: 0,
+                energy: 0,
+                silenceRatio: 1
+            };
+        }
+
+        // 평균 진폭
+        const avgAmplitude = audioData.reduce((sum, val) => sum + Math.abs(val), 0) / audioData.length;
+
+        // 최대 진폭
+        const peakAmplitude = Math.max(...audioData.map(Math.abs));
+
+        // 제로 크로싱 (음성 특성 분석)
+        let zeroCrossings = 0;
+        for (let i = 1; i < audioData.length; i++) {
+            if ((audioData[i] >= 0) !== (audioData[i-1] >= 0)) {
+                zeroCrossings++;
+            }
+        }
+
+        // 에너지
+        const energy = audioData.reduce((sum, val) => sum + val * val, 0) / audioData.length;
+
+        // 무음 비율 (임계값 이하)
+        const silenceThreshold = peakAmplitude * 0.1;
+        const silentSamples = audioData.filter(val => Math.abs(val) < silenceThreshold).length;
+        const silenceRatio = silentSamples / audioData.length;
+
+        return {
+            avgAmplitude,
+            peakAmplitude,
+            zeroCrossings: zeroCrossings / audioData.length * sampleRate, // Hz 단위
+            spectralCentroid: 0, // 추후 FFT 구현 시 추가
+            energy,
+            silenceRatio
+        };
+    }
+
+    // 📊 오디오 분석 정보 표시
+    showAudioAnalysisInfo(subtitle, blockElement) {
+        // 기존 분석 정보 제거
+        document.querySelectorAll('.audio-analysis-info').forEach(info => info.remove());
+
+        const audioAnalysis = this.analyzeAudioForSubtitle(subtitle);
+        if (!audioAnalysis) {
+            console.log('📊 오디오 분석 데이터 없음');
+            return;
+        }
+
+        const infoPanel = document.createElement('div');
+        infoPanel.className = 'audio-analysis-info';
+
+        // 분석 결과를 사용자 친화적으로 표시
+        const volumeLevel = this.getVolumeLevel(audioAnalysis.averageAmplitude);
+        const speechQuality = this.getSpeechQuality(audioAnalysis);
+
+        infoPanel.innerHTML = `
+            <div style="font-weight: bold; margin-bottom: 4px;">🎵 오디오 분석</div>
+            <div>📢 음량: ${volumeLevel}</div>
+            <div>🎤 음성 품질: ${speechQuality}</div>
+            <div>⏱️ 구간: ${audioAnalysis.duration.toFixed(1)}초</div>
+            <div>🔇 무음 비율: ${(audioAnalysis.silenceRatio * 100).toFixed(0)}%</div>
+            <div>⚡ 에너지: ${(audioAnalysis.energy * 1000).toFixed(1)}</div>
+        `;
+
+        // 위치 계산 (자막 블록 위에 표시)
+        const blockRect = blockElement.getBoundingClientRect();
+        const timelineContainer = document.querySelector('.timeline-container');
+        const containerRect = timelineContainer.getBoundingClientRect();
+
+        infoPanel.style.top = (blockRect.top - containerRect.top - 80) + 'px';
+        infoPanel.style.left = (blockRect.left - containerRect.left) + 'px';
+
+        timelineContainer.appendChild(infoPanel);
+
+        // 5초 후 자동 제거
+        setTimeout(() => {
+            infoPanel.remove();
+        }, 5000);
+    }
+
+    getVolumeLevel(amplitude) {
+        if (amplitude < 0.1) return '🔇 매우 낮음';
+        if (amplitude < 0.3) return '🔉 낮음';
+        if (amplitude < 0.6) return '🔊 보통';
+        if (amplitude < 0.8) return '📢 높음';
+        return '📯 매우 높음';
+    }
+
+    getSpeechQuality(analysis) {
+        const { zeroCrossings, silenceRatio, energy } = analysis;
+
+        // 음성 특성 분석
+        if (silenceRatio > 0.7) return '🤐 거의 무음';
+        if (zeroCrossings > 3000) return '📢 선명한 음성';
+        if (zeroCrossings > 1500) return '🎤 일반 음성';
+        if (zeroCrossings > 500) return '🔈 저음질';
+        return '📻 배경음/음악';
+    }
+
+    // 🎨 파형 강도 기반 자막 시각화
+    updateSubtitleAppearanceByAudio() {
+        console.log('🎨 파형 강도 기반 자막 시각화 업데이트');
+
+        if (!this.timeline.subtitleData) return;
+
+        const subtitles = this.timeline.subtitleData.subtitles || [];
+
+        subtitles.forEach((subtitle, index) => {
+            const audioAnalysis = this.analyzeAudioForSubtitle(subtitle);
+            if (!audioAnalysis) return;
+
+            // 모든 트랙에서 해당 자막 블록 찾기
+            const subtitleBlocks = document.querySelectorAll(`[data-index="${index}"]`);
+
+            subtitleBlocks.forEach(block => {
+                if (block.classList.contains('hybrid-subtitle')) {
+                    this.applyAudioBasedStyling(block, audioAnalysis);
+                }
+            });
+        });
+    }
+
+    applyAudioBasedStyling(block, analysis) {
+        const { averageAmplitude, energy, silenceRatio } = analysis;
+
+        // 음량에 따른 투명도 조정
+        const opacity = Math.max(0.4, Math.min(1, averageAmplitude * 2));
+
+        // 에너지에 따른 테두리 두께
+        const borderWidth = Math.max(1, Math.min(4, energy * 10)) + 'px';
+
+        // 무음 비율에 따른 시각적 처리
+        if (silenceRatio > 0.8) {
+            // 거의 무음인 경우 점선 테두리
+            block.style.borderStyle = 'dashed';
+            block.style.opacity = '0.6';
+        } else {
+            block.style.borderStyle = 'solid';
+            block.style.opacity = opacity;
+        }
+
+        block.style.borderWidth = borderWidth;
+
+        // 음량에 따른 그림자 효과
+        const shadowIntensity = averageAmplitude * 10;
+        block.style.boxShadow = `0 2px ${shadowIntensity}px rgba(0, 0, 0, 0.4)`;
+    }
+
+    // 🔄 실시간 파형-자막 동기화 시스템
+    startRealtimeWaveformSync() {
+        console.log('🔄 실시간 파형-자막 동기화 시작');
+
+        // 기존 동기화 중지
+        this.stopRealtimeWaveformSync();
+
+        this.realtimeSyncInterval = setInterval(() => {
+            this.updateCurrentSubtitleHighlight();
+        }, 100); // 100ms마다 업데이트
+
+        console.log('✅ 실시간 동기화 활성화');
+    }
+
+    stopRealtimeWaveformSync() {
+        if (this.realtimeSyncInterval) {
+            clearInterval(this.realtimeSyncInterval);
+            this.realtimeSyncInterval = null;
+        }
+
+        // 현재 하이라이트 제거
+        this.clearCurrentPlaybackHighlight();
+        console.log('⏹️ 실시간 동기화 중지');
+    }
+
+    updateCurrentSubtitleHighlight() {
+        if (!this.timeline.subtitleData) return;
+
+        const currentTime = this.getCurrentPlaybackTime();
+        if (currentTime === null) return;
+
+        const subtitles = this.timeline.subtitleData.subtitles || [];
+
+        // 현재 시간에 해당하는 자막 찾기
+        const currentSubtitles = subtitles.filter(subtitle => {
+            const startTime = Math.max(0, subtitle.start_time);
+            const endTime = Math.max(0, subtitle.end_time);
+            return currentTime >= startTime && currentTime <= endTime;
+        });
+
+        // 기존 실시간 하이라이트 제거
+        this.clearCurrentPlaybackHighlight();
+
+        currentSubtitles.forEach((subtitle, index) => {
+            // 파형에서 현재 구간 하이라이트
+            this.highlightCurrentWaveformSection(subtitle, currentTime);
+
+            // 자막 블록에서 현재 자막 하이라이트
+            this.highlightCurrentSubtitleBlock(subtitle);
+        });
+
+        // 현재 자막 텍스트 실시간 표시
+        if (currentSubtitles.length > 0) {
+            const mainSubtitle = currentSubtitles.find(s => !s.text.includes('[')) || currentSubtitles[0];
+            this.showCurrentSubtitleText(mainSubtitle.text);
+        } else {
+            this.hideCurrentSubtitleText();
+        }
+    }
+
+    getCurrentPlaybackTime() {
+        // 비디오 플레이어에서 현재 시간 가져오기
+        const videoPlayer = document.getElementById('video-player');
+        if (videoPlayer && !videoPlayer.paused) {
+            return videoPlayer.currentTime;
+        }
+
+        // 오디오 플레이어에서 현재 시간 가져오기
+        const audioPlayer = document.getElementById('audio-player');
+        if (audioPlayer && !audioPlayer.paused) {
+            return audioPlayer.currentTime;
+        }
+
+        return null;
+    }
+
+    highlightCurrentWaveformSection(subtitle, currentTime) {
+        const audioTrack = document.getElementById('audio-track');
+        if (!audioTrack) return;
+
+        const startTime = Math.max(0, subtitle.start_time);
+        const endTime = Math.max(0, subtitle.end_time);
+        const totalDuration = Math.max(this.timeline.duration, 60);
+
+        // 현재 재생 위치 표시
+        const currentPercent = (currentTime / totalDuration) * 100;
+        const startPercent = (startTime / totalDuration) * 100;
+        const endPercent = (endTime / totalDuration) * 100;
+
+        // 현재 재생 구간 하이라이트
+        const playbackHighlight = document.createElement('div');
+        playbackHighlight.className = 'realtime-waveform-highlight';
+        playbackHighlight.style.cssText = `
+            position: absolute;
+            left: ${startPercent}%;
+            width: ${endPercent - startPercent}%;
+            top: 0;
+            bottom: 0;
+            background: linear-gradient(90deg,
+                rgba(255, 100, 100, 0.4) 0%,
+                rgba(255, 150, 150, 0.6) 50%,
+                rgba(255, 100, 100, 0.4) 100%);
+            border: 2px solid rgba(255, 100, 100, 0.8);
+            z-index: 18;
+            pointer-events: none;
+            animation: realtimePulse 1s ease-in-out infinite;
+        `;
+
+        // 현재 재생 위치 마커
+        const playheadMarker = document.createElement('div');
+        playheadMarker.className = 'realtime-playhead-marker';
+        playheadMarker.style.cssText = `
+            position: absolute;
+            left: ${currentPercent}%;
+            top: -5px;
+            bottom: -5px;
+            width: 3px;
+            background: #ff3333;
+            z-index: 20;
+            pointer-events: none;
+            box-shadow: 0 0 10px rgba(255, 51, 51, 0.8);
+        `;
+
+        audioTrack.appendChild(playbackHighlight);
+        audioTrack.appendChild(playheadMarker);
+    }
+
+    highlightCurrentSubtitleBlock(subtitle) {
+        const subtitleBlocks = document.querySelectorAll('.hybrid-subtitle');
+
+        subtitleBlocks.forEach(block => {
+            const blockIndex = parseInt(block.dataset.index);
+            const blockSubtitle = this.timeline.subtitleData.subtitles[blockIndex];
+
+            if (blockSubtitle &&
+                blockSubtitle.start_time === subtitle.start_time &&
+                blockSubtitle.end_time === subtitle.end_time &&
+                blockSubtitle.text === subtitle.text) {
+
+                block.classList.add('realtime-active');
+            }
+        });
+    }
+
+    showCurrentSubtitleText(text) {
+        let realtimeDisplay = document.getElementById('realtime-subtitle-display');
+        if (!realtimeDisplay) {
+            realtimeDisplay = document.createElement('div');
+            realtimeDisplay.id = 'realtime-subtitle-display';
+            realtimeDisplay.style.cssText = `
+                position: fixed;
+                bottom: 80px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(0, 0, 0, 0.9);
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                font-size: 18px;
+                font-weight: bold;
+                z-index: 1001;
+                max-width: 90%;
+                text-align: center;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+                border: 2px solid rgba(255, 100, 100, 0.8);
+                backdrop-filter: blur(10px);
+            `;
+            document.body.appendChild(realtimeDisplay);
+        }
+
+        realtimeDisplay.textContent = text;
+        realtimeDisplay.style.display = 'block';
+    }
+
+    hideCurrentSubtitleText() {
+        const realtimeDisplay = document.getElementById('realtime-subtitle-display');
+        if (realtimeDisplay) {
+            realtimeDisplay.style.display = 'none';
+        }
+    }
+
+    clearCurrentPlaybackHighlight() {
+        // 실시간 하이라이트 제거
+        document.querySelectorAll('.realtime-waveform-highlight').forEach(el => el.remove());
+        document.querySelectorAll('.realtime-playhead-marker').forEach(el => el.remove());
+
+        // 자막 블록 실시간 하이라이트 제거
+        document.querySelectorAll('.hybrid-subtitle.realtime-active').forEach(block => {
+            block.classList.remove('realtime-active');
         });
     }
 
