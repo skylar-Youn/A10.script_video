@@ -700,8 +700,10 @@ def audio_to_srt(audio_path: str, language: str = "ko-KR", segment_duration: int
                 successful_segments += 1
 
         except sr.UnknownValueError:
-            # 인식 실패한 구간은 건너뛰기
+            logger.warning(f"Google Speech Recognition could not understand audio for segment {start}-{end}")
             pass
+        except sr.RequestError as e:
+            logger.error(f"Could not request results from Google Speech Recognition service for segment {start}-{end}: {e}")
         except Exception as e:
             logger.warning(f"STT 구간 처리 에러 ({start}-{end}초): {e}")
         finally:
@@ -709,6 +711,9 @@ def audio_to_srt(audio_path: str, language: str = "ko-KR", segment_duration: int
                 os.remove(temp_wav)
 
     # SRT 형식으로 변환
+    if not segments:
+        raise Exception("음성 인식이 가능한 구간을 찾을 수 없습니다. 오디오 품질을 확인해주세요.")
+
     srt_content = ""
     for i, segment in enumerate(segments, 1):
         start_time = seconds_to_srt_time(segment["start"])

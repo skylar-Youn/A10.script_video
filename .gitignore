@@ -31,3 +31,4 @@ __pycache__/*
 
 *.md 
 *.xlsx
+archive/*

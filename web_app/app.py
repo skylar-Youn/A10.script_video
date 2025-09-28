@@ -78,7 +78,6 @@ from ai_shorts_maker.translator import (
     UPLOADS_DIR,
 )
 from youtube.ytdl import download_with_options, parse_sub_langs
-from .routers import analysis
 
 
 class RenderRequest(BaseModel):
@@ -629,7 +628,6 @@ async def api_clone_translator_project(project_id: str):
 
 
 app.include_router(translator_router)
-app.include_router(analysis.router)
 
 
 # Video Editor Router
