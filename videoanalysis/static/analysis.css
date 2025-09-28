@@ -1855,9 +1855,33 @@ textarea:focus {
 
 /* 하이브리드 자막 트랙 시스템 */
 .subtitle-track {
-    height: 80px !important;
+    height: 140px !important;
     border-bottom: 2px solid var(--border-color);
     margin-bottom: 2px;
+    position: relative;
+}
+
+/* 3줄 레이어 가이드라인 표시 */
+.subtitle-track::before {
+    content: '';
+    position: absolute;
+    top: 37px; /* 첫 번째 레이어와 두 번째 레이어 경계 */
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    z-index: 1;
+}
+
+.subtitle-track::after {
+    content: '';
+    position: absolute;
+    top: 69px; /* 두 번째 레이어와 세 번째 레이어 경계 */
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    z-index: 1;
 }
 
 /* 각 트랙별 테마 색상 */

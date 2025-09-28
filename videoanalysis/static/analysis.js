@@ -2902,15 +2902,15 @@ class VideoAnalysisApp {
             const startPercent = (adjustedStartTime / totalDuration) * 100;
             const widthPercent = (duration / totalDuration) * 100;
 
-            // 레이어에 따른 위치 조정
-            const layer = layers[index] || 0;
-            const layerHeight = 30; // 각 레이어의 높이를 더 크게
+            // 레이어에 따른 위치 조정 (3줄까지 허용)
+            const layer = Math.min(layers[index] || 0, 2); // 최대 3줄 (0, 1, 2)
+            const layerHeight = 32; // 각 레이어의 높이를 3줄에 맞게 조정
             const topPosition = 5 + (layer * layerHeight);
 
             block.style.left = startPercent + '%';
             block.style.width = Math.max(widthPercent, 4) + '%'; // 최소 너비 보장
             block.style.top = topPosition + 'px';
-            block.style.height = '28px'; // 레이어 높이에 맞게 더 크게 조정
+            block.style.height = '30px'; // 3줄 레이어에 맞게 조정
 
             // 레이어별 색상 및 스타일 적용
             const layerColors = [
@@ -3221,15 +3221,15 @@ class VideoAnalysisApp {
             const startPercent = (startTime / totalDuration) * 100;
             const widthPercent = (duration / totalDuration) * 100;
 
-            // 레이어에 따른 위치 조정
-            const layer = layers[index] || 0;
-            const layerHeight = 25; // 트랙별로 높이 조정
-            const topPosition = 2 + (layer * layerHeight);
+            // 레이어에 따른 위치 조정 (3줄까지 허용)
+            const layer = Math.min(layers[index] || 0, 2); // 최대 3줄 (0, 1, 2)
+            const layerHeight = 32; // 3줄에 맞게 높이 조정
+            const topPosition = 5 + (layer * layerHeight);
 
             block.style.left = startPercent + '%';
             block.style.width = Math.max(widthPercent, 3) + '%';
             block.style.top = topPosition + 'px';
-            block.style.height = '22px';
+            block.style.height = '30px';
 
             // 트랙별 색상 적용
             block.style.background = `linear-gradient(135deg, ${theme.bgColor}, ${theme.bgColor.replace('0.9', '0.7')})`;
@@ -3415,8 +3415,10 @@ class VideoAnalysisApp {
     addDragFunctionality(block, subtitle, subtitleIndex) {
         let isDragging = false;
         let dragStartX = 0;
+        let dragStartY = 0; // 세로 드래그를 위한 Y 좌표
         let dragStartTime = 0;
         let originalLeft = 0;
+        let originalTop = 0; // 원래 레이어 위치
 
         // 드래그 핸들러 - 번호 부분을 드래그 핸들로 사용
         const numberElement = block.querySelector('.subtitle-number');
@@ -3435,8 +3437,10 @@ class VideoAnalysisApp {
 
                 isDragging = true;
                 dragStartX = e.clientX;
+                dragStartY = e.clientY; // 세로 드래그를 위한 Y 좌표 추가
                 dragStartTime = subtitle.start_time;
                 originalLeft = parseFloat(block.style.left);
+                originalTop = parseFloat(block.style.top); // 원래 레이어 위치 저장
 
                 numberElement.style.cursor = 'grabbing';
                 block.classList.add('dragging');
@@ -3455,11 +3459,12 @@ class VideoAnalysisApp {
             e.preventDefault();
 
             const deltaX = e.clientX - dragStartX;
+            const deltaY = e.clientY - dragStartY; // 세로 이동량
             const trackContent = block.parentElement;
             const trackWidth = trackContent.offsetWidth;
             const totalDuration = Math.max(this.timeline.duration, 60);
 
-            // 픽셀 이동을 시간으로 변환
+            // 픽셀 이동을 시간으로 변환 (가로 방향)
             const timePerPixel = totalDuration / trackWidth;
             const deltaTime = deltaX * timePerPixel;
             let newStartTime = Math.max(0, dragStartTime + deltaTime);
@@ -3467,14 +3472,23 @@ class VideoAnalysisApp {
             // 스냅핑 기능: 다른 자막과 자동 정렬
             newStartTime = this.snapToNearbySubtitles(newStartTime, subtitleIndex);
 
-            // 새로운 위치 계산
+            // 새로운 위치 계산 (가로)
             const newLeft = (newStartTime / totalDuration) * 100;
 
-            // 블록 위치 업데이트
-            block.style.left = newLeft + '%';
+            // 레이어 계산 (세로 방향)
+            const layerHeight = 32; // 레이어당 높이
+            const newLayer = Math.max(0, Math.min(2, Math.round((originalTop + deltaY - 5) / layerHeight))); // 0-2 레이어
+            const newTop = 5 + (newLayer * layerHeight);
 
-            // 실시간 시간 표시 업데이트
-            this.updateDragTimeDisplay(block, newStartTime);
+            // 블록 위치 업데이트 (가로 + 세로)
+            block.style.left = newLeft + '%';
+            block.style.top = newTop + 'px';
+
+            // 레이어 변경 시 색상도 업데이트
+            this.updateBlockLayerColor(block, newLayer);
+
+            // 실시간 시간 표시 업데이트 (레이어 정보 포함)
+            this.updateDragTimeDisplay(block, newStartTime, newLayer);
 
             // 드래그 가이드라인 표시
             this.showDragGuidelines(newStartTime);
@@ -3522,8 +3536,8 @@ class VideoAnalysisApp {
         }
     }
 
-    // 드래그 중 시간 표시 업데이트
-    updateDragTimeDisplay(block, newStartTime) {
+    // 드래그 중 시간 표시 업데이트 (레이어 정보 포함)
+    updateDragTimeDisplay(block, newStartTime, newLayer = null) {
         let timeDisplay = block.querySelector('.drag-time-display');
         if (!timeDisplay) {
             timeDisplay = document.createElement('div');
@@ -3546,7 +3560,34 @@ class VideoAnalysisApp {
             block.appendChild(timeDisplay);
         }
 
-        timeDisplay.textContent = `${this.formatSubtitleTime(newStartTime)}`;
+        const timeText = this.formatSubtitleTime(newStartTime);
+        const layerText = newLayer !== null ? ` [레이어 ${newLayer}]` : '';
+        timeDisplay.textContent = `${timeText}${layerText}`;
+    }
+
+    // 블록의 레이어 색상 업데이트
+    updateBlockLayerColor(block, newLayer) {
+        const layerColors = [
+            'rgba(0, 123, 255, 0.9)', // 레이어 0: 파란색
+            'rgba(40, 167, 69, 0.9)', // 레이어 1: 초록색
+            'rgba(255, 193, 7, 0.9)', // 레이어 2: 노란색
+        ];
+
+        const layerColor = layerColors[newLayer % layerColors.length];
+        block.style.background = `linear-gradient(135deg, ${layerColor}, ${layerColor.replace('0.9', '0.7')})`;
+
+        // 데이터셋 업데이트
+        block.dataset.layer = newLayer;
+
+        // 툴팁 업데이트
+        const currentTitle = block.title || '';
+        const titleParts = currentTitle.split(' (Layer ');
+        if (titleParts.length > 1) {
+            const afterLayer = titleParts[1].split('): ');
+            if (afterLayer.length > 1) {
+                block.title = `${titleParts[0]} (Layer ${newLayer}): ${afterLayer[1]}`;
+            }
+        }
     }
 
     // 드래그 가이드라인 표시
@@ -4259,11 +4300,23 @@ class VideoAnalysisApp {
             const startTime = Math.max(0, subtitle.start_time);
             const endTime = Math.max(0, subtitle.end_time);
 
+            // 강제 지정된 레이어가 있는지 확인
+            if (subtitle.forcedLayer !== undefined && subtitle.forcedLayer >= 0 && subtitle.forcedLayer <= 2) {
+                layers[index] = subtitle.forcedLayer;
+                // 강제 레이어의 종료 시간 업데이트
+                if (!layerEndTimes[subtitle.forcedLayer]) {
+                    layerEndTimes[subtitle.forcedLayer] = 0;
+                }
+                layerEndTimes[subtitle.forcedLayer] = Math.max(layerEndTimes[subtitle.forcedLayer], endTime);
+                console.log(`자막 #${index + 1}: 강제 지정 레이어 ${subtitle.forcedLayer} 사용`);
+                return;
+            }
+
             // 적절한 레이어 찾기
             let assignedLayer = -1;
 
-            // 기존 레이어에서 사용 가능한 것 찾기
-            for (let layer = 0; layer < layerEndTimes.length; layer++) {
+            // 기존 레이어에서 사용 가능한 것 찾기 (최대 3줄까지)
+            for (let layer = 0; layer < Math.min(layerEndTimes.length, 3); layer++) {
                 // 이 레이어의 마지막 자막이 현재 자막 시작 전에 끝나면 사용 가능
                 if (layerEndTimes[layer] <= startTime) {
                     assignedLayer = layer;
@@ -4272,10 +4325,17 @@ class VideoAnalysisApp {
                 }
             }
 
-            // 사용 가능한 레이어가 없으면 새 레이어 생성
-            if (assignedLayer === -1) {
+            // 사용 가능한 레이어가 없고 3줄 미만이면 새 레이어 생성
+            if (assignedLayer === -1 && layerEndTimes.length < 3) {
                 assignedLayer = layerEndTimes.length;
                 layerEndTimes.push(endTime);
+            }
+
+            // 3줄이 모두 차있으면 가장 빨리 끝나는 레이어에 강제 배치
+            if (assignedLayer === -1) {
+                let earliestEndTime = Math.min(...layerEndTimes);
+                assignedLayer = layerEndTimes.indexOf(earliestEndTime);
+                layerEndTimes[assignedLayer] = endTime;
             }
 
             layers[index] = assignedLayer;
@@ -4283,7 +4343,8 @@ class VideoAnalysisApp {
             console.log(`자막 #${index + 1}: ${startTime.toFixed(2)}s-${endTime.toFixed(2)}s → 레이어 ${assignedLayer}`);
         });
 
-        console.log(`총 ${Math.max(...layers) + 1}개 레이어 사용`);
+        const totalLayers = Math.min(Math.max(...layers) + 1, 3);
+        console.log(`총 ${totalLayers}개 레이어 사용 (최대 3줄)`);
         return layers;
     }
 
@@ -4294,7 +4355,7 @@ class VideoAnalysisApp {
             existingLegend.remove();
         }
 
-        const maxLayer = Math.max(...layers);
+        const maxLayer = Math.min(Math.max(...layers), 2); // 최대 3줄까지만 표시
         if (maxLayer === 0) return; // 레이어가 1개면 범례 불필요
 
         // 범례 컨테이너 생성
@@ -4398,8 +4459,8 @@ class VideoAnalysisApp {
             const block = document.createElement('div');
             block.className = 'subtitle-block';
 
-            const layer = layers[index] || 0;
-            const layerHeight = 30;
+            const layer = Math.min(layers[index] || 0, 2); // 최대 3줄 (0, 1, 2)
+            const layerHeight = 32;
             const topPosition = 5 + (layer * layerHeight);
 
             const startPercent = (subtitle.start_time / 10) * 100; // 10초 기준
@@ -4555,9 +4616,21 @@ class VideoAnalysisApp {
     }
 
     editSubtitleSegment(subtitle, index) {
+        // 매개변수가 잘못 전달된 경우 처리
+        if (typeof subtitle === 'number') {
+            // subtitle이 실제로는 index인 경우
+            index = subtitle;
+            subtitle = this.timeline.subtitleData.subtitles[index];
+        }
+
+        if (!subtitle) {
+            console.error('자막 데이터를 찾을 수 없습니다:', index);
+            return;
+        }
+
         // 자막 구간 편집 다이얼로그 표시
-        const currentStart = subtitle.start_time;
-        const currentEnd = subtitle.end_time;
+        const currentStart = subtitle.start_time || 0;
+        const currentEnd = subtitle.end_time || 0;
 
         const newStartTime = prompt(
             `자막 #${index + 1} 시작 시간을 입력하세요 (초):`,
@@ -4603,6 +4676,17 @@ class VideoAnalysisApp {
     }
 
     showSubtitleContextMenu(event, subtitle, index) {
+        // 매개변수가 2개만 전달된 경우 처리 (하이브리드 자막에서 호출)
+        if (typeof subtitle === 'number' && index === undefined) {
+            index = subtitle;
+            subtitle = this.timeline.subtitleData.subtitles[index];
+        }
+
+        if (!subtitle || index === undefined) {
+            console.error('자막 데이터 또는 인덱스가 없습니다:', { subtitle, index });
+            return;
+        }
+
         // 기존 컨텍스트 메뉴 제거
         const existingMenu = document.querySelector('.subtitle-context-menu');
         if (existingMenu) {
@@ -4626,6 +4710,12 @@ class VideoAnalysisApp {
         const menuItems = [
             { text: '🎯 이 구간으로 이동', action: () => this.seekToTime(subtitle.start_time) },
             { text: '✏️ 구간 시간 편집', action: () => this.editSubtitleSegment(subtitle, index) },
+            { text: '1️⃣ 메인트랙 1줄로 이동', action: () => this.moveSubtitleToLayer(index, 0) },
+            { text: '2️⃣ 메인트랙 2줄로 이동', action: () => this.moveSubtitleToLayer(index, 1) },
+            { text: '3️⃣ 메인트랙 3줄로 이동', action: () => this.moveSubtitleToLayer(index, 2) },
+            { text: '🔄 메인 트랙으로 이동', action: () => { this.moveSubtitleToTrack(index, 'main'); } },
+            { text: '🌍 번역 트랙으로 이동', action: () => { this.moveSubtitleToTrack(index, 'translation'); } },
+            { text: '📝 설명 트랙으로 이동', action: () => { this.moveSubtitleToTrack(index, 'description'); } },
             { text: '➕ 앞에 구간 추가', action: () => this.addSubtitleBefore(index) },
             { text: '➕ 뒤에 구간 추가', action: () => this.addSubtitleAfter(index) },
             { text: '✂️ 구간 분할', action: () => this.splitSubtitle(subtitle, index) },
@@ -4674,6 +4764,141 @@ class VideoAnalysisApp {
         setTimeout(() => {
             document.addEventListener('click', closeMenu);
         }, 100);
+    }
+
+    // 자막을 다른 트랙으로 이동
+    moveSubtitleToTrack(index, targetTrack) {
+        if (!this.timeline.subtitleData || !this.timeline.subtitleData.subtitles) {
+            console.error('자막 데이터가 없습니다');
+            return;
+        }
+
+        const subtitle = this.timeline.subtitleData.subtitles[index];
+        if (!subtitle) {
+            console.error('해당 인덱스의 자막을 찾을 수 없습니다:', index);
+            return;
+        }
+
+        // 현재 트랙에서 자막 제거
+        const currentTrackType = this.getCurrentTrackType(index);
+        this.removeSubtitleFromTrack(index, currentTrackType);
+
+        // 목표 트랙으로 이동
+        this.addSubtitleToTrack(subtitle, targetTrack);
+
+        // 트랙 재렌더링
+        this.renderHybridSubtitles();
+
+        console.log(`자막 #${index + 1}을(를) ${currentTrackType}에서 ${targetTrack} 트랙으로 이동했습니다`);
+
+        // 성공 메시지 표시
+        this.showInfo(`자막 #${index + 1}이(가) ${this.getTrackDisplayName(targetTrack)} 트랙으로 이동되었습니다`);
+    }
+
+    // 현재 자막이 속한 트랙 찾기
+    getCurrentTrackType(index) {
+        // DOM에서 해당 자막 블록을 찾아서 트랙 타입 확인
+        const blocks = document.querySelectorAll(`[data-index="${index}"]`);
+        for (let block of blocks) {
+            if (block.dataset.trackType) {
+                return block.dataset.trackType;
+            }
+        }
+        return 'main'; // 기본값
+    }
+
+    // 트랙에서 자막 제거
+    removeSubtitleFromTrack(index, trackType) {
+        const blocks = document.querySelectorAll(`[data-index="${index}"][data-track-type="${trackType}"]`);
+        blocks.forEach(block => block.remove());
+    }
+
+    // 트랙에 자막 추가
+    addSubtitleToTrack(subtitle, trackType) {
+        // 자막 데이터에 트랙 정보 추가
+        subtitle.trackType = trackType;
+    }
+
+    // 트랙 표시 이름 반환
+    getTrackDisplayName(trackType) {
+        const trackNames = {
+            'main': '메인',
+            'translation': '번역',
+            'description': '설명'
+        };
+        return trackNames[trackType] || trackType;
+    }
+
+    // 자막을 특정 레이어로 이동
+    moveSubtitleToLayer(index, targetLayer) {
+        if (!this.timeline.subtitleData || !this.timeline.subtitleData.subtitles) {
+            console.error('자막 데이터가 없습니다');
+            return;
+        }
+
+        const subtitle = this.timeline.subtitleData.subtitles[index];
+        if (!subtitle) {
+            console.error('해당 인덱스의 자막을 찾을 수 없습니다:', index);
+            return;
+        }
+
+        // 현재 자막 블록 찾기
+        const currentBlock = document.querySelector(`[data-index="${index}"]`);
+        if (!currentBlock) {
+            console.error('자막 블록을 찾을 수 없습니다:', index);
+            return;
+        }
+
+        // 새로운 레이어 위치 계산
+        const layerHeight = 32;
+        const newTop = 5 + (targetLayer * layerHeight);
+
+        // 블록 위치 업데이트
+        currentBlock.style.top = newTop + 'px';
+
+        // 레이어 색상 업데이트
+        this.updateBlockLayerColor(currentBlock, targetLayer);
+
+        // 데이터 업데이트
+        currentBlock.dataset.layer = targetLayer;
+
+        // 자막 데이터에도 레이어 정보 저장
+        subtitle.forcedLayer = targetLayer;
+
+        console.log(`자막 #${index + 1}을(를) 레이어 ${targetLayer} (${targetLayer + 1}줄)로 이동했습니다`);
+
+        // 성공 메시지 표시
+        this.showInfo(`자막 #${index + 1}이(가) ${targetLayer + 1}줄로 이동되었습니다`);
+
+        // 충돌 검사 및 경고
+        this.checkLayerCollisions(index, targetLayer);
+    }
+
+    // 레이어 충돌 검사
+    checkLayerCollisions(index, layer) {
+        const subtitle = this.timeline.subtitleData.subtitles[index];
+        const startTime = subtitle.start_time;
+        const endTime = subtitle.end_time;
+
+        // 같은 레이어의 다른 자막들과 시간 겹침 확인
+        const overlappingSubtitles = [];
+
+        document.querySelectorAll(`[data-layer="${layer}"]`).forEach(block => {
+            const blockIndex = parseInt(block.dataset.index);
+            if (blockIndex !== index) {
+                const blockSubtitle = this.timeline.subtitleData.subtitles[blockIndex];
+                if (blockSubtitle &&
+                    ((startTime >= blockSubtitle.start_time && startTime < blockSubtitle.end_time) ||
+                     (endTime > blockSubtitle.start_time && endTime <= blockSubtitle.end_time) ||
+                     (startTime <= blockSubtitle.start_time && endTime >= blockSubtitle.end_time))) {
+                    overlappingSubtitles.push(blockIndex + 1);
+                }
+            }
+        });
+
+        if (overlappingSubtitles.length > 0) {
+            this.showWarning(`⚠️ 자막 #${overlappingSubtitles.join(', #')}와 시간이 겹칩니다`);
+        }
     }
 
     addSubtitleBefore(index) {
