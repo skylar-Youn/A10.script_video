@@ -2562,6 +2562,10 @@ class VideoAnalysisApp {
         console.log('🧹 기존 내용 지우기');
         trackContent.innerHTML = '';
 
+        // 자막 겹침 방지를 위한 레이어 계산
+        const layers = this.calculateSubtitleLayers(subtitles);
+        console.log('📚 자막 레이어 계산 완료:', layers);
+
         subtitles.forEach((subtitle, index) => {
             const block = document.createElement('div');
             block.className = 'subtitle-block';
@@ -2579,8 +2583,17 @@ class VideoAnalysisApp {
             const startPercent = (adjustedStartTime / totalDuration) * 100;
             const widthPercent = (duration / totalDuration) * 100;
 
+            // 레이어에 따른 위치 조정
+            const layer = layers[index] || 0;
+            const layerHeight = 30; // 각 레이어의 높이를 더 크게
+            const topPosition = 5 + (layer * layerHeight);
+
             block.style.left = startPercent + '%';
-            block.style.width = widthPercent + '%';
+            block.style.width = Math.max(widthPercent, 4) + '%'; // 최소 너비 보장
+            block.style.top = topPosition + 'px';
+            block.style.height = '28px'; // 레이어 높이에 맞게 더 크게 조정
+
+            console.log(`자막 #${index + 1} 배치: layer=${layer}, top=${topPosition}px`);
 
             // 번호 표시 요소 생성 - 더 강력한 스타일링
             const numberElement = document.createElement('div');
@@ -2593,21 +2606,24 @@ class VideoAnalysisApp {
                 'display': 'block',
                 'visibility': 'visible',
                 'opacity': '1',
-                'position': 'relative',
+                'position': 'absolute',
+                'top': '0px',
+                'left': '0px',
                 'z-index': '999',
-                'background-color': 'rgb(255, 165, 0)',
+                'background-color': 'rgb(255, 60, 60)', // 더 눈에 띄는 빨간색
                 'color': 'white',
                 'font-weight': '900',
-                'font-size': '10px',
-                'padding': '3px 5px',
-                'border-radius': '4px',
+                'font-size': '12px', // 더 큰 폰트
+                'padding': '2px 6px',
+                'border-radius': '50%', // 원형으로
                 'text-align': 'center',
-                'min-width': '22px',
-                'margin-bottom': '2px',
-                'border': '1px solid white',
+                'min-width': '20px',
+                'min-height': '20px',
+                'border': '2px solid white',
                 'box-sizing': 'border-box',
-                'line-height': '1',
-                'white-space': 'nowrap'
+                'line-height': '16px',
+                'white-space': 'nowrap',
+                'box-shadow': '0 2px 6px rgba(0,0,0,0.8)' // 강한 그림자
             };
 
             // 스타일 직접 적용
@@ -2633,58 +2649,50 @@ class VideoAnalysisApp {
             // 블록 너비에 따라 표시 내용 조정
             const blockWidthPx = (widthPercent / 100) * (trackContent.offsetWidth || 1000);
 
-            if (blockWidthPx < 25) {
-                // 극극소 블록: 번호만 표시 (더 작게)
-                numberElement.style.fontSize = '7px';
-                numberElement.style.padding = '1px';
-                numberElement.style.minWidth = '15px';
-                numberElement.textContent = `${index + 1}`;
-                timeElement.style.display = 'none';
-                textElement.style.display = 'none';
-            } else if (blockWidthPx < 50) {
-                // 극소 블록: 번호만 표시
-                numberElement.style.fontSize = '8px';
-                numberElement.style.padding = '1px 2px';
+            // 번호는 항상 표시, 크기만 조정
+            numberElement.textContent = `${index + 1}`;
+
+            // 텍스트 컨테이너 생성 (번호 옆에 표시)
+            const textContainer = document.createElement('div');
+            textContainer.style.marginLeft = '25px'; // 번호 공간 확보
+            textContainer.style.display = 'flex';
+            textContainer.style.flexDirection = 'column';
+            textContainer.style.justifyContent = 'center';
+            textContainer.style.overflow = 'hidden';
+
+            if (blockWidthPx < 40) {
+                // 극소 블록: 번호만
                 timeElement.style.display = 'none';
                 textElement.style.display = 'none';
             } else if (blockWidthPx < 80) {
-                // 작은 블록: 번호 + 시작 시간만
-                numberElement.style.fontSize = '9px';
+                // 작은 블록: 번호 + 시간
                 timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}`;
-                timeElement.style.display = 'block';
-                textElement.style.display = 'none';
-                timeElement.style.fontSize = '8px';
-            } else if (blockWidthPx < 120) {
-                // 중소 블록: 번호 + 시작→끝 시간
-                numberElement.style.fontSize = '9px';
-                timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}→${this.formatSubtitleTime(endTime, true)}`;
-                timeElement.style.display = 'block';
-                textElement.style.display = 'none';
-                timeElement.style.fontSize = '8px';
-            } else if (blockWidthPx < 200) {
-                // 중간 블록: 번호 + 시간 + 짧은 텍스트
-                numberElement.style.fontSize = '10px';
-                timeElement.textContent = `${this.formatSubtitleTime(startTime)}→${this.formatSubtitleTime(endTime)}`;
-                timeElement.style.display = 'block';
-                textElement.style.display = 'block';
-                textElement.textContent = subtitle.text.length > 15 ?
-                    subtitle.text.substring(0, 12) + '...' : subtitle.text;
                 timeElement.style.fontSize = '9px';
-                textElement.style.fontSize = '10px';
+                textElement.style.display = 'none';
+                textContainer.appendChild(timeElement);
+            } else if (blockWidthPx < 150) {
+                // 중간 블록: 번호 + 시간 + 짧은 텍스트
+                timeElement.textContent = `${this.formatSubtitleTime(startTime, true)}`;
+                timeElement.style.fontSize = '8px';
+                textElement.textContent = subtitle.text.length > 8 ?
+                    subtitle.text.substring(0, 6) + '...' : subtitle.text;
+                textElement.style.fontSize = '8px';
+                textContainer.appendChild(timeElement);
+                textContainer.appendChild(textElement);
             } else {
-                // 큰 블록: 번호 + 전체 시간 + 전체 텍스트
-                numberElement.style.fontSize = '11px';
-                timeElement.textContent = `🕐 ${this.formatSubtitleTime(startTime)} → ${this.formatSubtitleTime(endTime)} (${this.formatSubtitleTime(duration)}초)`;
-                timeElement.style.display = 'block';
-                textElement.style.display = 'block';
-                timeElement.style.fontSize = '10px';
-                textElement.style.fontSize = '12px';
+                // 큰 블록: 번호 + 전체 정보
+                timeElement.textContent = `${this.formatSubtitleTime(startTime)} → ${this.formatSubtitleTime(endTime)}`;
+                timeElement.style.fontSize = '9px';
+                textElement.style.fontSize = '9px';
+                textContainer.appendChild(timeElement);
+                textContainer.appendChild(textElement);
             }
 
-            // 요소들을 블록에 추가 (번호가 맨 위에)
+            // 요소들을 블록에 추가 (번호 + 텍스트 컨테이너)
             block.appendChild(numberElement);
-            block.appendChild(timeElement);
-            block.appendChild(textElement);
+            if (blockWidthPx >= 40) {
+                block.appendChild(textContainer);
+            }
 
             console.log(`🔍 자막 블록 #${index + 1} 디버깅:`, {
                 번호요소텍스트: numberElement.textContent,
@@ -2753,6 +2761,42 @@ class VideoAnalysisApp {
                 });
             });
         }, 200);
+    }
+
+    calculateSubtitleLayers(subtitles) {
+        console.log('🧮 자막 레이어 계산 시작');
+        const layers = new Array(subtitles.length).fill(0);
+        const layerEndTimes = []; // 각 레이어의 마지막 종료 시간
+
+        subtitles.forEach((subtitle, index) => {
+            const startTime = Math.max(0, subtitle.start_time);
+            const endTime = Math.max(0, subtitle.end_time);
+
+            // 적절한 레이어 찾기
+            let assignedLayer = 0;
+
+            for (let layer = 0; layer < layerEndTimes.length; layer++) {
+                // 이 레이어의 마지막 자막이 현재 자막 시작 전에 끝나면 사용 가능
+                if (layerEndTimes[layer] <= startTime) {
+                    assignedLayer = layer;
+                    break;
+                }
+            }
+
+            // 새 레이어가 필요한 경우
+            if (assignedLayer === layerEndTimes.length) {
+                layerEndTimes.push(endTime);
+            } else {
+                layerEndTimes[assignedLayer] = endTime;
+            }
+
+            layers[index] = assignedLayer;
+
+            console.log(`자막 #${index + 1}: ${startTime.toFixed(2)}s-${endTime.toFixed(2)}s → 레이어 ${assignedLayer}`);
+        });
+
+        console.log(`총 ${Math.max(...layers) + 1}개 레이어 사용`);
+        return layers;
     }
 
     selectSubtitleBlock(block) {

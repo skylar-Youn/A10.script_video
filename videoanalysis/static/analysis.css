@@ -1853,6 +1853,11 @@ textarea:focus {
     position: relative;
 }
 
+/* 자막 트랙은 더 높게 - 다중 레이어 지원 */
+.subtitle-track {
+    height: 150px !important;
+}
+
 /* 0초 기준선을 모든 트랙에 표시 (이제 맨 왼쪽) */
 .timeline-track::after {
     content: '';
@@ -1987,25 +1992,26 @@ textarea:focus {
 
 .subtitle-block {
     position: absolute;
-    top: 5px;
-    height: 50px;
-    background: linear-gradient(135deg, var(--warning-color), #cc8800);
-    border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    top: 10px;
+    height: 28px;
+    background: linear-gradient(135deg, rgba(0, 123, 255, 0.9), rgba(0, 86, 179, 0.9));
+    border-radius: 8px;
+    border: 2px solid rgba(255, 255, 255, 0.6);
     display: flex !important;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     justify-content: flex-start;
     color: white;
     font-size: 0.7rem;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
     overflow: visible;
     padding: 2px 4px;
-    text-align: center;
+    text-align: left;
     line-height: 1.1;
     z-index: 5;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+    min-width: 60px;
 }
 
 .subtitle-block:hover {
@@ -2021,18 +2027,18 @@ textarea:focus {
 
 /* 자막 블록 내 번호 표시 - 강화된 스타일 */
 .subtitle-number {
-    font-size: 0.8rem !important;
+    font-size: 0.7rem !important;
     font-weight: 900 !important;
     color: rgba(255, 255, 255, 1.0) !important;
     background: rgba(255, 165, 0, 0.95) !important;
-    padding: 3px 6px !important;
-    border-radius: 4px !important;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 1) !important;
-    letter-spacing: 0.3px !important;
-    border: 2px solid rgba(255, 255, 255, 0.9) !important;
-    margin-bottom: 2px !important;
+    padding: 1px 3px !important;
+    border-radius: 3px !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 1) !important;
+    letter-spacing: 0.2px !important;
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    margin-bottom: 1px !important;
     text-align: center !important;
-    min-width: 25px !important;
+    min-width: 18px !important;
     white-space: nowrap !important;
     display: block !important;
     visibility: visible !important;
@@ -2040,7 +2046,7 @@ textarea:focus {
     position: relative !important;
     z-index: 100 !important;
     box-sizing: border-box !important;
-    line-height: 1.2 !important;
+    line-height: 1 !important;
 }
 
 /* 강제 표시를 위한 추가 스타일 */
