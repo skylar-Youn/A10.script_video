@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: check-line-limit
+        name: Check line limit
+        entry: python3 scripts/check_line_limit.py --max-lines 2000
+        language: system
+        pass_filenames: false

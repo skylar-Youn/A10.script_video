@@ -1,0 +1,19 @@
+name: Line Limit Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt || true
+          fi
+      - name: Enforce line limit
+        run: python3 scripts/check_line_limit.py --max-lines 2000
