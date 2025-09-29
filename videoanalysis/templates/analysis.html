@@ -286,6 +286,7 @@
                     <!-- 화자 인식 시작 -->
                     <div class="speaker-controls">
                         <button class="analyze-btn primary" id="start-speaker-recognition">🎭 화자 인식 시작</button>
+                        <button class="action-btn secondary" id="load-saved-speaker-main">💾 저장 내용 불러오기</button>
                         <div class="speaker-help">
                             💡 선택한 방법으로 등장인물을 자동 감지하고 각각을 다른 트랙에 배치합니다
                         </div>
@@ -306,7 +307,6 @@
                             <div class="mapping-grid" id="mapping-grid">
                                 <!-- 매핑 컨트롤들이 동적으로 추가됨 -->
                             </div>
-                            <button class="apply-btn" id="apply-speaker-mapping">✅ 트랙에 자동 배치</button>
                         </div>
                     </div>
 
@@ -716,11 +716,34 @@
             <div class="actions-section">
                 <h3>🚀 결과 활용</h3>
                 <div class="action-buttons">
+                    <div class="reinterpret-mode-select">
+                        <label>
+                            재해석 실행 모드
+                            <select id="reinterpret-mode">
+                                <option value="api" selected>API 모드 (서버에서 직접 처리)</option>
+                                <option value="chatgpt">ChatGPT 창 모드 (새 창에서 질문)</option>
+                            </select>
+                        </label>
+                        <small class="mode-hint">※ ChatGPT 창 모드는 Devtools/GPT와 직접 대화하여 결과를 붙여넣는 방식입니다.</small>
+                    </div>
                     <button class="action-btn primary" id="export-results">📁 결과 내보내기</button>
                     <button class="action-btn secondary" id="open-timeline">🎬 타임라인 편집기</button>
+                    <button class="action-btn secondary" id="reinterpret-results">🔄 재해석</button>
                     <button class="action-btn secondary" id="save-report">💾 보고서 저장</button>
                     <button class="action-btn outline" id="clear-results">🗑️ 결과 지우기</button>
                 </div>
+            </div>
+        </div>
+        <div class="reinterpretation-panel" id="reinterpretation-panel" style="display: none;">
+            <div class="reinterpretation-header">
+                <h3>🔄 재해석 결과</h3>
+                <button class="action-btn small" id="hide-reinterpretation">닫기</button>
+            </div>
+            <div class="reinterpretation-content" id="reinterpretation-text">
+                재해석 결과가 여기에 표시됩니다.
+            </div>
+            <div class="reinterpretation-actions">
+                <button class="action-btn secondary" id="copy-reinterpretation">📋 복사</button>
             </div>
         </div>
     </section>

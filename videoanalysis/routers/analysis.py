@@ -16,6 +16,7 @@ from ..services.subtitle_service import (
 from ..services.speaker_recognition import SpeakerRecognition
 from ..services.audio_speaker_recognition import AudioSpeakerRecognition
 from ..services.simple_audio_speaker_recognition import SimpleAudioSpeakerRecognition
+from ..services.ai_reinterpretation import reinterpret_subtitles as ai_reinterpret_subtitles
 
 logger = logging.getLogger(__name__)
 
@@ -314,18 +315,21 @@ async def assign_speakers_to_tracks(request: dict = Body(...)):
         speaker_track_mapping = request.get("speaker_track_mapping", {})
         existing_speakers = request.get("existing_speakers")
         existing_subtitles = request.get("existing_subtitles")
+        track_assignments = request.get("track_assignments", {})
 
-        if not file_path or not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="SRT 파일을 찾을 수 없습니다")
+        logger.info(f"🎭 트랙 배치 요청 받음")
+        logger.info(f"  - file_path: {file_path}")
+        logger.info(f"  - speaker_track_mapping: {speaker_track_mapping}")
+        logger.info(f"  - track_assignments: {track_assignments}")
+        logger.info(f"  - 기존 화자: {bool(existing_speakers)}")
+        logger.info(f"  - 기존 자막: {bool(existing_subtitles) and len(existing_subtitles) if existing_subtitles else 0}")
 
-        logger.info(f"🎭 트랙 배치 요청 - 기존 화자: {bool(existing_speakers)}, 기존 자막: {bool(existing_subtitles)}")
-
-        # 기존 화자 인식 결과가 있으면 사용, 없으면 새로 감지
+        # 기존 화자 인식 결과 사용
         if existing_speakers and existing_subtitles:
             logger.info("🎭 기존 음성 기반 화자 인식 결과 사용")
             speakers = existing_speakers
             subtitles = existing_subtitles
-        else:
+        elif file_path and os.path.exists(file_path):
             logger.info("🎭 새로운 텍스트 기반 화자 인식 수행")
             # SRT 파일 파싱
             subtitles = parse_srt_file(file_path)
@@ -336,23 +340,22 @@ async def assign_speakers_to_tracks(request: dict = Body(...)):
             # 화자 감지
             detection_result = speaker_recognition.detect_speakers_from_subtitles(subtitles)
             speakers = detection_result["speakers"]
+        else:
+            raise HTTPException(status_code=400, detail="기존 화자/자막 데이터 또는 SRT 파일 경로가 필요합니다")
 
-        # 화자를 트랙에 할당
-        if not speaker_track_mapping:
-            # 기본 트랙 할당 (화자1 -> main, 화자2 -> translation, 기타 -> description)
-            speaker_track_mapping = {}
-            speaker_names = list(speakers.keys())
-            for i, speaker in enumerate(speaker_names):
-                if i == 0:
-                    speaker_track_mapping[speaker] = "main"
-                elif i == 1:
-                    speaker_track_mapping[speaker] = "translation"
-                else:
-                    speaker_track_mapping[speaker] = "description"
+        # 사용자 지정 화자(화자4)는 자동 분류 대상에서 제외하기 위한 준비
+        if speakers and '화자4' in speakers:
+            logger.info('🎯 화자4는 사용자 지정용으로 통계만 초기화')
+            speaker4_info = speakers['화자4']
+            speaker4_info['subtitle_count'] = 0
+            speaker4_info['subtitle_indices'] = []
+            speaker4_info['total_duration'] = 0
+            speaker4_info['total_chars'] = 0
+            speaker4_info['avg_duration'] = 0
+            speaker4_info['avg_chars'] = 0
+            speaker4_info['sample_texts'] = []
 
-        logger.info(f"🎭 화자-트랙 매핑: {speaker_track_mapping}")
-
-        # 자막을 화자별로 분류 - 기존 speaker_id 사용
+        # 자막을 트랙별로 분류
         classified_subtitles = {
             "main": [],
             "translation": [],
@@ -360,20 +363,129 @@ async def assign_speakers_to_tracks(request: dict = Body(...)):
             "unassigned": []
         }
 
-        for subtitle in subtitles:
-            speaker_name = subtitle.get('speaker_name', '미분류')
-            assigned_track = speaker_track_mapping.get(speaker_name, 'unassigned')
-            classified_subtitles[assigned_track].append(subtitle)
+        # track_assignments가 있으면 인덱스 기반으로 분류
+        if track_assignments:
+            logger.info(f"🎯 인덱스 기반 트랙 할당 처리: {track_assignments}")
+
+            # 모든 자막을 먼저 unassigned로 초기화
+            for i, subtitle in enumerate(subtitles):
+                subtitle['assigned_track'] = 'unassigned'
+                subtitle['global_index'] = i
+                classified_subtitles['unassigned'].append(subtitle)
+
+            # track_assignments에 따라 자막을 해당 트랙으로 이동
+            for track, indices in track_assignments.items():
+                if track in classified_subtitles:
+                    for idx in indices:
+                        # unassigned에서 해당 자막 찾아서 이동
+                        for i, subtitle in enumerate(classified_subtitles['unassigned']):
+                            if subtitle.get('global_index') == idx:
+                                # unassigned에서 제거하고 해당 트랙에 추가
+                                subtitle['assigned_track'] = track
+                                classified_subtitles['unassigned'].pop(i)
+                                classified_subtitles[track].append(subtitle)
+                                break
+        else:
+            # 기존 speaker_track_mapping 방식 사용
+            if not speaker_track_mapping:
+                # 기본 트랙 할당 (화자1 -> main, 화자2 -> translation, 화자3 -> description)
+                # 화자4는 사용자용으로 자동 배치에서 제외하여 미분류로 유지
+                speaker_track_mapping = {}
+                speaker_names = list(speakers.keys())
+                for i, speaker in enumerate(speaker_names):
+                    if speaker == '화자4':
+                        speaker_track_mapping[speaker] = "unassigned"
+                        continue
+                    elif i == 0:
+                        speaker_track_mapping[speaker] = "main"
+                    elif i == 1:
+                        speaker_track_mapping[speaker] = "translation"
+                    else:
+                        speaker_track_mapping[speaker] = "description"
+
+                # 미분류와 화자3도 설명 트랙으로 기본 설정
+                speaker_track_mapping['미분류'] = "description"
+                speaker_track_mapping['화자3'] = "description"
+
+            # 사용자 설정 매핑에도 공통 규칙 적용
+            if '미분류' not in speaker_track_mapping:
+                speaker_track_mapping['미분류'] = "description"
+            if '화자3' not in speaker_track_mapping:
+                speaker_track_mapping['화자3'] = "description"
+            # 화자4는 항상 사용자 지정용으로 유지
+            speaker_track_mapping['화자4'] = "unassigned"
+
+            logger.info(f"🎭 화자-트랙 매핑: {speaker_track_mapping}")
+
+            # 자막을 화자별로 분류 - 기존 speaker_id 사용
+            speaker_name_counts = {}
+            for subtitle in subtitles:
+                speaker_name = subtitle.get('speaker_name', '미분류')
+
+                # 빈 문자열이나 None인 경우 미분류로 처리
+                if not speaker_name or speaker_name.strip() == '':
+                    speaker_name = '미분류'
+
+                # 화자4는 사용자 지정용으로 자동 분류에서 제외
+                if speaker_name == '화자4':
+                    subtitle['original_speaker_name'] = '화자4'
+                    subtitle['speaker_name'] = '미분류'
+                    subtitle['assigned_track'] = 'unassigned'
+                    classified_subtitles['unassigned'].append(subtitle)
+                    speaker_name_counts['미분류'] = speaker_name_counts.get('미분류', 0) + 1
+                    continue
+
+                assigned_track = speaker_track_mapping.get(speaker_name, 'description')  # default를 description으로 변경
+                subtitle['assigned_track'] = assigned_track
+                subtitle['speaker_name'] = speaker_name  # 정규화된 speaker_name 다시 저장
+                classified_subtitles[assigned_track].append(subtitle)
+
+                # 화자 이름 통계
+                speaker_name_counts[speaker_name] = speaker_name_counts.get(speaker_name, 0) + 1
+
+            # 화자 이름 분포 로깅
+            logger.info(f"🎭 화자 이름 분포:")
+            for speaker, count in speaker_name_counts.items():
+                mapped_track = speaker_track_mapping.get(speaker, 'unassigned')
+                logger.info(f"  {speaker}: {count}개 → {mapped_track} 트랙")
+
+        # Convert numpy types to native Python types for JSON serialization
+        def convert_numpy_types(obj):
+            """Convert numpy types to native Python types recursively"""
+            if hasattr(obj, 'item'):  # numpy scalar
+                return obj.item()
+            elif hasattr(obj, 'tolist'):  # numpy array
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {k: convert_numpy_types(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(item) for item in obj]
+            else:
+                return obj
+
+        # Convert all data to be JSON serializable
+        speakers_serializable = convert_numpy_types(speakers)
+        classified_subtitles_serializable = convert_numpy_types(classified_subtitles)
+
+        # 자세한 track_counts 로깅
+        track_counts = {}
+        total_subtitles = 0
+        for track, subs in classified_subtitles.items():
+            count = len(subs)
+            track_counts[track] = count
+            total_subtitles += count
+            logger.info(f"  {track} 트랙: {count}개 자막")
+
+        logger.info(f"🎯 총 자막 수: {total_subtitles}개")
+        logger.info(f"🎯 입력 자막 수: {len(subtitles)}개")
 
         return {
             "status": "success",
             "file": file_path,
-            "speakers": speakers,
+            "speakers": speakers_serializable,
             "speaker_track_mapping": speaker_track_mapping,
-            "classified_subtitles": classified_subtitles,
-            "track_counts": {
-                track: len(subs) for track, subs in classified_subtitles.items()
-            }
+            "classified_subtitles": classified_subtitles_serializable,
+            "track_counts": track_counts
         }
 
     except Exception as e:
@@ -414,12 +526,12 @@ async def analyze_audio_speakers(request: dict = Body(...)):
             subtitles = parse_srt_file(srt_path)
             logger.info(f"🎵 SRT 자막 개수: {len(subtitles) if subtitles else 0}")
 
-        # 간단한 음성 기반 화자 인식 시스템 초기화
-        logger.info("🎵 SimpleAudioSpeakerRecognition 초기화 중...")
-        audio_recognition = SimpleAudioSpeakerRecognition()
+        # 고급 음성 기반 화자 인식 시스템 초기화 (scikit-learn 사용)
+        logger.info("🎵 AudioSpeakerRecognition 초기화 중...")
+        audio_recognition = AudioSpeakerRecognition()
 
         # 화자 인식 수행
-        logger.info("🎵 간단한 화자 인식 수행 시작...")
+        logger.info("🎵 고급 화자 인식 수행 시작...")
         result = audio_recognition.recognize_speakers_from_audio(
             audio_path=audio_path,
             subtitles=subtitles,
@@ -428,11 +540,28 @@ async def analyze_audio_speakers(request: dict = Body(...)):
 
         logger.info(f"🎵 화자 인식 결과: {result}")
 
+        # Convert numpy types to native Python types for JSON serialization
+        def convert_numpy_types(obj):
+            """Convert numpy types to native Python types recursively"""
+            if hasattr(obj, 'item'):  # numpy scalar
+                return obj.item()
+            elif hasattr(obj, 'tolist'):  # numpy array
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {k: convert_numpy_types(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(item) for item in obj]
+            else:
+                return obj
+
+        # Convert result to be JSON serializable
+        result_serializable = convert_numpy_types(result)
+
         return {
             "status": "success",
             "audio_file": audio_path,
             "srt_file": srt_path,
-            **result
+            **result_serializable
         }
 
     except Exception as e:
@@ -498,3 +627,33 @@ async def extract_speaker_audio_segments(request: dict = Body(...)):
     except Exception as e:
         logger.exception(f"화자별 오디오 분리 에러: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analysis/reinterpret")
+async def reinterpret_subtitles(request: dict = Body(...)):
+    """대사 및 설명 자막을 기반으로 새로운 내레이션 재해석 생성"""
+    try:
+        dialogues = request.get("dialogue_subtitles") or []
+        descriptions = request.get("description_subtitles") or []
+
+        if not dialogues and not descriptions:
+            raise HTTPException(status_code=400, detail="재해석할 자막 데이터가 없습니다")
+
+        reinterpretation_result = ai_reinterpret_subtitles(dialogues, descriptions)
+
+        response = {"status": "success", **reinterpretation_result}
+        logger.info(
+            "재해석 완료 - 대사 %d개, 설명 %d개",
+            len(dialogues),
+            len(descriptions),
+        )
+        return response
+
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.warning("재해석 입력 오류: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("재해석 처리 실패: %s", exc)
+        raise HTTPException(status_code=500, detail="재해석 중 오류가 발생했습니다")

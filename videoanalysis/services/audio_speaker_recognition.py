@@ -201,19 +201,44 @@ class AudioSpeakerRecognition:
                     # 가장 많이 나타나는 화자를 선택
                     speaker_votes = [speaker_labels[i] for i in overlapping_windows]
                     speaker_id = max(set(speaker_votes), key=speaker_votes.count)
-                    subtitle['speaker_id'] = int(speaker_id)
-                    subtitle['speaker_name'] = f"화자{speaker_id + 1}"
+                    speaker_name = f"화자{speaker_id + 1}"
+
+                    if speaker_name == '화자4':
+                        subtitle['original_speaker_name'] = '화자4'
+                        subtitle['speaker_id'] = -1
+                        subtitle['speaker_name'] = '미분류'
+                    else:
+                        subtitle['speaker_id'] = int(speaker_id)
+                        subtitle['speaker_name'] = speaker_name
                 else:
                     # 겹치는 윈도우가 없으면 가장 가까운 윈도우의 화자 사용
                     closest_window = np.argmin([abs(ts - start_time) for ts in timestamps])
-                    subtitle['speaker_id'] = int(speaker_labels[closest_window])
-                    subtitle['speaker_name'] = f"화자{speaker_labels[closest_window] + 1}"
+                    closest_speaker_id = int(speaker_labels[closest_window])
+                    speaker_name = f"화자{closest_speaker_id + 1}"
+
+                    if speaker_name == '화자4':
+                        subtitle['original_speaker_name'] = '화자4'
+                        subtitle['speaker_id'] = -1
+                        subtitle['speaker_name'] = '미분류'
+                    else:
+                        subtitle['speaker_id'] = closest_speaker_id
+                        subtitle['speaker_name'] = speaker_name
 
             # 화자별 통계
             speaker_stats = {}
             for speaker_id in np.unique(speaker_labels):
                 speaker_subtitles = [s for s in subtitles if s.get('speaker_id') == speaker_id]
-                speaker_stats[f"화자{speaker_id + 1}"] = {
+                speaker_name = f"화자{speaker_id + 1}"
+
+                if speaker_name == '화자4':
+                    speaker_stats[speaker_name] = {
+                        "subtitle_count": 0,
+                        "total_duration": 0,
+                        "sample_texts": []
+                    }
+                    continue
+
+                speaker_stats[speaker_name] = {
                     "subtitle_count": len(speaker_subtitles),
                     "total_duration": sum(s.get('duration', 0) for s in speaker_subtitles),
                     "sample_texts": [s.get('text', '')[:50] for s in speaker_subtitles[:3]]
@@ -262,6 +287,15 @@ class AudioSpeakerRecognition:
                     'total_duration': np.sum(speaker_windows) * self.hop_size
                 }
 
+                speaker_name = f"화자{speaker_id + 1}"
+
+                if speaker_name == '화자4':
+                    speaker_features['window_count'] = 0
+                    speaker_features['total_duration'] = 0
+                    speaker_features['avg_pitch'] = 0
+                    speaker_features['avg_energy'] = 0
+                    speaker_features['avg_spectral_centroid'] = 0
+
                 if subtitles:
                     speaker_subtitles = [s for s in subtitles if s.get('speaker_id') == speaker_id]
                     speaker_features.update({
@@ -270,7 +304,12 @@ class AudioSpeakerRecognition:
                         'sample_texts': [s.get('text', '')[:50] + '...' for s in speaker_subtitles[:3]]
                     })
 
-                speakers[f"화자{speaker_id + 1}"] = speaker_features
+                    if speaker_name == '화자4':
+                        speaker_features['subtitle_count'] = 0
+                        speaker_features['subtitle_indices'] = []
+                        speaker_features['sample_texts'] = []
+
+                speakers[speaker_name] = speaker_features
 
             result = {
                 "speakers": speakers,
