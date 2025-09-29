@@ -89,6 +89,7 @@
         <div class="tool-tabs">
             <button class="tab-btn active" data-tab="audio">🎵 음성 분석</button>
             <button class="tab-btn" data-tab="subtitle">📝 자막 분석 & 편집</button>
+            <button class="tab-btn" data-tab="speaker">🎭 화자 인식</button>
             <button class="tab-btn" data-tab="stt">🎤 음성→자막</button>
             <button class="tab-btn" data-tab="extract-audio">🎬 음성 추출</button>
             <button class="tab-btn" data-tab="video-edit">🎬 영상 편집</button>
@@ -252,6 +253,71 @@
                         <ul class="recommendation-list" id="subtitle-recommendations">
                             <!-- 권장사항들이 동적으로 추가됨 -->
                         </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 🎭 화자 인식 탭 -->
+            <div class="tab-content" id="speaker-tab">
+                <div class="speaker-recognition-section">
+                    <h3>🎭 화자 인식 및 트랙 배치</h3>
+
+                    <!-- 화자 인식 방법 선택 -->
+                    <div class="recognition-method">
+                        <h4>🔍 인식 방법 선택</h4>
+                        <div class="method-options">
+                            <label class="method-option">
+                                <input type="radio" name="recognition-method" value="text" checked>
+                                <div class="method-info">
+                                    <strong>📝 텍스트 기반</strong>
+                                    <span>자막 텍스트의 패턴과 말투를 분석하여 화자를 구분</span>
+                                </div>
+                            </label>
+                            <label class="method-option">
+                                <input type="radio" name="recognition-method" value="audio">
+                                <div class="method-info">
+                                    <strong>🎵 음성 기반</strong>
+                                    <span>음성의 주파수, 피치, 톤을 분석하여 화자를 구분 (더 정확)</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 화자 인식 시작 -->
+                    <div class="speaker-controls">
+                        <button class="analyze-btn primary" id="start-speaker-recognition">🎭 화자 인식 시작</button>
+                        <div class="speaker-help">
+                            💡 선택한 방법으로 등장인물을 자동 감지하고 각각을 다른 트랙에 배치합니다
+                        </div>
+                    </div>
+
+                    <!-- 감지된 화자 목록 -->
+                    <div class="detected-speakers" id="detected-speakers" style="display: none;">
+                        <h4>🎯 감지된 화자들</h4>
+                        <div class="speakers-grid" id="speakers-grid">
+                            <!-- 화자들이 동적으로 추가됨 -->
+                        </div>
+                    </div>
+
+                    <!-- 화자-트랙 매핑 설정 -->
+                    <div class="speaker-track-mapping" id="speaker-track-mapping" style="display: none;">
+                        <h4>🎚️ 트랙 할당 설정</h4>
+                        <div class="mapping-controls">
+                            <div class="mapping-grid" id="mapping-grid">
+                                <!-- 매핑 컨트롤들이 동적으로 추가됨 -->
+                            </div>
+                            <button class="apply-btn" id="apply-speaker-mapping">✅ 트랙에 자동 배치</button>
+                        </div>
+                    </div>
+
+                    <!-- 결과 미리보기 -->
+                    <div class="mapping-results" id="mapping-results" style="display: none;">
+                        <h4>📊 배치 결과</h4>
+                        <div class="track-preview">
+                            <div class="track-summary" id="track-summary">
+                                <!-- 트랙별 자막 수 요약이 표시됨 -->
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

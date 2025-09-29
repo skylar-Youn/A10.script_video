@@ -154,6 +154,9 @@ class VideoAnalysisApp {
 
         // 하이브리드 자막 트랙 제어 버튼들
         this.setupTrackControls();
+
+        // 화자 인식 기능 설정
+        this.setupSpeakerRecognition();
     }
 
     setupTimelineEditor() {
@@ -309,7 +312,7 @@ class VideoAnalysisApp {
             <div class="file-card ${isSelected ? 'selected' : ''}" data-file-path="${file.path}">
                 <div class="file-header">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <input type="checkbox" ${isSelected ? 'checked' : ''}>
+                        <input type="checkbox" class="file-checkbox" value="${file.path}" ${isSelected ? 'checked' : ''}>
                         <span class="file-icon">${typeIcon}</span>
                     </div>
                     <span class="file-type-badge ${typeClass}">${file.extension.toUpperCase()}</span>
@@ -3131,8 +3134,15 @@ class VideoAnalysisApp {
             return;
         }
 
-        // 자막을 트랙별로 분류
-        const classifiedSubtitles = this.classifySubtitlesByType(subtitles);
+        // 자막을 트랙별로 분류 (화자 기반 분류가 있으면 우선 사용)
+        let classifiedSubtitles;
+        if (this.timeline.speakerClassifiedSubtitles) {
+            console.log('🎭 화자 기반 분류된 자막 사용');
+            classifiedSubtitles = this.timeline.speakerClassifiedSubtitles;
+        } else {
+            console.log('📝 기본 타입별 분류 사용');
+            classifiedSubtitles = this.classifySubtitlesByType(subtitles);
+        }
 
         // 각 트랙에 자막 렌더링
         ['main', 'translation', 'description'].forEach(trackType => {
@@ -5661,6 +5671,1340 @@ class VideoAnalysisApp {
             alert(`❌ 테스트 실패: ${error.message}`);
         }
     }
+
+    // 화자 인식 관련 메서드들
+    setupSpeakerRecognition() {
+        console.log('🎭 화자 인식 시스템 설정');
+
+        // 화자 인식 시작 버튼
+        const startBtn = document.getElementById('start-speaker-recognition');
+        if (startBtn) {
+            startBtn.addEventListener('click', () => {
+                this.startSpeakerRecognition();
+            });
+        }
+
+        // 트랙 배치 적용 버튼
+        const applyBtn = document.getElementById('apply-speaker-mapping');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', () => {
+                this.applySpeakerMapping();
+            });
+        }
+    }
+
+    async startSpeakerRecognition() {
+        console.log('🎭 화자 인식 시작');
+
+        // 인식 방법 확인
+        const methodRadio = document.querySelector('input[name="recognition-method"]:checked');
+        const method = methodRadio ? methodRadio.value : 'text';
+
+        console.log(`🔍 선택된 인식 방법: ${method}`);
+
+        if (method === 'text') {
+            await this.startTextBasedRecognition();
+        } else if (method === 'audio') {
+            await this.startAudioBasedRecognition();
+        }
+    }
+
+    async startTextBasedRecognition() {
+        console.log('📝 텍스트 기반 화자 인식 시작');
+
+        // 선택된 SRT 파일 확인
+        const selectedFiles = this.getSelectedSrtFiles();
+        if (selectedFiles.length === 0) {
+            alert('🎭 SRT 파일을 먼저 선택해주세요');
+            return;
+        }
+
+        const srtFile = selectedFiles[0];
+
+        try {
+            // 화자 인식 API 호출
+            const response = await fetch('/api/analysis/speaker-recognition', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    file_path: srtFile
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                this.displayDetectedSpeakers(result.speakers);
+                this.currentSpeakers = result.speakers;
+            } else {
+                throw new Error('화자 인식 실패');
+            }
+
+        } catch (error) {
+            console.error('화자 인식 에러:', error);
+            alert('❌ 화자 인식 중 오류가 발생했습니다');
+        }
+    }
+
+    async startAudioBasedRecognition() {
+        console.log('🎵 음성 기반 화자 인식 시작');
+
+        // 선택된 파일들 확인
+        const selectedFiles = this.getSelectedFiles(); // 모든 파일 타입
+        const audioFiles = selectedFiles.filter(f =>
+            f.endsWith('.wav') || f.endsWith('.mp3') || f.endsWith('.webm') || f.endsWith('.mp4')
+        );
+        const srtFiles = this.getSelectedSrtFiles();
+
+        if (audioFiles.length === 0) {
+            alert('🎵 음성 파일(.wav, .mp3, .webm, .mp4)을 먼저 선택해주세요');
+            return;
+        }
+
+        const audioFile = audioFiles[0];
+        const srtFile = srtFiles.length > 0 ? srtFiles[0] : null;
+
+        try {
+            // 진행 상황 표시
+            const startBtn = document.getElementById('start-speaker-recognition');
+            const originalText = startBtn.textContent;
+            startBtn.textContent = '🎵 음성 분석 중...';
+            startBtn.disabled = true;
+
+            // 음성 기반 화자 인식 API 호출
+            const response = await fetch('/api/analysis/audio-speaker-recognition', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    audio_path: audioFile,
+                    srt_path: srtFile,
+                    n_speakers: null // 자동 감지
+                })
+            });
+
+            // 응답 상태 확인
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`서버 오류 (${response.status}): ${errorText.substring(0, 100)}...`);
+            }
+
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                // SRT 파일 경로 저장
+                this.currentSrtFile = srtFile;
+
+                this.displayAudioBasedSpeakers(result.speakers, result.analysis_method);
+                this.currentSpeakers = result.speakers;
+
+                // 자막이 함께 분석된 경우 분류된 자막 정보도 저장
+                if (result.classified_subtitles) {
+                    this.classifiedSubtitles = result.classified_subtitles;
+                }
+            } else {
+                throw new Error(result.error || '음성 기반 화자 인식 실패');
+            }
+
+            // 버튼 복원
+            startBtn.textContent = originalText;
+            startBtn.disabled = false;
+
+        } catch (error) {
+            console.error('음성 기반 화자 인식 에러:', error);
+            alert('❌ 음성 기반 화자 인식 중 오류가 발생했습니다: ' + error.message);
+
+            // 버튼 복원
+            const startBtn = document.getElementById('start-speaker-recognition');
+            startBtn.textContent = '🎭 화자 인식 시작';
+            startBtn.disabled = false;
+        }
+    }
+
+    displayAudioBasedSpeakers(speakers, analysisMethod) {
+        console.log('🎵 음성 기반 화자 표시:', speakers);
+
+        const speakersSection = document.getElementById('detected-speakers');
+        const speakersGrid = document.getElementById('speakers-grid');
+
+        speakersGrid.innerHTML = '';
+
+        // 화자별 색상 매핑 생성
+        const speakerColors = this.generateSpeakerColors(Object.keys(speakers));
+
+        // 화자별 카드 생성
+        Object.entries(speakers).forEach(([speakerName, speakerData]) => {
+            const speakerColor = speakerColors[speakerName];
+            const speakerCard = document.createElement('div');
+            speakerCard.className = 'speaker-card audio-based';
+            speakerCard.style.borderLeft = `4px solid ${speakerColor}`;
+
+            speakerCard.innerHTML = `
+                <div class="speaker-header">
+                    <h5 style="color: ${speakerColor}">🎵 ${speakerName}</h5>
+                    <span class="speaker-count">${speakerData.subtitle_count || speakerData.window_count}개 구간</span>
+                </div>
+                <div class="speaker-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">평균 피치:</span>
+                        <span class="stat-value">${speakerData.avg_pitch ? speakerData.avg_pitch.toFixed(1) + 'Hz' : 'N/A'}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">음성 에너지:</span>
+                        <span class="stat-value">${speakerData.avg_energy ? speakerData.avg_energy.toFixed(3) : 'N/A'}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">총 시간:</span>
+                        <span class="stat-value">${speakerData.total_duration ? speakerData.total_duration.toFixed(1) + '초' : 'N/A'}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">스펙트럼:</span>
+                        <span class="stat-value">${speakerData.avg_spectral_centroid ? speakerData.avg_spectral_centroid.toFixed(0) + 'Hz' : 'N/A'}</span>
+                    </div>
+                </div>
+                <div class="speaker-subtitles" id="speaker-subtitles-${speakerName}">
+                    <div class="subtitle-header">
+                        <strong>📝 실제 대사 (시간순):</strong>
+                        <button class="toggle-all-btn" onclick="app.toggleAllSubtitles('${speakerName}')" style="background: ${speakerColor}">
+                            모두 선택/해제
+                        </button>
+                    </div>
+                    <div class="subtitle-list" style="max-height: 200px; overflow-y: auto;">
+                        <!-- 실제 자막들이 여기에 추가됩니다 -->
+                    </div>
+                </div>
+                <div class="analysis-badge">
+                    <span class="badge audio-badge">🎵 음성 분석</span>
+                </div>
+            `;
+
+            speakersGrid.appendChild(speakerCard);
+
+            // 해당 화자의 자막들을 시간순으로 정렬해서 추가
+            this.addSpeakerSubtitlesFromSRT(speakerName, speakerData, speakerColor);
+        });
+
+        // 실제 SRT 파일 내용을 시간순으로 표시
+        this.displayAllSRTSubtitlesWithSpeakers(speakers);
+
+        // 자막별 상세 분석 결과 추가
+        if (this.classifiedSubtitles && Array.isArray(this.classifiedSubtitles)) {
+            this.displaySubtitleDetailsWithTrackSelection(this.classifiedSubtitles);
+        }
+
+        speakersSection.style.display = 'block';
+        this.setupSpeakerTrackMapping(speakers);
+    }
+
+    displaySubtitleDetailsWithTrackSelection(subtitles) {
+        console.log('📝 자막별 상세 분석 표시:', subtitles);
+
+        const speakersSection = document.getElementById('detected-speakers');
+
+        // 자막 상세 분석 섹션 추가
+        const detailsSection = document.createElement('div');
+        detailsSection.className = 'subtitle-details-section';
+        detailsSection.innerHTML = `
+            <div class="section-header">
+                <h4>📝 자막별 분석 결과 및 트랙 선택</h4>
+                <p>각 자막의 화자 인식 결과를 확인하고 필요시 수동으로 트랙을 변경할 수 있습니다.</p>
+            </div>
+            <div class="subtitle-details-container" id="subtitle-details-container">
+                <!-- 자막 상세 내용이 여기에 추가됩니다 -->
+            </div>
+        `;
+
+        speakersSection.appendChild(detailsSection);
+
+        const container = document.getElementById('subtitle-details-container');
+
+        subtitles.forEach((subtitle, index) => {
+            const detailCard = document.createElement('div');
+            detailCard.className = 'subtitle-detail-card';
+
+            const formatTime = (seconds) => {
+                const minutes = Math.floor(seconds / 60);
+                const secs = (seconds % 60).toFixed(1);
+                return `${minutes}:${secs.padStart(4, '0')}`;
+            };
+
+            detailCard.innerHTML = `
+                <div class="subtitle-detail-header">
+                    <span class="subtitle-number">#${index + 1}</span>
+                    <span class="subtitle-time">${formatTime(subtitle.start_time)} → ${formatTime(subtitle.end_time)}</span>
+                    <span class="subtitle-duration">(${(subtitle.end_time - subtitle.start_time).toFixed(1)}초)</span>
+                </div>
+                <div class="subtitle-content">
+                    <div class="subtitle-text">"${subtitle.text}"</div>
+                </div>
+                <div class="subtitle-analysis">
+                    <div class="analysis-before">
+                        <strong>🔍 분석 결과:</strong>
+                        <span class="detected-speaker">${subtitle.speaker_name || '미분류'}</span>
+                        ${subtitle.speaker_id !== undefined ? `<span class="speaker-confidence">(ID: ${subtitle.speaker_id})</span>` : ''}
+                    </div>
+                    <div class="track-selection">
+                        <label for="track-select-${index}">🎯 트랙 배치:</label>
+                        <select id="track-select-${index}" class="subtitle-track-select" data-subtitle-index="${index}">
+                            <option value="main" ${this.getSubtitleAutoAssignedTrack(subtitle) === 'main' ? 'selected' : ''}>📝 메인 자막</option>
+                            <option value="translation" ${this.getSubtitleAutoAssignedTrack(subtitle) === 'translation' ? 'selected' : ''}>🌐 번역 자막</option>
+                            <option value="description" ${this.getSubtitleAutoAssignedTrack(subtitle) === 'description' ? 'selected' : ''}>🔊 설명 자막</option>
+                            <option value="unassigned" ${this.getSubtitleAutoAssignedTrack(subtitle) === 'unassigned' ? 'selected' : ''}>❓ 미분류</option>
+                        </select>
+                        <button class="apply-track-btn" onclick="app.applySingleSubtitleTrack(${index})" title="이 자막만 변경 적용">
+                            ✅ 적용
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(detailCard);
+        });
+
+        // 일괄 적용 버튼 추가
+        const batchActions = document.createElement('div');
+        batchActions.className = 'batch-actions';
+        batchActions.innerHTML = `
+            <button class="btn btn-primary" onclick="app.applyAllSubtitleTracks()">
+                🎯 모든 변경사항 일괄 적용
+            </button>
+            <button class="btn btn-secondary" onclick="app.resetAllSubtitleTracks()">
+                🔄 모든 선택 초기화
+            </button>
+        `;
+
+        container.appendChild(batchActions);
+    }
+
+    getSubtitleCurrentTrack(subtitle) {
+        // 현재 자막이 어느 트랙에 배치되어 있는지 확인
+        if (!this.timeline.speakerClassifiedSubtitles) return 'unassigned';
+
+        for (const [track, trackSubtitles] of Object.entries(this.timeline.speakerClassifiedSubtitles)) {
+            if (trackSubtitles.some(s => s.start_time === subtitle.start_time && s.text === subtitle.text)) {
+                return track;
+            }
+        }
+        return 'unassigned';
+    }
+
+    getSubtitleAutoAssignedTrack(subtitle) {
+        // 화자 기반 자동 배치와 현재 트랙 상태를 모두 고려하여 트랙 결정
+
+        // 1. 현재 명시적으로 배치된 트랙이 있으면 우선 사용
+        const currentTrack = this.getSubtitleCurrentTrack(subtitle);
+        if (currentTrack && currentTrack !== 'unassigned') {
+            return currentTrack;
+        }
+
+        // 2. 화자 기반 자동 배치 확인
+        if (this.currentSpeakers && subtitle.speaker_name) {
+            const speakerData = this.currentSpeakers[subtitle.speaker_name];
+            if (speakerData && speakerData.assigned_track && speakerData.assigned_track !== 'unassigned') {
+                return speakerData.assigned_track;
+            }
+        }
+
+        // 3. 화자별 기본 트랙 규칙 적용
+        if (subtitle.speaker_name) {
+            switch (subtitle.speaker_name) {
+                case '화자1':
+                    return 'main';      // 화자1은 메인 자막
+                case '화자2':
+                    return 'translation'; // 화자2는 번역 자막
+                case '화자3':
+                    return 'description'; // 화자3은 설명 자막
+                default:
+                    return 'unassigned';  // 기타는 미분류
+            }
+        }
+
+        return 'unassigned';
+    }
+
+    getSelectedFiles() {
+        // 모든 선택된 파일들 반환 (SRT 뿐만 아니라 모든 타입)
+        const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+        const files = [];
+
+        checkboxes.forEach(checkbox => {
+            files.push(checkbox.value);
+        });
+
+        return files;
+    }
+
+    displayDetectedSpeakers(speakers) {
+        console.log('🎯 감지된 화자 표시:', speakers);
+
+        const speakersSection = document.getElementById('detected-speakers');
+        const speakersGrid = document.getElementById('speakers-grid');
+
+        speakersGrid.innerHTML = '';
+
+        Object.entries(speakers).forEach(([speakerName, speakerData]) => {
+            const speakerCard = document.createElement('div');
+            speakerCard.className = 'speaker-card';
+            speakerCard.innerHTML = `
+                <div class="speaker-header">
+                    <h5>${speakerName}</h5>
+                    <span class="speaker-count">${speakerData.subtitle_count}개 대사</span>
+                </div>
+                <div class="speaker-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">평균 길이:</span>
+                        <span class="stat-value">${speakerData.avg_chars.toFixed(0)}자</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">말투:</span>
+                        <span class="stat-value">${speakerData.characteristics.politeness_level}</span>
+                    </div>
+                </div>
+                <div class="speaker-samples">
+                    <strong>샘플 대사:</strong>
+                    ${speakerData.sample_texts.map(text => `<div class="sample-text">"${text}"</div>`).join('')}
+                </div>
+            `;
+
+            speakersGrid.appendChild(speakerCard);
+        });
+
+        speakersSection.style.display = 'block';
+        this.setupSpeakerTrackMapping(speakers);
+    }
+
+    setupSpeakerTrackMapping(speakers) {
+        console.log('🎚️ 트랙 매핑 설정');
+
+        const mappingSection = document.getElementById('speaker-track-mapping');
+        const mappingGrid = document.getElementById('mapping-grid');
+
+        mappingGrid.innerHTML = '';
+
+        const tracks = [
+            { value: 'main', label: '📝 메인 자막', color: '#007bff' },
+            { value: 'translation', label: '🌐 번역 자막', color: '#28a745' },
+            { value: 'description', label: '🔊 설명 자막', color: '#ffc107' }
+        ];
+
+        Object.entries(speakers).forEach(([speakerName, speakerData], index) => {
+            const mappingRow = document.createElement('div');
+            mappingRow.className = 'mapping-row';
+
+            const defaultTrack = index < tracks.length ? tracks[index].value : 'main';
+
+            mappingRow.innerHTML = `
+                <div class="speaker-info">
+                    <strong>${speakerName}</strong>
+                    <span class="subtitle-count">(${speakerData.subtitle_count}개 대사)</span>
+                </div>
+                <div class="track-selector">
+                    <label>트랙 선택:</label>
+                    <select class="track-select" data-speaker="${speakerName}">
+                        ${tracks.map(track =>
+                            `<option value="${track.value}" ${track.value === defaultTrack ? 'selected' : ''}>
+                                ${track.label}
+                            </option>`
+                        ).join('')}
+                    </select>
+                </div>
+            `;
+
+            mappingGrid.appendChild(mappingRow);
+        });
+
+        mappingSection.style.display = 'block';
+    }
+
+    async applySpeakerMapping() {
+        console.log('✅ 화자 트랙 매핑 적용');
+
+        // 사용자가 설정한 매핑 수집
+        const speakerTrackMapping = {};
+        document.querySelectorAll('.track-select').forEach(select => {
+            const speaker = select.dataset.speaker;
+            const track = select.value;
+            speakerTrackMapping[speaker] = track;
+        });
+
+        // 선택된 SRT 파일 확인
+        const selectedFiles = this.getSelectedSrtFiles();
+        if (selectedFiles.length === 0) {
+            alert('SRT 파일을 먼저 선택해주세요');
+            return;
+        }
+
+        const srtFile = selectedFiles[0];
+
+        try {
+            // 트랙 배치 API 호출
+            const response = await fetch('/api/analysis/assign-speakers-to-tracks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    file_path: srtFile,
+                    speaker_track_mapping: speakerTrackMapping,
+                    existing_speakers: this.currentSpeakers || {},
+                    existing_subtitles: this.classifiedSubtitles || null
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                this.displayTrackingResults(result);
+                this.updateHybridTracksWithSpeakers(result.classified_subtitles);
+            } else {
+                throw new Error('트랙 배치 실패');
+            }
+
+        } catch (error) {
+            console.error('트랙 배치 에러:', error);
+            alert('❌ 트랙 배치 중 오류가 발생했습니다');
+        }
+    }
+
+    displayTrackingResults(result) {
+        console.log('📊 배치 결과 표시');
+
+        const resultsSection = document.getElementById('mapping-results');
+        const trackSummary = document.getElementById('track-summary');
+
+        trackSummary.innerHTML = '';
+
+        const trackLabels = {
+            main: '📝 메인 자막',
+            translation: '🌐 번역 자막',
+            description: '🔊 설명 자막',
+            unassigned: '❓ 미분류'
+        };
+
+        Object.entries(result.track_counts).forEach(([track, count]) => {
+            const summaryCard = document.createElement('div');
+            summaryCard.className = 'track-summary-card';
+            summaryCard.innerHTML = `
+                <div class="track-label">${trackLabels[track] || track}</div>
+                <div class="track-count">${count}개 자막</div>
+            `;
+            trackSummary.appendChild(summaryCard);
+        });
+
+        resultsSection.style.display = 'block';
+    }
+
+    updateHybridTracksWithSpeakers(classifiedSubtitles) {
+        console.log('🎬 하이브리드 트랙에 화자별 자막 업데이트');
+
+        // 각 트랙별로 자막 데이터 업데이트
+        this.timeline.speakerClassifiedSubtitles = classifiedSubtitles;
+
+        // timeline.subtitleData가 없으면 초기화
+        if (!this.timeline.subtitleData) {
+            console.log('🔧 timeline.subtitleData 초기화');
+            // 모든 분류된 자막을 하나로 합침
+            const allSubtitles = [];
+            Object.values(classifiedSubtitles).forEach(trackSubtitles => {
+                if (Array.isArray(trackSubtitles)) {
+                    allSubtitles.push(...trackSubtitles);
+                }
+            });
+
+            // 시간 순으로 정렬
+            allSubtitles.sort((a, b) => a.start_time - b.start_time);
+
+            this.timeline.subtitleData = {
+                subtitles: allSubtitles,
+                file_path: "speaker_classified",
+                total_duration: allSubtitles.length > 0 ? Math.max(...allSubtitles.map(s => s.end_time)) : 0
+            };
+
+            console.log(`📝 timeline.subtitleData 초기화 완료: ${allSubtitles.length}개 자막`);
+        }
+
+        // 하이브리드 트랙 다시 렌더링
+        this.renderHybridSubtitleTracks();
+    }
+
+    applySingleSubtitleTrack(subtitleIndex) {
+        console.log(`✅ 자막 #${subtitleIndex + 1} 트랙 변경 적용`);
+
+        const selectElement = document.getElementById(`track-select-${subtitleIndex}`);
+        if (!selectElement) {
+            console.error(`❌ 트랙 선택 요소를 찾을 수 없습니다: track-select-${subtitleIndex}`);
+            return;
+        }
+
+        const newTrack = selectElement.value;
+        const subtitle = this.classifiedSubtitles[subtitleIndex];
+
+        if (!subtitle) {
+            console.error(`❌ 자막 데이터를 찾을 수 없습니다: ${subtitleIndex}`);
+            return;
+        }
+
+        // 기존 트랙에서 자막 제거
+        this.removeSubtitleFromAllTracks(subtitle);
+
+        // 새 트랙에 자막 추가
+        if (!this.timeline.speakerClassifiedSubtitles) {
+            this.timeline.speakerClassifiedSubtitles = {
+                main: [],
+                translation: [],
+                description: [],
+                unassigned: []
+            };
+        }
+
+        if (!this.timeline.speakerClassifiedSubtitles[newTrack]) {
+            this.timeline.speakerClassifiedSubtitles[newTrack] = [];
+        }
+
+        this.timeline.speakerClassifiedSubtitles[newTrack].push(subtitle);
+
+        // 편집 탭 업데이트
+        this.renderHybridSubtitleTracks();
+
+        this.showSuccess(`자막 #${subtitleIndex + 1}을 ${this.getTrackDisplayName(newTrack)}로 이동했습니다`);
+    }
+
+    applyAllSubtitleTracks() {
+        console.log('🎯 모든 자막 트랙 변경사항 일괄 적용');
+
+        if (!this.classifiedSubtitles) {
+            this.showError('적용할 자막 데이터가 없습니다');
+            return;
+        }
+
+        // 새로운 트랙 분류 생성
+        const newClassification = {
+            main: [],
+            translation: [],
+            description: [],
+            unassigned: []
+        };
+
+        // 각 자막의 선택된 트랙으로 분류
+        this.classifiedSubtitles.forEach((subtitle, index) => {
+            const selectElement = document.getElementById(`track-select-${index}`);
+            if (selectElement) {
+                const selectedTrack = selectElement.value;
+                newClassification[selectedTrack].push(subtitle);
+            } else {
+                newClassification.unassigned.push(subtitle);
+            }
+        });
+
+        // 분류 결과 적용
+        this.timeline.speakerClassifiedSubtitles = newClassification;
+
+        // 편집 탭 업데이트
+        this.renderHybridSubtitleTracks();
+
+        const totalMoved = newClassification.main.length + newClassification.translation.length + newClassification.description.length;
+        this.showSuccess(`모든 변경사항을 적용했습니다 (${totalMoved}개 자막 배치, ${newClassification.unassigned.length}개 미분류)`);
+    }
+
+    resetAllSubtitleTracks() {
+        console.log('🔄 모든 자막 트랙 선택 초기화');
+
+        if (!this.classifiedSubtitles) {
+            this.showError('초기화할 자막 데이터가 없습니다');
+            return;
+        }
+
+        // 모든 select 요소를 '미분류'로 초기화
+        this.classifiedSubtitles.forEach((subtitle, index) => {
+            const selectElement = document.getElementById(`track-select-${index}`);
+            if (selectElement) {
+                selectElement.value = 'unassigned';
+            }
+        });
+
+        this.showSuccess('모든 트랙 선택이 초기화되었습니다');
+    }
+
+    removeSubtitleFromAllTracks(targetSubtitle) {
+        if (!this.timeline.speakerClassifiedSubtitles) return;
+
+        Object.keys(this.timeline.speakerClassifiedSubtitles).forEach(track => {
+            this.timeline.speakerClassifiedSubtitles[track] = this.timeline.speakerClassifiedSubtitles[track].filter(
+                subtitle => !(subtitle.start_time === targetSubtitle.start_time && subtitle.text === targetSubtitle.text)
+            );
+        });
+    }
+
+    getTrackDisplayName(track) {
+        const displayNames = {
+            main: '📝 메인 자막',
+            translation: '🌐 번역 자막',
+            description: '🔊 설명 자막',
+            unassigned: '❓ 미분류'
+        };
+        return displayNames[track] || track;
+    }
+
+    seekToSubtitle(startTime) {
+        console.log(`⏯️ 자막 구간으로 이동: ${startTime}초`);
+
+        const videoPlayer = document.getElementById('video-player');
+        if (videoPlayer) {
+            videoPlayer.currentTime = startTime;
+            this.showSuccess(`${this.formatTime(startTime)}로 이동했습니다`);
+        } else {
+            this.showError('비디오 플레이어를 찾을 수 없습니다');
+        }
+    }
+
+    generateSpeakerColors(speakerNames) {
+        const colors = [
+            '#3498db', // 파란색 (화자1)
+            '#e74c3c', // 빨간색 (화자2)
+            '#2ecc71', // 초록색 (화자3)
+            '#f39c12', // 주황색
+            '#9b59b6', // 보라색
+            '#1abc9c', // 청록색
+            '#34495e', // 진회색
+            '#e67e22', // 당근색
+            '#95a5a6', // 회색
+            '#85C1E9'  // 하늘색
+        ];
+
+        const speakerColors = {};
+        speakerNames.forEach((speaker, index) => {
+            speakerColors[speaker] = colors[index % colors.length];
+        });
+
+        return speakerColors;
+    }
+
+    addSpeakerSubtitles(speakerName, speakerData, speakerColor) {
+        console.log(`📝 ${speakerName} 자막 추가`);
+
+        const subtitleList = document.querySelector(`#speaker-subtitles-${speakerName} .subtitle-list`);
+        if (!subtitleList) {
+            console.error(`자막 리스트 컨테이너를 찾을 수 없습니다: ${speakerName}`);
+            return;
+        }
+
+        // 해당 화자의 자막들 찾기
+        const speakerSubtitles = this.classifiedSubtitles ?
+            this.classifiedSubtitles.filter(sub => sub.speaker_name === speakerName) : [];
+
+        // 시간순으로 정렬
+        speakerSubtitles.sort((a, b) => a.start_time - b.start_time);
+
+        const formatTime = (seconds) => {
+            const minutes = Math.floor(seconds / 60);
+            const secs = (seconds % 60).toFixed(1);
+            return `${minutes}:${secs.padStart(4, '0')}`;
+        };
+
+        speakerSubtitles.forEach((subtitle, index) => {
+            const subtitleItem = document.createElement('div');
+            subtitleItem.className = 'subtitle-item';
+
+            const globalIndex = this.classifiedSubtitles.findIndex(s =>
+                s.start_time === subtitle.start_time && s.text === subtitle.text
+            );
+
+            subtitleItem.innerHTML = `
+                <div class="subtitle-checkbox-container">
+                    <input type="checkbox"
+                           id="subtitle-check-${globalIndex}"
+                           class="subtitle-checkbox"
+                           data-speaker="${speakerName}"
+                           data-subtitle-index="${globalIndex}"
+                           onchange="app.onSubtitleCheckboxChange(${globalIndex}, '${speakerName}')">
+                    <label for="subtitle-check-${globalIndex}" class="checkbox-label"></label>
+                </div>
+                <div class="subtitle-content" style="border-left: 3px solid ${speakerColor}">
+                    <div class="subtitle-time-info">
+                        <span class="subtitle-time">${formatTime(subtitle.start_time)} → ${formatTime(subtitle.end_time)}</span>
+                        <span class="subtitle-duration">(${(subtitle.end_time - subtitle.start_time).toFixed(1)}초)</span>
+                        <button class="play-subtitle-btn" onclick="app.seekToSubtitle(${subtitle.start_time})" title="재생">▶️</button>
+                    </div>
+                    <div class="subtitle-text-content">"${subtitle.text}"</div>
+                </div>
+            `;
+
+            subtitleList.appendChild(subtitleItem);
+        });
+
+        // 선택된 자막 개수 업데이트
+        this.updateSelectedCount(speakerName);
+    }
+
+    async addSpeakerSubtitlesFromSRT(speakerName, speakerData, speakerColor) {
+        console.log(`📝 ${speakerName} SRT 파일에서 자막 로드`);
+
+        const subtitleList = document.querySelector(`#speaker-subtitles-${speakerName} .subtitle-list`);
+        if (!subtitleList) {
+            console.error(`자막 리스트 컨테이너를 찾을 수 없습니다: ${speakerName}`);
+            return;
+        }
+
+        try {
+            // 실제 SRT 파일 경로 설정
+            const srtFilePath = '/home/sk/ws/youtubeanalysis/youtube/download/시어머니 머리꼭대기에 앉은 전지현의 미친 필살기🔥북극성 4,5화 [vTMssu3XB7g].ko.srt';
+
+            // 실제 SRT 파일 내용 로드
+            const allSrtSubtitles = await this.loadSRTFile(srtFilePath);
+
+            // 모든 SRT 자막을 표시 (화자별로 색상 구분)
+            const speakerSubtitles = allSrtSubtitles.map((srtSub, index) => {
+                // 화자 인식 결과와 매칭하여 화자 정보 추가
+                let assignedSpeaker = '미분류';
+                let speakerId = -1;
+
+                if (this.classifiedSubtitles) {
+                    const matchingClassified = this.classifiedSubtitles.find(classifiedSub =>
+                        Math.abs(srtSub.start_time - classifiedSub.start_time) < 0.5 &&
+                        Math.abs(srtSub.end_time - classifiedSub.end_time) < 0.5
+                    );
+
+                    if (matchingClassified) {
+                        assignedSpeaker = matchingClassified.speaker_name;
+                        speakerId = matchingClassified.speaker_id;
+                    }
+                }
+
+                return {
+                    ...srtSub,
+                    speaker_name: assignedSpeaker,
+                    speaker_id: speakerId,
+                    globalIndex: index + 1
+                };
+            });
+
+            // 시간순으로 정렬
+            speakerSubtitles.sort((a, b) => a.start_time - b.start_time);
+
+            const formatSRTTime = (seconds) => {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = (seconds % 60).toFixed(3);
+                return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.padStart(6, '0')}`;
+            };
+
+            speakerSubtitles.forEach((subtitle, index) => {
+                const subtitleItem = document.createElement('div');
+                subtitleItem.className = 'subtitle-item';
+
+                // 화자별 색상 설정
+                const getSpeakerColor = (speaker) => {
+                    if (speaker === '화자1') return '#3498db';  // 파란색
+                    if (speaker === '화자2') return '#e74c3c';  // 빨간색
+                    if (speaker === '화자3') return '#2ecc71';  // 초록색
+                    return '#95a5a6';  // 회색 (미분류)
+                };
+
+                const currentSpeakerColor = getSpeakerColor(subtitle.speaker_name);
+                const isCurrentSpeaker = subtitle.speaker_name === speakerName;
+
+                subtitleItem.innerHTML = `
+                    <div class="subtitle-checkbox-container">
+                        <input type="checkbox"
+                               id="subtitle-check-${subtitle.globalIndex}"
+                               class="subtitle-checkbox"
+                               data-speaker="${subtitle.speaker_name}"
+                               data-subtitle-index="${subtitle.globalIndex}"
+                               ${isCurrentSpeaker ? 'checked' : ''}
+                               onchange="app.onSubtitleCheckboxChange(${subtitle.globalIndex}, '${subtitle.speaker_name}')">
+                        <label for="subtitle-check-${subtitle.globalIndex}" class="checkbox-label"></label>
+                    </div>
+                    <div class="subtitle-content" style="border-left: 3px solid ${currentSpeakerColor}; ${isCurrentSpeaker ? 'background-color: rgba(' + hexToRgb(currentSpeakerColor) + ', 0.1)' : ''}">
+                        <div class="subtitle-time-info">
+                            <span class="subtitle-number">#${subtitle.number || subtitle.globalIndex}</span>
+                            <span class="subtitle-time">${formatSRTTime(subtitle.start_time)} → ${formatSRTTime(subtitle.end_time)}</span>
+                            <span class="speaker-label" style="color: ${currentSpeakerColor}; font-weight: bold;">${subtitle.speaker_name}</span>
+                            <button class="play-subtitle-btn" onclick="app.seekToSubtitle(${subtitle.start_time})" title="재생">▶️</button>
+                        </div>
+                        <div class="subtitle-text-content">${subtitle.text}</div>
+                    </div>
+                `;
+
+                subtitleList.appendChild(subtitleItem);
+            });
+
+            // 헥스 색상을 RGB로 변환하는 헬퍼 함수
+            function hexToRgb(hex) {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ?
+                    parseInt(result[1], 16) + ',' + parseInt(result[2], 16) + ',' + parseInt(result[3], 16) :
+                    '0,0,0';
+            }
+
+            // 선택된 자막 개수 업데이트
+            this.updateSelectedCount(speakerName);
+
+        } catch (error) {
+            console.error(`❌ SRT 파일 로드 실패: ${error}`);
+            subtitleList.innerHTML = `<div class="error-message">❌ SRT 파일을 로드할 수 없습니다: ${error.message}</div>`;
+        }
+    }
+
+    async loadSRTFile(filePath) {
+        console.log(`📁 SRT 파일 로드: ${filePath}`);
+
+        const response = await fetch('/api/analysis/subtitle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                files: [filePath]
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        if (result.results && result.results[0] && result.results[0].status === 'success') {
+            return result.results[0].data.subtitles;
+        } else {
+            throw new Error('SRT 파일 분석 실패');
+        }
+    }
+
+    async displayAllSRTSubtitlesWithSpeakers(speakers) {
+        console.log('🎬 전체 SRT 자막을 화자별 색상으로 표시');
+
+        try {
+            // SRT 파일 경로
+            const srtFilePath = '/home/sk/ws/youtubeanalysis/youtube/download/시어머니 머리꼭대기에 앉은 전지현의 미친 필살기🔥북극성 4,5화 [vTMssu3XB7g].ko.srt';
+
+            // SRT 파일 로드
+            const allSrtSubtitles = await this.loadSRTFile(srtFilePath);
+
+            // 화자별 색상 매핑
+            const getSpeakerColor = (speaker) => {
+                if (speaker === '화자1') return '#3498db';  // 파란색
+                if (speaker === '화자2') return '#e74c3c';  // 빨간색
+                if (speaker === '화자3') return '#2ecc71';  // 초록색
+                return '#95a5a6';  // 회색 (미분류)
+            };
+
+            const hexToRgb = (hex) => {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ?
+                    parseInt(result[1], 16) + ',' + parseInt(result[2], 16) + ',' + parseInt(result[3], 16) :
+                    '0,0,0';
+            };
+
+            const formatSRTTime = (seconds) => {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = (seconds % 60).toFixed(3);
+                return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.padStart(6, '0')}`;
+            };
+
+            // 전체 자막을 화자 정보와 함께 매핑
+            const enrichedSubtitles = allSrtSubtitles.map((srtSub, index) => {
+                let assignedSpeaker = '미분류';
+                let speakerId = -1;
+
+                if (this.classifiedSubtitles) {
+                    const matchingClassified = this.classifiedSubtitles.find(classifiedSub =>
+                        Math.abs(srtSub.start_time - classifiedSub.start_time) < 0.5 &&
+                        Math.abs(srtSub.end_time - classifiedSub.end_time) < 0.5
+                    );
+
+                    if (matchingClassified) {
+                        assignedSpeaker = matchingClassified.speaker_name;
+                        speakerId = matchingClassified.speaker_id;
+                    }
+                }
+
+                return {
+                    ...srtSub,
+                    speaker_name: assignedSpeaker,
+                    speaker_id: speakerId,
+                    globalIndex: index + 1
+                };
+            });
+
+            // 기존 전체 자막 섹션 제거
+            const existingSection = document.getElementById('all-subtitles-section');
+            if (existingSection) {
+                existingSection.remove();
+            }
+
+            // 새로운 전체 자막 섹션 생성
+            const allSubtitlesSection = document.createElement('div');
+            allSubtitlesSection.id = 'all-subtitles-section';
+            allSubtitlesSection.className = 'analysis-section';
+            allSubtitlesSection.innerHTML = `
+                <h3>🎬 전체 자막 (시간순)</h3>
+                <div class="subtitle-controls">
+                    <div class="control-row">
+                        <button onclick="app.selectAllSubtitles()" class="action-btn">전체 선택</button>
+                        <button onclick="app.deselectAllSubtitles()" class="action-btn">전체 해제</button>
+                        <span class="selected-count">선택된 자막: <span id="total-selected-count">0</span>개</span>
+                    </div>
+                    <div class="control-row">
+                        <div class="speaker-bulk-controls">
+                            <label>화자별 일괄 선택:</label>
+                            <button onclick="app.selectBySpeaker('화자1')" class="speaker-btn speaker1">화자1</button>
+                            <button onclick="app.selectBySpeaker('화자2')" class="speaker-btn speaker2">화자2</button>
+                            <button onclick="app.selectBySpeaker('화자3')" class="speaker-btn speaker3">화자3</button>
+                            <button onclick="app.selectBySpeaker('미분류')" class="speaker-btn unclassified">미분류</button>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <div class="track-assignment-controls">
+                            <label>선택된 자막을 트랙에 일괄 적용:</label>
+                            <button onclick="app.assignSelectedToTrack('main')" class="track-btn main-track">📝 메인 자막</button>
+                            <button onclick="app.assignSelectedToTrack('translation')" class="track-btn translation-track">🌐 번역 자막</button>
+                            <button onclick="app.assignSelectedToTrack('description')" class="track-btn description-track">🔊 설명 자막</button>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <div class="speaker-change-controls">
+                            <label>선택된 자막의 화자 변경:</label>
+                            <select id="target-speaker-select" class="speaker-select">
+                                <option value="화자1">화자1</option>
+                                <option value="화자2">화자2</option>
+                                <option value="화자3">화자3</option>
+                                <option value="미분류">미분류</option>
+                            </select>
+                            <button onclick="app.changeSpeakerForSelected()" class="action-btn">화자 변경</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="all-subtitles-list"></div>
+            `;
+
+            // speakers 섹션 다음에 추가
+            const speakersSection = document.getElementById('speakers-section');
+            speakersSection.insertAdjacentElement('afterend', allSubtitlesSection);
+
+            // 자막 리스트 컨테이너
+            const subtitleList = allSubtitlesSection.querySelector('.all-subtitles-list');
+
+            // 모든 자막 표시
+            enrichedSubtitles.forEach((subtitle) => {
+                const currentSpeakerColor = getSpeakerColor(subtitle.speaker_name);
+
+                const subtitleItem = document.createElement('div');
+                subtitleItem.className = 'subtitle-item';
+                subtitleItem.innerHTML = `
+                    <div class="subtitle-checkbox-container">
+                        <input type="checkbox"
+                               id="subtitle-check-${subtitle.globalIndex}"
+                               class="subtitle-checkbox"
+                               data-speaker="${subtitle.speaker_name}"
+                               data-subtitle-index="${subtitle.globalIndex}"
+                               onchange="app.onSubtitleCheckboxChange(${subtitle.globalIndex}, '${subtitle.speaker_name}')">
+                        <label for="subtitle-check-${subtitle.globalIndex}" class="checkbox-label"></label>
+                    </div>
+                    <div class="subtitle-content" style="border-left: 3px solid ${currentSpeakerColor}; background-color: rgba(${hexToRgb(currentSpeakerColor)}, 0.05);">
+                        <div class="subtitle-time-info">
+                            <span class="subtitle-number">#${subtitle.number || subtitle.globalIndex}</span>
+                            <span class="subtitle-time">${formatSRTTime(subtitle.start_time)} → ${formatSRTTime(subtitle.end_time)}</span>
+                            <span class="speaker-label" style="color: ${currentSpeakerColor}; font-weight: bold;">${subtitle.speaker_name}</span>
+                            <button class="play-subtitle-btn" onclick="app.seekToSubtitle(${subtitle.start_time})" title="재생">▶️</button>
+                        </div>
+                        <div class="subtitle-text-content">${subtitle.text}</div>
+                    </div>
+                `;
+
+                subtitleList.appendChild(subtitleItem);
+            });
+
+            // 전체 선택된 자막 개수 업데이트
+            this.updateTotalSelectedCount();
+
+            console.log(`✅ 전체 SRT 자막 표시 완료: ${enrichedSubtitles.length}개`);
+
+        } catch (error) {
+            console.error(`❌ 전체 SRT 자막 표시 실패: ${error}`);
+        }
+    }
+
+    selectAllSubtitles() {
+        const checkboxes = document.querySelectorAll('.subtitle-checkbox');
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = true;
+        });
+        this.updateTotalSelectedCount();
+    }
+
+    deselectAllSubtitles() {
+        const checkboxes = document.querySelectorAll('.subtitle-checkbox');
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = false;
+        });
+        this.updateTotalSelectedCount();
+    }
+
+    updateTotalSelectedCount() {
+        const selectedCheckboxes = document.querySelectorAll('.subtitle-checkbox:checked');
+        const countElement = document.getElementById('total-selected-count');
+        if (countElement) {
+            countElement.textContent = selectedCheckboxes.length;
+        }
+    }
+
+    onSubtitleCheckboxChange(subtitleIndex, speakerName) {
+        console.log(`✅ 자막 #${subtitleIndex} 선택 상태 변경: ${speakerName}`);
+        this.updateTotalSelectedCount();
+    }
+
+    selectBySpeaker(speakerName) {
+        console.log(`🎭 ${speakerName} 화자의 모든 자막 선택`);
+
+        // 먼저 모든 체크박스 해제
+        this.deselectAllSubtitles();
+
+        // 해당 화자의 자막만 선택
+        const speakerCheckboxes = document.querySelectorAll(`input[data-speaker="${speakerName}"]`);
+        speakerCheckboxes.forEach(checkbox => {
+            checkbox.checked = true;
+        });
+
+        this.updateTotalSelectedCount();
+        console.log(`✅ ${speakerName} 자막 ${speakerCheckboxes.length}개 선택 완료`);
+    }
+
+    async assignSelectedToTrack(trackType) {
+        const selectedCheckboxes = document.querySelectorAll('.subtitle-checkbox:checked');
+        const selectedIndices = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.subtitleIndex));
+
+        if (selectedIndices.length === 0) {
+            alert('선택된 자막이 없습니다.');
+            return;
+        }
+
+        const trackNames = {
+            'main': '메인 자막',
+            'translation': '번역 자막',
+            'description': '설명 자막'
+        };
+
+        console.log(`📝 선택된 ${selectedIndices.length}개 자막을 ${trackNames[trackType]}에 일괄 적용`);
+
+        try {
+            // 현재 화자 데이터 준비
+            const speakersForAPI = {};
+            if (this.currentSpeakers) {
+                Object.keys(this.currentSpeakers).forEach(speakerName => {
+                    speakersForAPI[speakerName] = {
+                        ...this.currentSpeakers[speakerName],
+                        assigned_track: selectedIndices.some(idx => {
+                            const checkbox = document.querySelector(`input[data-subtitle-index="${idx}"]`);
+                            return checkbox && checkbox.dataset.speaker === speakerName;
+                        }) ? trackType : (this.currentSpeakers[speakerName].assigned_track || 'unassigned')
+                    };
+                });
+            }
+
+            const response = await fetch('/api/analysis/assign-speakers-to-tracks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    existing_speakers: speakersForAPI,
+                    existing_subtitles: this.classifiedSubtitles || [],
+                    track_assignments: {
+                        [trackType]: selectedIndices
+                    }
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ 트랙 일괄 적용 성공:', result);
+
+                // UI 업데이트
+                this.updateHybridTracksWithSpeakers(result.classified_subtitles);
+
+                // 자막별 분석 결과의 드롭다운도 업데이트
+                this.updateSubtitleTrackSelections(selectedIndices, trackType);
+
+                alert(`✅ ${selectedIndices.length}개 자막이 ${trackNames[trackType]}에 적용되었습니다.`);
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+        } catch (error) {
+            console.error('❌ 트랙 일괄 적용 실패:', error);
+            alert(`❌ 트랙 적용 중 오류가 발생했습니다: ${error.message}`);
+        }
+    }
+
+    changeSpeakerForSelected() {
+        const selectedCheckboxes = document.querySelectorAll('.subtitle-checkbox:checked');
+        const targetSpeaker = document.getElementById('target-speaker-select').value;
+
+        if (selectedCheckboxes.length === 0) {
+            alert('선택된 자막이 없습니다.');
+            return;
+        }
+
+        console.log(`🔄 선택된 ${selectedCheckboxes.length}개 자막의 화자를 ${targetSpeaker}로 변경`);
+
+        // 화자별 색상 매핑
+        const getSpeakerColor = (speaker) => {
+            if (speaker === '화자1') return '#3498db';
+            if (speaker === '화자2') return '#e74c3c';
+            if (speaker === '화자3') return '#2ecc71';
+            return '#95a5a6';
+        };
+
+        const hexToRgb = (hex) => {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ?
+                parseInt(result[1], 16) + ',' + parseInt(result[2], 16) + ',' + parseInt(result[3], 16) :
+                '0,0,0';
+        };
+
+        const newColor = getSpeakerColor(targetSpeaker);
+
+        selectedCheckboxes.forEach(checkbox => {
+            const subtitleIndex = checkbox.dataset.subtitleIndex;
+            const subtitleItem = checkbox.closest('.subtitle-item');
+
+            // 체크박스 데이터 업데이트
+            checkbox.dataset.speaker = targetSpeaker;
+
+            // 시각적 업데이트
+            const subtitleContent = subtitleItem.querySelector('.subtitle-content');
+            const speakerLabel = subtitleItem.querySelector('.speaker-label');
+
+            // 색상 업데이트
+            subtitleContent.style.borderLeft = `3px solid ${newColor}`;
+            subtitleContent.style.backgroundColor = `rgba(${hexToRgb(newColor)}, 0.05)`;
+
+            // 화자 라벨 업데이트
+            speakerLabel.textContent = targetSpeaker;
+            speakerLabel.style.color = newColor;
+
+            // 분류된 자막 데이터 업데이트
+            if (this.classifiedSubtitles) {
+                const classifiedIndex = parseInt(subtitleIndex) - 1;
+                if (this.classifiedSubtitles[classifiedIndex]) {
+                    this.classifiedSubtitles[classifiedIndex].speaker_name = targetSpeaker;
+                    this.classifiedSubtitles[classifiedIndex].speaker_id = targetSpeaker === '화자1' ? 0 :
+                                                                             targetSpeaker === '화자2' ? 1 :
+                                                                             targetSpeaker === '화자3' ? 2 : -1;
+                }
+            }
+        });
+
+        // 선택 해제
+        this.deselectAllSubtitles();
+
+        console.log(`✅ ${selectedCheckboxes.length}개 자막의 화자를 ${targetSpeaker}로 변경 완료`);
+        alert(`✅ ${selectedCheckboxes.length}개 자막의 화자가 ${targetSpeaker}로 변경되었습니다.`);
+    }
+
+    updateSubtitleTrackSelections(subtitleIndices, trackType) {
+        console.log(`🔄 자막별 분석 결과 드롭다운 업데이트: ${subtitleIndices.length}개 → ${trackType}`);
+
+        subtitleIndices.forEach(subtitleIndex => {
+            // 드롭다운이 있는 자막 찾기 (0-based 인덱스로 변환)
+            const selectElement = document.getElementById(`track-select-${subtitleIndex - 1}`);
+            if (selectElement) {
+                selectElement.value = trackType;
+                console.log(`✅ 자막 #${subtitleIndex} 드롭다운을 ${trackType}로 업데이트`);
+            }
+        });
+    }
+
+    toggleAllSubtitles(speakerName) {
+        console.log(`🔄 ${speakerName} 모든 자막 토글`);
+
+        const checkboxes = document.querySelectorAll(`input[data-speaker="${speakerName}"]`);
+        const checkedCount = document.querySelectorAll(`input[data-speaker="${speakerName}"]:checked`).length;
+        const newState = checkedCount === 0; // 모두 체크 해제된 상태면 모두 체크
+
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = newState;
+        });
+
+        this.updateSelectedCount(speakerName);
+        this.showSuccess(`${speakerName}의 모든 자막을 ${newState ? '선택' : '해제'}했습니다`);
+    }
+
+    onSubtitleCheckboxChange(subtitleIndex, speakerName) {
+        console.log(`☑️ 자막 #${subtitleIndex + 1} 체크박스 변경`);
+        this.updateSelectedCount(speakerName);
+    }
+
+    updateSelectedCount(speakerName) {
+        const checkboxes = document.querySelectorAll(`input[data-speaker="${speakerName}"]`);
+        const checkedCount = document.querySelectorAll(`input[data-speaker="${speakerName}"]:checked`).length;
+        const totalCount = checkboxes.length;
+
+        // 화자 카드의 제목 업데이트
+        const speakerHeader = document.querySelector(`#speaker-subtitles-${speakerName} .subtitle-header strong`);
+        if (speakerHeader) {
+            speakerHeader.innerHTML = `📝 실제 대사 (시간순): <span style="color: var(--success-color)">${checkedCount}/${totalCount} 선택됨</span>`;
+        }
+    }
+
+    applySelectedSubtitles() {
+        console.log('✅ 선택된 자막들 적용');
+
+        const allCheckboxes = document.querySelectorAll('.subtitle-checkbox:checked');
+        const selectedIndices = Array.from(allCheckboxes).map(cb => parseInt(cb.dataset.subtitleIndex));
+
+        if (selectedIndices.length === 0) {
+            this.showError('선택된 자막이 없습니다');
+            return;
+        }
+
+        // 선택된 자막들의 트랙 배치를 새로운 설정으로 업데이트
+        const newClassification = {
+            main: [],
+            translation: [],
+            description: [],
+            unassigned: []
+        };
+
+        this.classifiedSubtitles.forEach((subtitle, index) => {
+            if (selectedIndices.includes(index)) {
+                // 선택된 자막은 사용자가 지정한 트랙으로
+                const trackSelect = document.getElementById(`track-select-${index}`);
+                const selectedTrack = trackSelect ? trackSelect.value : 'unassigned';
+                newClassification[selectedTrack].push(subtitle);
+            } else {
+                // 선택되지 않은 자막은 기존 분류 유지 또는 미분류로
+                newClassification.unassigned.push(subtitle);
+            }
+        });
+
+        // 분류 결과 적용
+        this.timeline.speakerClassifiedSubtitles = newClassification;
+        this.renderHybridSubtitleTracks();
+
+        const totalSelected = selectedIndices.length;
+        this.showSuccess(`선택된 ${totalSelected}개 자막이 트랙에 배치되었습니다`);
+    }
+
+    getSelectedSrtFiles() {
+        // 선택된 SRT 파일들 반환
+        const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+        const srtFiles = [];
+
+        checkboxes.forEach(checkbox => {
+            const filePath = checkbox.value;
+            if (filePath.endsWith('.srt')) {
+                srtFiles.push(filePath);
+            }
+        });
+
+        return srtFiles;
+    }
 }
 
 // 앱 초기화
@@ -5708,7 +7052,7 @@ window.debugSubtitleTrack = function() {
             });
         });
     }
-};
+}
 
 window.forceRenderSubtitles = function() {
     console.log('🔄 강제 자막 렌더링 실행');
@@ -5723,3 +7067,4 @@ window.forceRenderSubtitles = function() {
         });
     }
 };
+
