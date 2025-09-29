@@ -1,3 +1,6 @@
+import { createRenderers } from './modules/renderers.js';
+import { createSavedRecordsManager } from './modules/saved-records.js';
+
 const state = {
   project: null,
   templates: [
@@ -458,227 +461,18 @@ function parseChatGPTShortsResult(text) {
 
   return { subtitles, images };
 }
-
-function renderStoryKeywordResults(result) {
-  const container = document.getElementById("story-keyword-results");
-  if (!container) return;
-
-  const items = Array.isArray(result?.items) ? result.items : (Array.isArray(result?.titles) ? result.titles : []);
-  if (!items.length) {
-    container.innerHTML = '<div class="placeholder"><p>생성된 항목이 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
-    return;
-  }
-
-  const listMarkup = items
-    .map((item, index) => {
-      const text = escapeHtml(item.text ?? "");
-      return `<li>${text}</li>`;
-    })
-    .join("");
-
-  container.innerHTML = `
-    <article>
-      <header>
-        <div>
-          <h2>생성된 키워드</h2>
-          <p class="status">입력 키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong> · 총 ${items.length}개</p>
-        </div>
-        <small class="status">언어: ${escapeHtml(result.language ?? "ko")}</small>
-      </header>
-      <ol>
-        ${listMarkup}
-      </ol>
-    </article>
-  `;
-}
-
-function renderImageStoryResults(result) {
-  const container = document.getElementById("image-story-results");
-  if (!container) return;
-
-  const items = Array.isArray(result?.items) ? result.items : [];
-  if (!items.length) {
-    container.innerHTML = '<div class="placeholder"><p>생성된 결과가 없습니다. 다른 이미지를 시도해 보세요.</p></div>';
-    return;
-  }
-
-  const listMarkup = items
-    .map((item, index) => {
-      const label = typeof item.index === "number" ? item.index : index + 1;
-      const title = escapeHtml(item.title ?? "");
-      const description = escapeHtml(item.description ?? "");
-      return `
-        <li>
-          <header><strong>${label}. ${title}</strong></header>
-          <p>${description}</p>
-        </li>
-      `;
-    })
-    .join("");
-
-  const infoRows = [];
-  const source = result?.source ?? {};
-  if (source.image_filename) {
-    const sizeLabel = source.image_size ? ` (${escapeHtml(String(source.image_size))} bytes)` : "";
-    infoRows.push(`<li><strong>이미지 파일</strong> ${escapeHtml(source.image_filename)}${sizeLabel}</li>`);
-  }
-  if (source.description) {
-    infoRows.push(`<li><strong>사용자 설명</strong> ${escapeHtml(source.description)}</li>`);
-  }
-
-  container.innerHTML = `
-    <article>
-      <header>
-        <div>
-          <h3>생성된 이미지 스토리</h3>
-          <p class="status">총 ${items.length}개 · 키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong></p>
-        </div>
-        <small class="status">언어: ${escapeHtml(result.language ?? "ko")}</small>
-      </header>
-      ${infoRows.length ? `<ul class="context-info">${infoRows.join("")}</ul>` : ""}
-      <ol>
-        ${listMarkup}
-      </ol>
-    </article>
-  `;
-}
-
-function renderShortsScriptResults(result) {
-  const container = document.getElementById("shorts-script-results");
-  if (!container) return;
-
-  const subtitles = Array.isArray(result?.subtitles) ? result.subtitles : [];
-  const images = Array.isArray(result?.images) ? result.images : [];
-
-  if (!subtitles.length && !images.length) {
-    container.innerHTML = '<div class="placeholder"><p>생성된 결과가 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
-    return;
-  }
-
-  const subtitleMarkup = subtitles
-    .map((segment) => {
-      const index = typeof segment.index === "number" ? segment.index : "-";
-      const start = formatTimecode(segment.start);
-      const end = formatTimecode(segment.end);
-      const text = escapeHtml(segment.text ?? "");
-      const tag = escapeHtml(segment.scene_tag ?? "");
-      return `
-        <li>
-          <header><strong>${index}</strong> <span>${start} → ${end}</span></header>
-          <p>${text}</p>
-          <small>${tag}</small>
-        </li>
-      `;
-    })
-    .join("");
-
-  const imageMarkup = images
-    .map((prompt, idx) => {
-      const tag = escapeHtml(prompt.tag ?? `이미지 ${idx + 1}`);
-      const description = escapeHtml(prompt.description ?? "");
-      const start = prompt.start !== undefined && prompt.start !== null ? formatTimecode(prompt.start) : "-";
-      const end = prompt.end !== undefined && prompt.end !== null ? formatTimecode(prompt.end) : "-";
-      return `
-        <li>
-          <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
-          <p>${description}</p>
-          <div class="item-actions">
-          </div>
-        </li>
-      `;
-    })
-    .join("");
-
-  container.innerHTML = `
-    <article>
-      <header>
-        <h3>쇼츠용 SRT 대본</h3>
-        <p class="status">키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong> · 언어: ${escapeHtml(result.language ?? "ko")}</p>
-      </header>
-      <div class="grid">
-        <section>
-          <h4>자막 타임라인</h4>
-          <ol class="srt-list">${subtitleMarkup || '<li>자막이 없습니다.</li>'}</ol>
-        </section>
-        <section>
-          <h4>이미지 장면 프롬프트</h4>
-          <ol class="prompt-list">${imageMarkup || '<li>이미지 프롬프트가 없습니다.</li>'}</ol>
-        </section>
-      </div>
-    </article>
-  `;
-  displayAudioResult(TOOL_KEYS.SCRIPT, state.audioResults[TOOL_KEYS.SCRIPT]);
-}
-
-function renderShortsSceneResults(result) {
-  const container = document.getElementById("shorts-scenes-results");
-  if (!container) return;
-
-  const subtitles = Array.isArray(result?.subtitles) ? result.subtitles : [];
-  const scenes = Array.isArray(result?.scenes) ? result.scenes : [];
-
-  if (!subtitles.length && !scenes.length) {
-    container.innerHTML = '<div class="placeholder"><p>생성된 결과가 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
-    return;
-  }
-
-  const subtitleMarkup = subtitles
-    .map((segment) => {
-      const index = typeof segment.index === "number" ? segment.index : "-";
-      const start = formatTimecode(segment.start);
-      const end = formatTimecode(segment.end);
-      const text = escapeHtml(segment.text ?? "");
-      const tag = escapeHtml(segment.scene_tag ?? "");
-      return `
-        <li>
-          <header><strong>${index}</strong> <span>${start} → ${end}</span></header>
-          <p>${text}</p>
-          <small>${tag}</small>
-        </li>
-      `;
-    })
-    .join("");
-
-  const sceneMarkup = scenes
-    .map((scene, idx) => {
-      const tag = escapeHtml(scene.scene_tag ?? `씬 ${idx + 1}`);
-      const action = escapeHtml(scene.action ?? "");
-      const camera = escapeHtml(scene.camera ?? "");
-      const mood = escapeHtml(scene.mood ?? "");
-      const start = scene.start !== undefined && scene.start !== null ? formatTimecode(scene.start) : "-";
-      const end = scene.end !== undefined && scene.end !== null ? formatTimecode(scene.end) : "-";
-      return `
-        <li>
-          <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
-          <p>${action}</p>
-          <small>카메라: ${camera} · 분위기: ${mood}</small>
-          <div class="item-actions">
-          </div>
-        </li>
-      `;
-    })
-    .join("");
-
-  container.innerHTML = `
-    <article>
-      <header>
-        <h3>쇼츠용 씬 대본</h3>
-        <p class="status">키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong> · 언어: ${escapeHtml(result.language ?? "ko")}</p>
-      </header>
-      <div class="grid">
-        <section>
-          <h4>SRT 구간</h4>
-          <ol class="srt-list">${subtitleMarkup || '<li>자막이 없습니다.</li>'}</ol>
-        </section>
-        <section>
-          <h4>영상 장면 프롬프트</h4>
-          <ol class="prompt-list">${sceneMarkup || '<li>장면 프롬프트가 없습니다.</li>'}</ol>
-        </section>
-      </div>
-    </article>
-  `;
-  displayAudioResult(TOOL_KEYS.SCENES, state.audioResults[TOOL_KEYS.SCENES]);
-}
+const {
+  renderStoryKeywordResults,
+  renderImageStoryResults,
+  renderShortsScriptResults,
+  renderShortsSceneResults
+} = createRenderers({
+  escapeHtml,
+  formatTimecode,
+  displayAudioResult,
+  state,
+  TOOL_KEYS
+});
 
 const TOOL_CONFIG = {
   [TOOL_KEYS.STORY]: {
@@ -731,223 +525,24 @@ const TOOL_CONFIG = {
   }
 };
 
-function renderSavedRecords(tool, records = state.savedRecords[tool] || []) {
-  const config = TOOL_CONFIG[tool];
-  console.log(`renderSavedRecords called for tool: ${tool}, records count: ${records.length}`);
-  if (!config) {
-    console.warn(`No config found for tool: ${tool}`);
-    return;
-  }
-  const container = document.querySelector(`#${config.savedContainer} .saved-body`);
-  if (!container) {
-    console.warn(`No container found for tool: ${tool}, selector: #${config.savedContainer} .saved-body`);
-    return;
-  }
-  console.log(`Rendering ${records.length} saved records for tool: ${tool}`);
+const savedRecordsManager = createSavedRecordsManager({
+  state,
+  toolConfig: TOOL_CONFIG,
+  toolKeys: TOOL_KEYS,
+  api,
+  displayAudioResult,
+  persistSelection,
+  loadPersistedSelection,
+  clearPersistedSelection,
+  updateRecordSelectOptions,
+  formatTimestamp,
+  escapeHtml,
+  alert: (message) => window.alert(message),
+  confirm: (message) => window.confirm(message),
+  prompt: (message, defaultValue) => window.prompt(message, defaultValue)
+});
 
-  if (!records.length) {
-    container.innerHTML = '<div class="placeholder"><p>저장된 결과가 없습니다.</p></div>';
-    return;
-  }
 
-  const checkedSet = state.checkedRecords[tool] || new Set();
-
-  const items = records
-    .map((record) => {
-      const created = formatTimestamp(record.created_at);
-      const isActive = state.activeRecords[tool] === record.id;
-      const isChecked = checkedSet.has(record.id);
-      return `
-        <li class="saved-item${isActive ? " active" : ""}" data-record-id="${record.id}" data-tool="${tool}">
-          <label class="saved-check">
-            <input type="checkbox" data-check ${isChecked ? "checked" : ""}>
-            <span>선택</span>
-          </label>
-          <div class="saved-meta">
-            <strong>${escapeHtml(record.title)}</strong>
-            <small>${escapeHtml(created)}</small>
-          </div>
-          <div class="saved-actions">
-            <button type="button" data-select>불러오기</button>
-            <button type="button" data-delete class="outline danger">삭제</button>
-          </div>
-        </li>
-      `;
-    })
-    .join("");
-
-  container.innerHTML = `<ul class="saved-list">${items}</ul>`;
-}
-
-async function loadSavedRecords(tool) {
-  try {
-    console.log(`Loading saved records for tool: ${tool}`);
-    const records = await api(`/api/tools/${tool}/records`);
-    console.log(`Loaded ${records?.length || 0} records for ${tool}:`, records);
-    state.savedRecords[tool] = Array.isArray(records) ? records : [];
-    console.log(`State updated. state.savedRecords[${tool}] now has ${state.savedRecords[tool].length} records`);
-    const previous = state.checkedRecords[tool] || new Set();
-    const next = new Set();
-    state.savedRecords[tool].forEach((record) => {
-      if (previous.has(record.id)) {
-        next.add(record.id);
-      }
-    });
-    state.checkedRecords[tool] = next;
-    const persisted = loadPersistedSelection();
-    if (persisted && persisted.tool === tool) {
-      const exists = state.savedRecords[tool].some((record) => record.id === persisted.recordId);
-      if (exists) {
-        state.activeRecords[tool] = persisted.recordId;
-        if (!state.latestResults[tool]) {
-          const saved = state.savedRecords[tool].find((record) => record.id === persisted.recordId);
-          if (saved) {
-            state.latestResults[tool] = saved.payload;
-            if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES || tool === TOOL_KEYS.VIDEO_IMPORT) {
-              const keyword = saved.payload?.keyword || saved.title;
-              const language = saved.payload?.language || "ko";
-              if (keyword) {
-                state.lastRequests[tool] = { keyword, language };
-              }
-            }
-          }
-        }
-      } else if (persisted.payload) {
-        state.latestResults[tool] = state.latestResults[tool] || persisted.payload;
-      } else {
-        clearPersistedSelection();
-      }
-    }
-    renderSavedRecords(tool);
-    updateRecordSelectOptions();
-  } catch (error) {
-    console.error(`Failed to load records for ${tool}:`, error);
-  }
-}
-
-async function saveLatestResult(tool) {
-  const payload = state.latestResults[tool];
-  if (!payload) {
-    alert("먼저 결과를 생성하세요.");
-    return;
-  }
-  const config = TOOL_CONFIG[tool];
-  if (!config) return;
-  const suggested = config.defaultTitle(payload) || "새로운 결과";
-  const title = window.prompt("저장할 이름을 입력하세요.", suggested);
-  if (title === null) return;
-  if (!title.trim()) {
-    alert("이름을 입력해야 합니다.");
-    return;
-  }
-  try {
-    await api(`/api/tools/${tool}/records`, {
-      method: "POST",
-      body: JSON.stringify({ title: title.trim(), payload })
-    });
-    state.activeRecords[tool] = null;
-    await loadSavedRecords(tool);
-    alert("저장되었습니다.");
-  } catch (error) {
-    alert(error.message);
-  }
-}
-
-async function deleteSavedRecord(tool, recordId) {
-  if (!recordId) return;
-  const confirmed = window.confirm("저장된 결과를 삭제할까요?");
-  if (!confirmed) return;
-  try {
-    await api(`/api/tools/${tool}/records/${recordId}`, { method: "DELETE" });
-    if (state.activeRecords[tool] === recordId) {
-      state.activeRecords[tool] = null;
-    }
-    const persisted = loadPersistedSelection();
-    if (persisted && persisted.tool === tool && persisted.recordId === recordId) {
-      clearPersistedSelection();
-    }
-    await loadSavedRecords(tool);
-  } catch (error) {
-    alert(error.message);
-  }
-}
-
-function selectSavedRecord(tool, recordId) {
-  if (!recordId) return;
-  const records = state.savedRecords[tool] || [];
-  const record = records.find((item) => item.id === recordId);
-  if (!record) {
-    alert("저장된 데이터를 찾을 수 없습니다.");
-    return;
-  }
-  const config = TOOL_CONFIG[tool];
-  if (!config) return;
-  state.latestResults[tool] = record.payload;
-  state.activeRecords[tool] = recordId;
-  config.renderer(record.payload);
-  if (tool === TOOL_KEYS.SCRIPT || tool === TOOL_KEYS.SCENES) {
-    state.audioResults[tool] = null;
-    displayAudioResult(tool, null);
-  }
-  persistSelection(tool, recordId, record.payload);
-  if (tool === TOOL_KEYS.SCRIPT) {
-    const keyword = record.payload?.keyword;
-    const language = record.payload?.language || "ko";
-    if (keyword) {
-      state.lastRequests[tool] = { keyword, language };
-    }
-  }
-  if (tool === TOOL_KEYS.SCENES) {
-    const keyword = record.payload?.keyword;
-    const language = record.payload?.language || "ko";
-    if (keyword) {
-      state.lastRequests[tool] = { keyword, language };
-    }
-  }
-  renderSavedRecords(tool);
-  const target = document.getElementById(config.resultsContainer);
-  if (target) {
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-}
-
-function handleSavedSectionClick(event) {
-  const selectButton = event.target.closest("button[data-select]");
-  if (selectButton) {
-    const item = selectButton.closest("li[data-record-id]");
-    if (!item) return;
-    const tool = item.dataset.tool;
-    const recordId = item.dataset.recordId;
-    selectSavedRecord(tool, recordId);
-    return;
-  }
-
-  const deleteButton = event.target.closest("button[data-delete]");
-  if (deleteButton) {
-    const item = deleteButton.closest("li[data-record-id]");
-    if (!item) return;
-    const tool = item.dataset.tool;
-    const recordId = item.dataset.recordId;
-    deleteSavedRecord(tool, recordId);
-  }
-
-  const checkBox = event.target.closest("input[data-check]");
-  if (checkBox) {
-    const item = checkBox.closest("li[data-record-id]");
-    if (!item) return;
-    const tool = item.dataset.tool;
-    const recordId = item.dataset.recordId;
-    if (!state.checkedRecords[tool]) {
-      state.checkedRecords[tool] = new Set();
-    }
-    const bucket = state.checkedRecords[tool];
-    if (checkBox.checked) {
-      bucket.add(recordId);
-    } else {
-      bucket.delete(recordId);
-    }
-  }
-}
 
 async function continueGeneration(tool) {
   const endpoint = GENERATION_ENDPOINTS[tool];
@@ -1457,7 +1052,7 @@ function initStoryKeywordPage() {
       state.latestResults[TOOL_KEYS.STORY] = data;
       state.activeRecords[TOOL_KEYS.STORY] = null;
       renderStoryKeywordResults(data);
-      renderSavedRecords(TOOL_KEYS.STORY);
+      savedRecordsManager.renderSavedRecords(TOOL_KEYS.STORY);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
     } finally {
@@ -1580,7 +1175,7 @@ ${hasImage ? "※ 이미지를 함께 업로드해서 분석해주세요." : ""}
       state.latestResults[TOOL_KEYS.IMAGE_STORY] = data;
       state.activeRecords[TOOL_KEYS.IMAGE_STORY] = null;
       renderImageStoryResults(data);
-      renderSavedRecords(TOOL_KEYS.IMAGE_STORY);
+      savedRecordsManager.renderSavedRecords(TOOL_KEYS.IMAGE_STORY);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
     } finally {
@@ -1725,7 +1320,7 @@ function initShortsScriptPage() {
       state.activeRecords[TOOL_KEYS.SCRIPT] = null;
       state.audioResults[TOOL_KEYS.SCRIPT] = null;
       renderShortsScriptResults(data);
-      renderSavedRecords(TOOL_KEYS.SCRIPT);
+      savedRecordsManager.renderSavedRecords(TOOL_KEYS.SCRIPT);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
     } finally {
@@ -1859,7 +1454,7 @@ function initShortsScenesPage() {
       state.activeRecords[TOOL_KEYS.SCENES] = null;
       state.audioResults[TOOL_KEYS.SCENES] = null;
       renderShortsSceneResults(data);
-      renderSavedRecords(TOOL_KEYS.SCENES);
+      savedRecordsManager.renderSavedRecords(TOOL_KEYS.SCENES);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
     } finally {
@@ -4006,7 +3601,7 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", () => {
       const tool = button.getAttribute("data-save");
       if (!tool) return;
-      saveLatestResult(tool);
+      savedRecordsManager.saveLatestResult(tool);
     });
   });
 
@@ -4014,7 +3609,7 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", () => {
       const tool = button.getAttribute("data-refresh");
       if (!tool) return;
-      loadSavedRecords(tool);
+      savedRecordsManager.loadSavedRecords(tool);
     });
   });
 
@@ -4037,9 +3632,9 @@ document.addEventListener("DOMContentLoaded", () => {
   Object.keys(TOOL_CONFIG).forEach((tool) => {
     const section = document.getElementById(TOOL_CONFIG[tool].savedContainer);
     if (section) {
-      section.addEventListener("click", handleSavedSectionClick);
+      section.addEventListener("click", savedRecordsManager.handleSavedSectionClick);
     }
-    loadSavedRecords(tool);
+    savedRecordsManager.loadSavedRecords(tool);
   });
 
   // 타임라인 테이블 편집 기능 이벤트 핸들러
@@ -4085,7 +3680,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function loadAllToolRecords() {
     for (const tool of Object.values(TOOL_KEYS)) {
       try {
-        await loadSavedRecords(tool);
+        await savedRecordsManager.loadSavedRecords(tool);
       } catch (error) {
         console.error(`Failed to load records for ${tool}:`, error);
       }
@@ -6170,6 +5765,3 @@ function trimGap(gapIndex) {
 
   showNotification(`갭 길이가 ${duration}초로 조정되었습니다.`, 'success');
 }
-
-
-
