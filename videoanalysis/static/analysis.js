@@ -15,10 +15,10 @@ class VideoAnalysisApp {
         this.lastReinterpretationTone = 'neutral';
         this.lastSelectedSavedSpeakerName = null;
         this.currentAnalysisMethod = null;
-        this.savedResultsStorageKey = 'videoanalysis_saved_results';
         this.reinterpretationHistory = {};
         this.currentReinterpretationEditIndex = null;
         this.activeReinterpretationTrack = null;
+        this.cachedSavedResults = [];
 
         // 하이브리드 자막 트랙 시스템 설정
         this.trackStates = {
@@ -157,6 +157,16 @@ class VideoAnalysisApp {
         if (reinterpretBtn) {
             reinterpretBtn.addEventListener('click', () => {
                 this.startReinterpretation();
+            });
+        }
+
+        const toneSelect = document.getElementById('reinterpret-tone');
+        if (toneSelect) {
+            toneSelect.addEventListener('change', () => {
+                const toneKey = this.setReinterpretationTone(toneSelect.value);
+                if (this.analysisResults && this.analysisResults.reinterpretation) {
+                    this.analysisResults.reinterpretation.tone = toneKey;
+                }
             });
         }
 
@@ -1294,6 +1304,7 @@ class VideoAnalysisApp {
         this.clearResults();
 
         const restored = {};
+        this.analysisResults = restored;
 
         if (hasAudio) {
             restored.audio = payload.audio;
@@ -1312,6 +1323,30 @@ class VideoAnalysisApp {
             } catch (error) {
                 console.error('저장된 자막 분석 결과 표시 실패:', error);
                 this.showError('저장된 자막 분석 결과를 표시하지 못했습니다');
+            }
+
+            const subtitleEntry = Array.isArray(payload.subtitle)
+                ? payload.subtitle.find(item => item && item.status === 'success' && item.data)
+                : null;
+            if (subtitleEntry && subtitleEntry.data) {
+                const subtitleData = subtitleEntry.data;
+                const subtitleListRaw = subtitleData.subtitles
+                    || (subtitleData.analysis && subtitleData.analysis.subtitles)
+                    || [];
+                const normalizedSubtitles = Array.isArray(subtitleListRaw)
+                    ? subtitleListRaw.map((sub, index) => ({ ...sub, __source_index: index }))
+                    : [];
+
+                if (this.timeline) {
+                    this.timeline.subtitleData = {
+                        ...subtitleData,
+                        subtitles: normalizedSubtitles.map(sub => ({ ...sub }))
+                    };
+                }
+
+                if (!Array.isArray(this.classifiedSubtitles) || this.classifiedSubtitles.length === 0) {
+                    this.classifiedSubtitles = normalizedSubtitles.map(sub => ({ ...sub }));
+                }
             }
         }
 
@@ -1335,40 +1370,85 @@ class VideoAnalysisApp {
             }
         }
 
+        let fallbackReinterpretationHistory = null;
+
         if (hasReinterpretation) {
-            restored.reinterpretation = payload.reinterpretation;
-            const reinterpretationScript = payload.reinterpretation.script || '';
-            const reinterpretationOutline = payload.reinterpretation.outline || null;
+            const reinterpretationPayload = payload.reinterpretation || {};
+            const reinterpretationScript = reinterpretationPayload.script || '';
+            const reinterpretationOutline = reinterpretationPayload.outline || null;
+            const toneValue = reinterpretationPayload.tone || (reinterpretationPayload.metadata && reinterpretationPayload.metadata.tone) || null;
+            const reinterpretationSource = reinterpretationPayload.source || 'imported';
+
+            restored.reinterpretation = {
+                ...reinterpretationPayload,
+                script: reinterpretationScript,
+                outline: reinterpretationOutline
+            };
+            if (toneValue) {
+                restored.reinterpretation.tone = toneValue;
+            }
 
             if (reinterpretationScript) {
                 this.showReinterpretationResult(reinterpretationScript, reinterpretationOutline);
             }
 
-            if (Array.isArray(payload.reinterpretation.replacements)) {
-                this.reinterpretationHistory = this.reinterpretationHistory || {};
-                payload.reinterpretation.replacements.forEach(rep => {
+            const rawReplacements = Array.isArray(reinterpretationPayload.replacements)
+                ? reinterpretationPayload.replacements
+                : [];
+            const sanitizedReplacements = rawReplacements
+                .map(rep => this.normalizeReplacementPayload(rep))
+                .filter(Boolean);
+
+            let appliedReplacements = [];
+            if (sanitizedReplacements.length > 0) {
+                appliedReplacements = this.applyDescriptionReplacements(sanitizedReplacements, reinterpretationSource);
+            }
+
+            if (appliedReplacements.length > 0) {
+                restored.reinterpretation.replacements = appliedReplacements;
+            } else if (rawReplacements.length > 0) {
+                restored.reinterpretation.replacements = rawReplacements;
+                fallbackReinterpretationHistory = rawReplacements.reduce((acc, rep) => {
                     const idx = Number(rep.index);
-                    if (!Number.isInteger(idx) || idx < 0) return;
-                    const originalText = (rep.previous_text || rep.original_text || '').trim();
-                    const updatedText = (rep.text || rep.new_text || '').trim();
-                    this.reinterpretationHistory[idx] = {
+                    if (!Number.isInteger(idx) || idx < 0) {
+                        return acc;
+                    }
+                    const originalText = (rep.previous_text || rep.original_text || '').toString().trim();
+                    const updatedText = (rep.text || rep.new_text || '').toString().trim();
+                    if (!originalText && !updatedText) {
+                        return acc;
+                    }
+                    acc[idx] = {
                         original_text: originalText,
                         updated_text: updatedText,
-                        source: rep.source || 'imported',
-                        updated_at: rep.updated_at || payload.reinterpretation.generated_at || new Date().toISOString(),
+                        source: rep.source || reinterpretationSource,
+                        updated_at: rep.updated_at || reinterpretationPayload.generated_at || new Date().toISOString(),
                         reverted: originalText === updatedText
                     };
-                });
+                    return acc;
+                }, {});
             }
         }
 
-        this.analysisResults = restored;
-
-        if (reinterpretationHistoryOption && typeof reinterpretationHistoryOption === 'object') {
-            this.reinterpretationHistory = JSON.parse(JSON.stringify(reinterpretationHistoryOption));
+        if (restored.reinterpretation && restored.reinterpretation.tone) {
+            const normalizedTone = this.setReinterpretationTone(restored.reinterpretation.tone);
+            restored.reinterpretation.tone = normalizedTone;
         }
 
-        if (!this.reinterpretationHistory) {
+        if (reinterpretationHistoryOption && typeof reinterpretationHistoryOption === 'object') {
+            this.rehydrateReinterpretationState(
+                JSON.parse(JSON.stringify(reinterpretationHistoryOption)),
+                {
+                    defaultSource: (payload.reinterpretation && payload.reinterpretation.source) || 'imported',
+                    forceTextUpdate: true
+                }
+            );
+        } else if (fallbackReinterpretationHistory && Object.keys(fallbackReinterpretationHistory).length > 0) {
+            this.rehydrateReinterpretationState(fallbackReinterpretationHistory, {
+                defaultSource: (payload.reinterpretation && payload.reinterpretation.source) || 'imported',
+                forceTextUpdate: true
+            });
+        } else if (!this.reinterpretationHistory) {
             this.reinterpretationHistory = {};
         }
 
@@ -1465,12 +1545,16 @@ class VideoAnalysisApp {
             if (sanitizedReplacements.length > 0 && appliedReplacements.length === 0) {
                 this.showError('재해석 결과를 설명 자막에 적용하지 못했습니다.');
             }
+            const resolvedTone = this.normalizeToneKey(result.tone || tone);
+            this.setReinterpretationTone(resolvedTone);
+
             this.analysisResults.reinterpretation = {
                 script: result.reinterpretation,
                 outline: result.outline || null,
                 replacements: appliedReplacements,
                 source: 'api',
-                generated_at: new Date().toISOString()
+                generated_at: new Date().toISOString(),
+                tone: resolvedTone
             };
 
         } catch (error) {
@@ -1509,12 +1593,42 @@ class VideoAnalysisApp {
         return collected;
     }
 
+    normalizeToneKey(tone) {
+        if (tone === null || tone === undefined) {
+            return 'neutral';
+        }
+        const key = String(tone).trim();
+        if (!key) {
+            return 'neutral';
+        }
+        return key.toLowerCase();
+    }
+
     getReinterpretationTone() {
         const toneSelect = document.getElementById('reinterpret-tone');
         if (toneSelect && toneSelect.value) {
-            return toneSelect.value;
+            const toneKey = this.normalizeToneKey(toneSelect.value);
+            this.lastReinterpretationTone = toneKey;
+            return toneKey;
         }
-        return this.lastReinterpretationTone || 'neutral';
+        return this.normalizeToneKey(this.lastReinterpretationTone);
+    }
+
+    setReinterpretationTone(tone) {
+        const toneKey = this.normalizeToneKey(tone);
+        const toneSelect = document.getElementById('reinterpret-tone');
+        let resolvedValue = toneKey;
+        if (toneSelect) {
+            const match = Array.from(toneSelect.options).find(opt => this.normalizeToneKey(opt.value) === toneKey);
+            if (match) {
+                toneSelect.value = match.value;
+                resolvedValue = this.normalizeToneKey(match.value);
+            } else {
+                toneSelect.value = toneKey;
+            }
+        }
+        this.lastReinterpretationTone = resolvedValue;
+        return resolvedValue;
     }
 
     describeToneLabel(tone) {
@@ -1525,7 +1639,18 @@ class VideoAnalysisApp {
             serious: '진중',
             thrilling: '긴장감'
         };
-        return map[tone] || map.neutral;
+        const key = this.normalizeToneKey(tone);
+        if (map[key]) {
+            return map[key];
+        }
+        const toneSelect = document.getElementById('reinterpret-tone');
+        if (toneSelect) {
+            const match = Array.from(toneSelect.options).find(opt => this.normalizeToneKey(opt.value) === key);
+            if (match) {
+                return match.textContent.trim() || match.value;
+            }
+        }
+        return key;
     }
 
     describeToneInstruction(tone) {
@@ -1536,7 +1661,11 @@ class VideoAnalysisApp {
             serious: 'calm, respectful, and sincere',
             thrilling: 'tense, urgent, and suspenseful'
         };
-        return map[tone] || map.neutral;
+        const key = this.normalizeToneKey(tone);
+        if (map[key]) {
+            return map[key];
+        }
+        return `adhere to the '${key}' tone style provided by the user`;
     }
 
     normalizeSubtitleForPayload(subtitle, fallbackTrack = 'unassigned', overrideIndex = undefined) {
@@ -1563,7 +1692,7 @@ class VideoAnalysisApp {
     }
 
     buildReinterpretationPrompt(dialogues, descriptions, tone = 'neutral') {
-        const toneKey = typeof tone === 'string' ? tone.trim().toLowerCase() : 'neutral';
+        const toneKey = this.normalizeToneKey(tone);
         const toneInstruction = this.describeToneInstruction(toneKey);
         const toneLabel = this.describeToneLabel(toneKey);
 
@@ -1665,11 +1794,16 @@ class VideoAnalysisApp {
             </div>
         `;
 
+        const toneKey = this.getReinterpretationTone();
+
         this.analysisResults.reinterpretation = {
             source: 'chatgpt-prompt',
             prompt: promptText,
-            generated_at: new Date().toISOString()
+            generated_at: new Date().toISOString(),
+            tone: toneKey
         };
+
+        this.setReinterpretationTone(toneKey);
 
         const applyBtn = document.getElementById('manual-reinterpret-apply');
         if (applyBtn) {
@@ -1712,6 +1846,8 @@ class VideoAnalysisApp {
             if (parsed.replacements && parsed.replacements.length && appliedReplacements.length === 0) {
                 this.showError('재해석 결과를 설명 자막에 대체하지 못했습니다. JSON 구조를 확인해주세요.');
             }
+            const toneKey = this.normalizeToneKey(this.lastReinterpretationTone || this.getReinterpretationTone());
+            this.setReinterpretationTone(toneKey);
             this.analysisResults.reinterpretation = {
                 script: parsed.script,
                 outline: parsed.outline || null,
@@ -1719,7 +1855,8 @@ class VideoAnalysisApp {
                 source: 'chatgpt-manual',
                 generated_at: new Date().toISOString(),
                 prompt: this.lastReinterpretationPrompt || null,
-                raw: rawText
+                raw: rawText,
+                tone: toneKey
             };
         } catch (error) {
             console.error('수동 재해석 적용 실패:', error);
@@ -1728,34 +1865,49 @@ class VideoAnalysisApp {
     }
 
     getSavedResults() {
-        try {
-            const raw = localStorage.getItem(this.savedResultsStorageKey);
-            if (!raw) {
-                return [];
-            }
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-                return parsed;
-            }
-            return [];
-        } catch (error) {
-            console.warn('저장된 결과를 읽는 중 오류:', error);
-            return [];
-        }
+        return Array.isArray(this.cachedSavedResults) ? this.cachedSavedResults : [];
     }
 
     setSavedResults(results) {
+        this.cachedSavedResults = Array.isArray(results) ? results : [];
+    }
+
+    async fetchSavedResultsList() {
         try {
-            localStorage.setItem(this.savedResultsStorageKey, JSON.stringify(results));
+            const response = await fetch('/api/analysis/saved-results');
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || `HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            const results = Array.isArray(data.results) ? data.results : [];
+            this.setSavedResults(results);
+            return results;
         } catch (error) {
-            console.error('저장된 결과를 기록하지 못했습니다:', error);
-            this.showError('저장소에 기록할 수 없습니다. 용량을 확인해주세요.');
+            console.error('저장된 결과 목록을 불러오지 못했습니다:', error);
+            this.setSavedResults([]);
+
+            const panel = document.getElementById('saved-results-panel');
+            if (panel && panel.style.display !== 'none') {
+                this.showError('저장된 결과 목록을 불러오지 못했습니다');
+            }
+
+            return [];
         }
     }
 
     refreshSavedResultsList() {
-        const results = this.getSavedResults();
-        this.renderSavedResultsList(results);
+        return this.fetchSavedResultsList()
+            .then(results => {
+                this.renderSavedResultsList(results);
+                return results;
+            })
+            .catch(error => {
+                console.error('저장된 결과 목록 렌더링 실패:', error);
+                this.renderSavedResultsList([]);
+                return [];
+            });
     }
 
     renderSavedResultsList(results) {
@@ -1842,7 +1994,7 @@ class VideoAnalysisApp {
         }
     }
 
-    saveResultsToStorage() {
+    async saveResultsToStorage() {
         if (!this.analysisResults || Object.keys(this.analysisResults).length === 0) {
             this.showError('저장할 분석 결과가 없습니다');
             return;
@@ -1860,15 +2012,26 @@ class VideoAnalysisApp {
         }
 
         const timestamp = new Date().toISOString();
-        const savedResults = this.getSavedResults();
-        const existingIndex = savedResults.findIndex(item => item.name === saveName);
 
-        if (existingIndex !== -1 && !window.confirm(`"${saveName}" 이름이 이미 존재합니다. 덮어쓸까요?`)) {
+        let savedResults = this.getSavedResults();
+        if (!Array.isArray(savedResults) || savedResults.length === 0) {
+            savedResults = await this.fetchSavedResultsList();
+        }
+
+        const existingEntry = Array.isArray(savedResults)
+            ? savedResults.find(item => item.name === saveName)
+            : null;
+
+        if (this.analysisResults && this.analysisResults.reinterpretation && !this.analysisResults.reinterpretation.tone) {
+            this.analysisResults.reinterpretation.tone = this.getReinterpretationTone();
+        }
+
+        if (existingEntry && !window.confirm(`"${saveName}" 이름이 이미 존재합니다. 덮어쓸까요?`)) {
             return;
         }
 
         const payload = {
-            id: existingIndex !== -1 ? savedResults[existingIndex].id : `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            id: existingEntry ? existingEntry.id : `${Date.now()}_${Math.random().toString(16).slice(2)}`,
             name: saveName,
             saved_at: timestamp,
             analysisResults: JSON.parse(JSON.stringify(this.analysisResults)),
@@ -1880,26 +2043,60 @@ class VideoAnalysisApp {
             }
         };
 
-        if (existingIndex !== -1) {
-            savedResults[existingIndex] = payload;
-        } else {
-            savedResults.push(payload);
-        }
+        try {
+            const response = await fetch('/api/analysis/saved-results', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
 
-        this.setSavedResults(savedResults);
-        this.refreshSavedResultsList();
-        this.toggleSavedResultsPanel(true);
-        this.showSuccess(`"${saveName}" 이름으로 저장했습니다`);
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || '저장 결과를 기록하지 못했습니다');
+            }
+
+            await this.refreshSavedResultsList();
+            this.toggleSavedResultsPanel(true);
+            this.showSuccess(`"${saveName}" 이름으로 저장했습니다`);
+        } catch (error) {
+            console.error('저장 결과 기록 실패:', error);
+            this.showError(error.message || '저장 결과를 기록하지 못했습니다');
+        }
     }
 
-    loadSavedResult(id) {
+    async loadSavedResult(id) {
         if (!id) {
             this.showError('불러올 결과를 찾을 수 없습니다');
             return;
         }
 
-        const savedResults = this.getSavedResults();
-        const entry = savedResults.find(item => item.id === id);
+        let savedResults = this.getSavedResults();
+        let entry = Array.isArray(savedResults) ? savedResults.find(item => item.id === id) : null;
+
+        if (!entry) {
+            try {
+                const response = await fetch(`/api/analysis/saved-results/${encodeURIComponent(id)}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || '저장된 결과를 찾지 못했습니다');
+                }
+
+                const data = await response.json();
+                entry = data?.result || null;
+
+                if (entry) {
+                    savedResults = Array.isArray(savedResults) ? savedResults.filter(item => item.id !== entry.id) : [];
+                    savedResults.push(entry);
+                    this.setSavedResults(savedResults);
+                }
+            } catch (error) {
+                console.error('저장된 결과를 불러오지 못했습니다:', error);
+                this.showError(error.message || '저장된 결과를 불러오지 못했습니다');
+                return;
+            }
+        }
 
         if (!entry) {
             this.showError('저장된 결과를 찾지 못했습니다');
@@ -1934,9 +2131,16 @@ class VideoAnalysisApp {
         this.showSuccess(`"${entry.name}" 저장 결과를 불러왔습니다`);
     }
 
-    renameSavedResult(id) {
-        const savedResults = this.getSavedResults();
-        const entryIndex = savedResults.findIndex(item => item.id === id);
+    async renameSavedResult(id) {
+        let savedResults = this.getSavedResults();
+        if (!Array.isArray(savedResults) || savedResults.length === 0) {
+            savedResults = await this.fetchSavedResultsList();
+        }
+
+        const entryIndex = Array.isArray(savedResults)
+            ? savedResults.findIndex(item => item.id === id)
+            : -1;
+
         if (entryIndex === -1) {
             this.showError('저장된 결과를 찾을 수 없습니다');
             return;
@@ -1953,33 +2157,69 @@ class VideoAnalysisApp {
             return;
         }
 
-        savedResults[entryIndex].name = newName;
-        this.setSavedResults(savedResults);
-        this.refreshSavedResultsList();
-        this.showSuccess('이름을 변경했습니다');
+        try {
+            const response = await fetch(`/api/analysis/saved-results/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: newName })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || '이름을 변경하지 못했습니다');
+            }
+
+            await this.refreshSavedResultsList();
+            this.showSuccess('이름을 변경했습니다');
+        } catch (error) {
+            console.error('저장 결과 이름 변경 실패:', error);
+            this.showError(error.message || '이름을 변경하지 못했습니다');
+        }
     }
 
-    deleteSavedResult(id) {
-        const savedResults = this.getSavedResults();
-        const entryIndex = savedResults.findIndex(item => item.id === id);
-        if (entryIndex === -1) {
+    async deleteSavedResult(id) {
+        let savedResults = this.getSavedResults();
+        if (!Array.isArray(savedResults) || savedResults.length === 0) {
+            savedResults = await this.fetchSavedResultsList();
+        }
+
+        const entry = Array.isArray(savedResults) ? savedResults.find(item => item.id === id) : null;
+        if (!entry) {
             return;
         }
 
-        const name = savedResults[entryIndex].name || '저장된 결과';
+        const name = entry.name || '저장된 결과';
         if (!window.confirm(`"${name}"을(를) 삭제할까요?`)) {
             return;
         }
 
-        savedResults.splice(entryIndex, 1);
-        this.setSavedResults(savedResults);
-        this.refreshSavedResultsList();
-        this.showSuccess('저장된 결과를 삭제했습니다');
+        try {
+            const response = await fetch(`/api/analysis/saved-results/${encodeURIComponent(id)}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || '저장된 결과를 삭제하지 못했습니다');
+            }
+
+            await this.refreshSavedResultsList();
+            this.showSuccess('저장된 결과를 삭제했습니다');
+        } catch (error) {
+            console.error('저장 결과 삭제 실패:', error);
+            this.showError(error.message || '저장된 결과를 삭제하지 못했습니다');
+        }
     }
 
-    clearAllSavedResults() {
-        const savedResults = this.getSavedResults();
-        if (!savedResults.length) {
+    async clearAllSavedResults() {
+        let savedResults = this.getSavedResults();
+        if (!Array.isArray(savedResults) || savedResults.length === 0) {
+            savedResults = await this.fetchSavedResultsList();
+        }
+
+        if (!Array.isArray(savedResults) || savedResults.length === 0) {
             this.showInfo('삭제할 저장 결과가 없습니다');
             return;
         }
@@ -1988,9 +2228,23 @@ class VideoAnalysisApp {
             return;
         }
 
-        this.setSavedResults([]);
-        this.refreshSavedResultsList();
-        this.showSuccess('모든 저장 결과를 삭제했습니다');
+        try {
+            const response = await fetch('/api/analysis/saved-results', {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || '모든 저장 결과를 삭제하지 못했습니다');
+            }
+
+            this.setSavedResults([]);
+            this.renderSavedResultsList([]);
+            this.showSuccess('모든 저장 결과를 삭제했습니다');
+        } catch (error) {
+            console.error('저장 결과 전체 삭제 실패:', error);
+            this.showError(error.message || '모든 저장 결과를 삭제하지 못했습니다');
+        }
     }
 
     setupReinterpretationEditingPanel() {
@@ -2262,12 +2516,19 @@ class VideoAnalysisApp {
         if (!text) {
             return null;
         }
+        const originalText = (raw.previous_text || raw.original_text || raw.old_text || '').toString().trim();
+        const source = typeof raw.source === 'string' ? raw.source : null;
+        const updatedAt = raw.updated_at || raw.updatedAt || null;
         return {
             index: resolvedIndex,
             start_time: Number.isFinite(startNum) ? startNum : null,
             end_time: Number.isFinite(endNum) ? endNum : null,
             target_length: targetLength,
-            text
+            text,
+            original_text: originalText,
+            previous_text: originalText,
+            source,
+            updated_at: updatedAt
         };
     }
 
@@ -2286,7 +2547,15 @@ class VideoAnalysisApp {
             }
 
             const originalSubtitle = this.classifiedSubtitles[resolvedIndex];
-            const originalText = (originalSubtitle.text || '').trim();
+            const savedOriginalTextCandidate = typeof rep.original_text === 'string' && rep.original_text.trim().length > 0
+                ? rep.original_text.trim()
+                : (typeof rep.previous_text === 'string' && rep.previous_text.trim().length > 0
+                    ? rep.previous_text.trim()
+                    : null);
+            const savedOriginalText = savedOriginalTextCandidate;
+            const originalText = savedOriginalText !== null
+                ? savedOriginalText
+                : (originalSubtitle.text || '').trim();
             const originalLength = originalText.length;
             const desiredLength = Number.isFinite(rep.target_length) ? rep.target_length : originalLength;
 
@@ -2324,15 +2593,15 @@ class VideoAnalysisApp {
                     });
                 }
                 existingHistory.updated_text = newText;
-                existingHistory.source = source;
-                existingHistory.updated_at = timestamp;
+                existingHistory.source = rep.source || source;
+                existingHistory.updated_at = rep.updated_at || timestamp;
                 existingHistory.reverted = existingHistory.original_text?.trim() === newText.trim();
             } else {
                 this.reinterpretationHistory[resolvedIndex] = {
                     original_text: originalText,
                     updated_text: newText,
-                    source,
-                    updated_at: timestamp,
+                    source: rep.source || source,
+                    updated_at: rep.updated_at || timestamp,
                     reverted: originalText.trim() === newText.trim()
                 };
             }
@@ -2340,7 +2609,7 @@ class VideoAnalysisApp {
             const historyEntry = this.reinterpretationHistory[resolvedIndex];
 
             this.classifiedSubtitles[resolvedIndex].text = newText;
-            this.classifiedSubtitles[resolvedIndex].updated_by = source;
+            this.classifiedSubtitles[resolvedIndex].updated_by = rep.source || source;
             this.classifiedSubtitles[resolvedIndex].__source_index = resolvedIndex;
             this.classifiedSubtitles[resolvedIndex].__original_description_text = historyEntry?.original_text || originalText;
             this.classifiedSubtitles[resolvedIndex].reinterpretation = historyEntry ? { ...historyEntry } : undefined;
@@ -2362,9 +2631,10 @@ class VideoAnalysisApp {
                 text: newText,
                 original_length: originalLength,
                 target_length: Number.isFinite(desiredLength) ? desiredLength : originalLength,
-                source,
+                source: rep.source || source,
                 previous_text: originalText,
-                updated_at: timestamp
+                original_text: originalText,
+                updated_at: rep.updated_at || timestamp
             });
         });
 
@@ -2375,6 +2645,73 @@ class VideoAnalysisApp {
         }
 
         return applied;
+    }
+
+    rehydrateReinterpretationState(history, options = {}) {
+        if (!history || typeof history !== 'object') {
+            return;
+        }
+
+        const defaultSource = options.defaultSource || 'imported';
+        const forceTextUpdate = options.forceTextUpdate !== false;
+
+        if (!this.reinterpretationHistory || typeof this.reinterpretationHistory !== 'object') {
+            this.reinterpretationHistory = {};
+        }
+
+        Object.entries(history).forEach(([key, value]) => {
+            const index = Number(key);
+            if (!Number.isInteger(index) || index < 0) {
+                return;
+            }
+
+            const entry = value && typeof value === 'object' ? { ...value } : {};
+            const originalTextRaw = entry.original_text || entry.previous_text || '';
+            const updatedTextRaw = entry.updated_text || entry.text || '';
+            const originalText = typeof originalTextRaw === 'string' ? originalTextRaw : String(originalTextRaw || '');
+            const updatedText = typeof updatedTextRaw === 'string' ? updatedTextRaw : String(updatedTextRaw || '');
+            const source = entry.source || defaultSource;
+            const updatedAt = entry.updated_at || entry.updatedAt || new Date().toISOString();
+            const reverted = typeof entry.reverted === 'boolean'
+                ? entry.reverted
+                : originalText.trim() === updatedText.trim();
+
+            const normalizedEntry = {
+                original_text: originalText,
+                updated_text: updatedText,
+                source,
+                updated_at: updatedAt,
+                reverted
+            };
+
+            if (Array.isArray(entry.changes)) {
+                normalizedEntry.changes = entry.changes.map(change => ({ ...change }));
+            }
+
+            this.reinterpretationHistory[index] = normalizedEntry;
+
+            if (Array.isArray(this.classifiedSubtitles) && this.classifiedSubtitles[index]) {
+                const classified = this.classifiedSubtitles[index];
+                if (originalText) {
+                    classified.__original_description_text = originalText;
+                }
+                if (forceTextUpdate && updatedText) {
+                    classified.text = updatedText;
+                }
+                classified.reinterpretation = { ...normalizedEntry };
+            }
+
+            if (this.timeline && this.timeline.subtitleData && Array.isArray(this.timeline.subtitleData.subtitles) && this.timeline.subtitleData.subtitles[index]) {
+                const subtitle = this.timeline.subtitleData.subtitles[index];
+                if (originalText) {
+                    subtitle.__original_description_text = originalText;
+                }
+                if (forceTextUpdate && updatedText) {
+                    subtitle.text = updatedText;
+                }
+                subtitle.reinterpretation = { ...normalizedEntry };
+            }
+        });
     }
 
     resolveReplacementIndex(replacement) {
@@ -9655,11 +9992,15 @@ class VideoAnalysisApp {
         }
 
         if (!this.analysisResults.reinterpretation) {
+            const toneKey = this.normalizeToneKey(this.lastReinterpretationTone || this.getReinterpretationTone());
             this.analysisResults.reinterpretation = {
                 script: this.analysisResults.reinterpretation?.script || '',
                 outline: this.analysisResults.reinterpretation?.outline || null,
-                replacements: []
+                replacements: [],
+                tone: toneKey
             };
+        } else if (!this.analysisResults.reinterpretation.tone) {
+            this.analysisResults.reinterpretation.tone = this.normalizeToneKey(this.lastReinterpretationTone || this.getReinterpretationTone());
         }
 
         if (!Array.isArray(this.analysisResults.reinterpretation.replacements)) {

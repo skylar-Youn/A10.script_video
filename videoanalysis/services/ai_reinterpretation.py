@@ -92,7 +92,7 @@ def sanitize_tone(tone: Optional[str]) -> str:
     if not tone:
         return "neutral"
     tone_key = str(tone).strip().lower()
-    if tone_key not in TONE_INSTRUCTIONS:
+    if not tone_key:
         return "neutral"
     return tone_key
 
@@ -106,7 +106,10 @@ def build_prompt(
     description_block = _build_description_block(descriptions, "[Existing Descriptive Subtitles]")
 
     tone_key = sanitize_tone(tone)
-    tone_instruction = TONE_INSTRUCTIONS.get(tone_key, TONE_INSTRUCTIONS["neutral"])
+    tone_instruction = TONE_INSTRUCTIONS.get(
+        tone_key,
+        f"Adopt the style described as '{tone_key}'. Keep the narration consistent with this tone while staying natural in Korean."
+    )
 
     instructions = """You are rewriting a Korean narration track for a video where the original audio will be muted.
 Use the dialogue and descriptive subtitles to craft a fresh, immersive Korean narration script.

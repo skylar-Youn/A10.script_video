@@ -2,11 +2,15 @@
 분석 관련 API 라우터
 """
 import os
+import json
 import logging
-from fastapi import APIRouter, HTTPException, Body
+from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
-from ..config import DOWNLOAD_DIR
+from fastapi import APIRouter, HTTPException, Body
+
+from ..config import DOWNLOAD_DIR, SAVED_RESULTS_DIR
 from ..services.audio_service import (
     analyze_audio_file, extract_audio_from_video, extract_waveform_data, audio_to_srt
 )
@@ -21,6 +25,57 @@ from ..services.ai_reinterpretation import reinterpret_subtitles as ai_reinterpr
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["analysis"])
+
+
+# 저장 결과 디렉터리 준비
+SAVED_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _sanitize_saved_result_id(result_id: str) -> str:
+    """보안상의 이유로 저장 결과 ID를 정제"""
+    if not isinstance(result_id, str):
+        raise ValueError("유효하지 않은 저장 ID")
+
+    sanitized = ''.join(ch for ch in result_id if ch.isalnum() or ch in {'-', '_'})
+    sanitized = sanitized.strip(' .')
+
+    if not sanitized:
+        raise ValueError("유효하지 않은 저장 ID")
+
+    return sanitized
+
+
+def _saved_result_path(result_id: str) -> Path:
+    """저장 결과 파일 경로 반환"""
+    sanitized_id = _sanitize_saved_result_id(result_id)
+    return SAVED_RESULTS_DIR / f"{sanitized_id}.json"
+
+
+def _load_saved_result(path: Path) -> dict:
+    """저장된 JSON 결과를 로드"""
+    with path.open('r', encoding='utf-8') as file:
+        data = json.load(file)
+
+    if not isinstance(data, dict):
+        raise ValueError("저장된 결과 형식이 올바르지 않습니다")
+
+    data.setdefault('id', path.stem)
+    return data
+
+
+def _persist_saved_result(path: Path, payload: dict) -> dict:
+    """저장 결과를 파일로 기록"""
+    if not isinstance(payload, dict):
+        raise ValueError("저장할 데이터 형식이 올바르지 않습니다")
+
+    payload = dict(payload)
+    payload.setdefault('id', path.stem)
+    payload.setdefault('saved_at', datetime.utcnow().isoformat())
+
+    with path.open('w', encoding='utf-8') as file:
+        json.dump(payload, file, ensure_ascii=False, indent=2)
+
+    return payload
 
 
 @router.post("/analyze-waveform")
@@ -661,3 +716,146 @@ async def reinterpret_subtitles(request: dict = Body(...)):
         logger.exception("재해석 처리 실패: %s", exc)
         detail_message = str(exc).strip() or "재해석 중 오류가 발생했습니다"
         raise HTTPException(status_code=500, detail=detail_message)
+
+
+@router.get("/analysis/saved-results")
+async def list_saved_analysis_results():
+    """저장된 분석 결과 목록 반환"""
+    try:
+        entries = []
+        for path in sorted(SAVED_RESULTS_DIR.glob("*.json")):
+            try:
+                entry = _load_saved_result(path)
+                entries.append(entry)
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning("저장 결과 파일을 읽지 못했습니다: %s", path, exc_info=exc)
+
+        entries.sort(key=lambda item: item.get("saved_at") or "", reverse=True)
+        return {"results": entries}
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("저장 결과 목록 조회 실패: %s", exc)
+        raise HTTPException(status_code=500, detail="저장된 결과를 불러오지 못했습니다") from exc
+
+
+@router.get("/analysis/saved-results/{result_id}")
+async def get_saved_analysis_result(result_id: str):
+    """특정 ID의 저장된 분석 결과 반환"""
+    try:
+        path = _saved_result_path(result_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="저장된 결과를 찾을 수 없습니다")
+
+    try:
+        entry = _load_saved_result(path)
+        return {"result": entry}
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("저장 결과 로드 실패 (%s): %s", result_id, exc)
+        raise HTTPException(status_code=500, detail="저장된 결과를 불러오지 못했습니다") from exc
+
+
+@router.post("/analysis/saved-results")
+async def save_analysis_result(entry: dict = Body(...)):
+    """분석 결과 저장(업데이트 포함)"""
+    try:
+        payload = dict(entry or {})
+    except TypeError as exc:
+        raise HTTPException(status_code=400, detail="저장할 데이터 형식이 올바르지 않습니다") from exc
+
+    try:
+        result_id = payload.get("id") or uuid4().hex
+        path = _saved_result_path(result_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    payload["id"] = path.stem
+    payload.setdefault("saved_at", datetime.utcnow().isoformat())
+
+    try:
+        persisted = _persist_saved_result(path, payload)
+        return {"result": persisted}
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("저장 결과 기록 실패 (%s): %s", path, exc)
+        raise HTTPException(status_code=500, detail="저장 결과를 기록하지 못했습니다") from exc
+
+
+@router.put("/analysis/saved-results/{result_id}")
+async def update_saved_analysis_result(result_id: str, updates: dict = Body(...)):
+    """저장된 분석 결과 업데이트 (주로 이름 변경)"""
+    try:
+        path = _saved_result_path(result_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="저장된 결과를 찾을 수 없습니다")
+
+    try:
+        current = _load_saved_result(path)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("저장 결과 읽기 실패 (%s): %s", result_id, exc)
+        raise HTTPException(status_code=500, detail="저장된 결과를 불러오지 못했습니다") from exc
+
+    if not isinstance(updates, dict):
+        raise HTTPException(status_code=400, detail="업데이트 형식이 올바르지 않습니다")
+
+    allowed_fields = {
+        "name",
+        "analysisResults",
+        "selectedFiles",
+        "reinterpretationHistory",
+        "metadata",
+        "saved_at",
+    }
+
+    for key, value in updates.items():
+        if key in allowed_fields:
+            current[key] = value
+
+    try:
+        persisted = _persist_saved_result(path, current)
+        return {"result": persisted}
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("저장 결과 업데이트 실패 (%s): %s", result_id, exc)
+        raise HTTPException(status_code=500, detail="저장 결과를 업데이트하지 못했습니다") from exc
+
+
+@router.delete("/analysis/saved-results/{result_id}")
+async def delete_saved_analysis_result(result_id: str):
+    """저장된 분석 결과 삭제"""
+    try:
+        path = _saved_result_path(result_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="저장된 결과를 찾을 수 없습니다")
+
+    try:
+        path.unlink()
+        return {"status": "deleted", "id": path.stem}
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("저장 결과 삭제 실패 (%s): %s", result_id, exc)
+        raise HTTPException(status_code=500, detail="저장 결과를 삭제하지 못했습니다") from exc
+
+
+@router.delete("/analysis/saved-results")
+async def clear_saved_analysis_results():
+    """모든 저장된 분석 결과 삭제"""
+    deleted = 0
+    errors = []
+
+    for path in SAVED_RESULTS_DIR.glob("*.json"):
+        try:
+            path.unlink()
+            deleted += 1
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("저장 결과 삭제 실패 (%s): %s", path, exc)
+            errors.append(str(exc))
+
+    if errors:
+        raise HTTPException(status_code=500, detail="일부 저장 결과를 삭제하지 못했습니다")
+
+    return {"status": "cleared", "deleted": deleted}

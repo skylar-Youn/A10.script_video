@@ -8,6 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 DOWNLOAD_DIR = Path("/home/sk/ws/youtubeanalysis/youtube/download")
+SAVED_RESULTS_DIR = Path("/home/sk/ws/youtubeanalysis/youtube/saved_results")
 
 # 분석 기본값
 DEFAULT_SILENCE_THRESHOLD = 0.05
