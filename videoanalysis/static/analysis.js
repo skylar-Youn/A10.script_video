@@ -219,6 +219,20 @@ class VideoAnalysisApp {
             });
         }
 
+        const openTimelineBtn = document.getElementById('open-timeline');
+        if (openTimelineBtn) {
+            openTimelineBtn.addEventListener('click', () => {
+                this.openTimelineEditor();
+            });
+        }
+
+        const openInTimelineBtn = document.getElementById('open-in-timeline');
+        if (openInTimelineBtn) {
+            openInTimelineBtn.addEventListener('click', () => {
+                this.openTimelineEditor();
+            });
+        }
+
         // 고급 타임라인 편집기 기능
         this.setupTimelineEditor();
 
@@ -742,6 +756,29 @@ class VideoAnalysisApp {
         this.updateStatusBar();
     }
 
+    openTimelineEditor() {
+        this.switchTab('video-edit');
+
+        const videoEditTab = document.getElementById('video-edit-tab');
+        if (videoEditTab) {
+            videoEditTab.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        if (this.timeline && this.timeline.subtitleData) {
+            try {
+                this.renderHybridSubtitleTracks();
+            } catch (error) {
+                console.warn('타임라인 렌더링 실패:', error);
+            }
+        }
+
+        const descriptionTrack = document.getElementById('description-subtitle-track');
+        if (descriptionTrack) {
+            descriptionTrack.classList.add('highlight-focus');
+            setTimeout(() => descriptionTrack.classList.remove('highlight-focus'), 1500);
+        }
+    }
+
     async startAudioAnalysis() {
         if (this.selectedFiles.size === 0) {
             this.showError('분석할 파일을 선택하세요');
@@ -1206,7 +1243,8 @@ class VideoAnalysisApp {
         const results = {
             timestamp: new Date().toISOString(),
             selectedFiles: Array.from(this.selectedFiles),
-            analysisResults: this.analysisResults
+            analysisResults: this.analysisResults,
+            timelineSnapshot: this.buildTimelineSnapshotForSave('export')
         };
 
         const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
@@ -1256,8 +1294,11 @@ class VideoAnalysisApp {
                     throw new Error('분석 결과 형식이 올바르지 않습니다');
                 }
 
+                const timelineSnapshot = parsed?.timelineSnapshot || parsed?.timeline_snapshot || payload?.timelineSnapshot || payload?.timeline_snapshot || null;
+
                 const restored = this.populateAnalysisResultsFromImport(payload, {
-                    reinterpretationHistory: parsed && parsed.reinterpretationHistory
+                    reinterpretationHistory: parsed && parsed.reinterpretationHistory,
+                    timelineSnapshot
                 });
                 if (!restored) {
                     throw new Error('파일에서 불러올 분석 결과를 찾지 못했습니다');
@@ -1291,6 +1332,7 @@ class VideoAnalysisApp {
 
     populateAnalysisResultsFromImport(payload, options = {}) {
         const reinterpretationHistoryOption = options.reinterpretationHistory;
+        const timelineSnapshotOption = options.timelineSnapshot;
         const hasAudio = Array.isArray(payload.audio);
         const hasSubtitle = Array.isArray(payload.subtitle);
         const hasStt = Array.isArray(payload.stt);
@@ -1346,6 +1388,12 @@ class VideoAnalysisApp {
 
                 if (!Array.isArray(this.classifiedSubtitles) || this.classifiedSubtitles.length === 0) {
                     this.classifiedSubtitles = normalizedSubtitles.map(sub => ({ ...sub }));
+                }
+
+                try {
+                    this.renderHybridSubtitleTracks();
+                } catch (error) {
+                    console.error('자막 트랙 렌더링 실패:', error);
                 }
             }
         }
@@ -1433,6 +1481,15 @@ class VideoAnalysisApp {
         if (restored.reinterpretation && restored.reinterpretation.tone) {
             const normalizedTone = this.setReinterpretationTone(restored.reinterpretation.tone);
             restored.reinterpretation.tone = normalizedTone;
+        }
+
+        const timelineSnapshotFromPayload = payload.timelineSnapshot || payload.timeline_snapshot || null;
+        const timelineSnapshot = timelineSnapshotOption || timelineSnapshotFromPayload;
+
+        if (timelineSnapshot) {
+            this.restoreTimelineSnapshot(timelineSnapshot, {
+                preserveExistingSubtitles: hasSubtitle
+            });
         }
 
         if (reinterpretationHistoryOption && typeof reinterpretationHistoryOption === 'object') {
@@ -2037,6 +2094,7 @@ class VideoAnalysisApp {
             analysisResults: JSON.parse(JSON.stringify(this.analysisResults)),
             selectedFiles: Array.from(this.selectedFiles || []),
             reinterpretationHistory: JSON.parse(JSON.stringify(this.reinterpretationHistory || {})),
+            timelineSnapshot: this.buildTimelineSnapshotForSave('analysis-save'),
             metadata: {
                 analysis_method: this.currentAnalysisMethod,
                 selected_count: this.selectedFiles ? this.selectedFiles.size : 0
@@ -2107,7 +2165,8 @@ class VideoAnalysisApp {
         const clonedHistory = JSON.parse(JSON.stringify(entry.reinterpretationHistory || {}));
 
         const restored = this.populateAnalysisResultsFromImport(clonedResults, {
-            reinterpretationHistory: clonedHistory
+            reinterpretationHistory: clonedHistory,
+            timelineSnapshot: entry.timelineSnapshot || entry.timeline_snapshot || null
         });
 
         if (!restored) {
@@ -2538,13 +2597,37 @@ class VideoAnalysisApp {
         }
 
         const applied = [];
+        const usedIndices = new Set();
+        const descriptionIndices = Array.isArray(this.classifiedSubtitles)
+            ? this.classifiedSubtitles.reduce((acc, sub, idx) => {
+                const track = sub?.assigned_track || sub?.track || sub?.detected_track || 'unassigned';
+                if (track === 'description') {
+                    acc.push(idx);
+                }
+                return acc;
+            }, [])
+            : [];
 
         replacements.forEach(rep => {
             if (!rep) return;
-            const resolvedIndex = this.resolveReplacementIndex(rep);
+            let resolvedIndex = this.resolveReplacementIndex(rep);
+            if (!Number.isInteger(resolvedIndex) || resolvedIndex < 0 || !this.classifiedSubtitles || !this.classifiedSubtitles[resolvedIndex]) {
+                resolvedIndex = null;
+            }
+
+            if (resolvedIndex === null) {
+                const fallbackIndex = descriptionIndices.find(idx => !usedIndices.has(idx) && this.classifiedSubtitles && this.classifiedSubtitles[idx]);
+                if (Number.isInteger(fallbackIndex) && fallbackIndex >= 0) {
+                    resolvedIndex = fallbackIndex;
+                }
+            }
+
             if (!Number.isInteger(resolvedIndex) || resolvedIndex < 0 || !this.classifiedSubtitles || !this.classifiedSubtitles[resolvedIndex]) {
                 return;
             }
+
+            usedIndices.add(resolvedIndex);
+            rep.index = resolvedIndex;
 
             const originalSubtitle = this.classifiedSubtitles[resolvedIndex];
             const savedOriginalTextCandidate = typeof rep.original_text === 'string' && rep.original_text.trim().length > 0
@@ -9278,6 +9361,50 @@ class VideoAnalysisApp {
         };
     }
 
+    buildTimelineSnapshotForSave(source = 'analysis-save') {
+        const classificationSnapshot = this.buildSpeakerClassificationSnapshot(source);
+
+        const subtitleDataClone = this.timeline && this.timeline.subtitleData
+            ? JSON.parse(JSON.stringify(this.timeline.subtitleData))
+            : null;
+
+        if (!classificationSnapshot && !subtitleDataClone) {
+            return null;
+        }
+
+        const snapshot = classificationSnapshot
+            ? { ...classificationSnapshot }
+            : {
+                saved_at: new Date().toISOString(),
+                source,
+                classified_subtitles: [],
+                classification: null,
+                current_speakers: this.currentSpeakers ? JSON.parse(JSON.stringify(this.currentSpeakers)) : {},
+                track_states: this.trackStates ? JSON.parse(JSON.stringify(this.trackStates)) : {},
+                selected_files: Array.from(this.selectedFiles || []),
+                status: {
+                    current_tab: this.currentTab,
+                    analysis_method: this.currentAnalysisMethod || 'text'
+                }
+            };
+
+        snapshot.subtitle_data = subtitleDataClone;
+
+        if (this.timeline) {
+            snapshot.timeline_state = {
+                zoom: this.timeline.zoom,
+                duration: this.timeline.duration,
+                currentTime: this.timeline.currentTime,
+                pixelsPerSecond: this.timeline.pixelsPerSecond,
+                startOffset: this.timeline.startOffset,
+                minTime: this.timeline.minTime,
+                maxTime: this.timeline.maxTime
+            };
+        }
+
+        return snapshot;
+    }
+
     storeSpeakerClassification(source = 'manual-save') {
         if (!this.isStorageAvailable()) {
             return;
@@ -9632,6 +9759,78 @@ class VideoAnalysisApp {
             console.warn('localStorage 사용 불가:', error);
             return false;
         }
+    }
+
+    restoreTimelineSnapshot(snapshot, options = {}) {
+        if (!snapshot || typeof snapshot !== 'object') {
+            return false;
+        }
+
+        const preserveExistingSubtitles = Boolean(options.preserveExistingSubtitles);
+
+        const subtitleData = snapshot.subtitle_data || snapshot.subtitleData || null;
+        if (subtitleData && (!preserveExistingSubtitles || !this.timeline || !this.timeline.subtitleData)) {
+            if (!this.timeline) {
+                this.timeline = {
+                    zoom: 1,
+                    duration: 0,
+                    currentTime: 0,
+                    pixelsPerSecond: 50,
+                    startOffset: 0,
+                    minTime: 0,
+                    maxTime: 0,
+                    subtitleData: null,
+                    videoData: null,
+                    audioData: null,
+                    isPlaying: false,
+                    realWaveformDrawn: false
+                };
+            }
+
+            this.timeline.subtitleData = JSON.parse(JSON.stringify(subtitleData));
+
+            const timelineState = snapshot.timeline_state || snapshot.timelineState || null;
+            if (timelineState) {
+                this.timeline.zoom = timelineState.zoom ?? this.timeline.zoom;
+                this.timeline.duration = timelineState.duration ?? this.timeline.duration;
+                this.timeline.currentTime = timelineState.currentTime ?? this.timeline.currentTime;
+                this.timeline.pixelsPerSecond = timelineState.pixelsPerSecond ?? this.timeline.pixelsPerSecond;
+                this.timeline.startOffset = timelineState.startOffset ?? this.timeline.startOffset;
+                this.timeline.minTime = timelineState.minTime ?? this.timeline.minTime;
+                this.timeline.maxTime = timelineState.maxTime ?? this.timeline.maxTime;
+            }
+        }
+
+        if (snapshot.track_states) {
+            this.trackStates = JSON.parse(JSON.stringify(snapshot.track_states));
+        }
+
+        if (Array.isArray(snapshot.classified_subtitles)) {
+            this.classifiedSubtitles = snapshot.classified_subtitles.map(sub => ({ ...sub }));
+        }
+
+        if (snapshot.current_speakers) {
+            this.currentSpeakers = JSON.parse(JSON.stringify(snapshot.current_speakers));
+        }
+
+        if (snapshot.status?.analysis_method) {
+            this.currentAnalysisMethod = snapshot.status.analysis_method;
+        }
+
+        if (snapshot.classification) {
+            const classificationClone = JSON.parse(JSON.stringify(snapshot.classification));
+            this.updateHybridTracksWithSpeakers(classificationClone);
+        } else if (this.timeline && this.timeline.subtitleData) {
+            try {
+                this.renderHybridSubtitleTracks();
+            } catch (error) {
+                console.error('타임라인 스냅샷 렌더링 실패:', error);
+            }
+        }
+
+        this.refreshReinterpretationPanel();
+
+        return true;
     }
 
     applySelectedSubtitles() {

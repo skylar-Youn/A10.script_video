@@ -32,3 +32,4 @@ __pycache__/*
 *.md 
 *.xlsx
 archive/*
+youtube/saved_results/*
