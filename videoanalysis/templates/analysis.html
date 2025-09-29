@@ -245,6 +245,27 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- 재해석 비교 편집 패널 -->
+                        <div class="reinterpretation-compare" id="reinterpretation-compare" style="display: none;">
+                            <h5>📝 재해석 비교 편집</h5>
+                            <p class="compare-hint">타임라인에서 설명 자막을 선택하면 재해석 전후 내용을 비교하고 수정할 수 있습니다.</p>
+                            <div class="compare-grid">
+                                <div class="compare-column">
+                                    <label>변경 전</label>
+                                    <div class="compare-before" id="reinterpretation-before-text"></div>
+                                </div>
+                                <div class="compare-column">
+                                    <label for="reinterpretation-after-input">변경 후</label>
+                                    <textarea id="reinterpretation-after-input" class="compare-after-input" spellcheck="false"></textarea>
+                                </div>
+                            </div>
+                            <div class="compare-meta" id="reinterpretation-meta"></div>
+                            <div class="compare-actions">
+                                <button class="action-btn primary" id="reinterpretation-apply-button">✅ 타임라인에 적용</button>
+                                <button class="action-btn secondary" id="reinterpretation-revert-button">↩️ 원본으로 복원</button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- 권장사항 -->
@@ -286,9 +307,21 @@
                     <!-- 화자 인식 시작 -->
                     <div class="speaker-controls">
                         <button class="analyze-btn primary" id="start-speaker-recognition">🎭 화자 인식 시작</button>
-                        <button class="action-btn secondary" id="load-saved-speaker-main">💾 저장 내용 불러오기</button>
+                        <button class="action-btn secondary" id="load-saved-speaker-main">💾 불러오기</button>
                         <div class="speaker-help">
                             💡 선택한 방법으로 등장인물을 자동 감지하고 각각을 다른 트랙에 배치합니다
+                        </div>
+                        <div class="saved-speaker-controls">
+                            <label>저장된 프로필
+                                <select id="saved-speaker-dropdown">
+                                    <option value="">자동 저장 (최근)</option>
+                                </select>
+                            </label>
+                            <div class="saved-speaker-actions">
+                                <button class="action-btn secondary" id="save-speaker-profile">💾 저장</button>
+                                <button class="action-btn secondary" id="rename-speaker-profile" disabled>✏️ 이름 변경</button>
+                                <button class="action-btn secondary danger" id="delete-speaker-profile" disabled>🗑️ 삭제</button>
+                            </div>
                         </div>
                     </div>
 
@@ -726,11 +759,45 @@
                         </label>
                         <small class="mode-hint">※ ChatGPT 창 모드는 Devtools/GPT와 직접 대화하여 결과를 붙여넣는 방식입니다.</small>
                     </div>
-                    <button class="action-btn primary" id="export-results">📁 결과 내보내기</button>
-                    <button class="action-btn secondary" id="open-timeline">🎬 타임라인 편집기</button>
-                    <button class="action-btn secondary" id="reinterpret-results">🔄 재해석</button>
-                    <button class="action-btn secondary" id="save-report">💾 보고서 저장</button>
-                    <button class="action-btn outline" id="clear-results">🗑️ 결과 지우기</button>
+                    <div class="reinterpret-controls">
+                        <label for="reinterpret-tone" class="reinterpret-controls-label">재해석 톤</label>
+                        <div class="reinterpret-control-row">
+                            <select id="reinterpret-tone">
+                                <option value="neutral" selected>표준</option>
+                                <option value="comic">코믹</option>
+                                <option value="dramatic">드라마틱</option>
+                                <option value="serious">진중</option>
+                                <option value="thrilling">긴장감</option>
+                            </select>
+                            <button class="action-btn secondary reinterpret-trigger" id="reinterpret-results">🔄 재해석</button>
+                        </div>
+                    </div>
+                    <div class="save-controls">
+                        <input type="text" id="save-results-name" placeholder="저장할 이름을 입력하세요" maxlength="60">
+                        <button class="action-btn secondary" id="save-report">💾 결과 저장</button>
+                    </div>
+                    <div class="action-btn-group">
+                        <button class="action-btn secondary" id="import-results">📚 저장 결과 불러오기</button>
+                        <button class="action-btn primary" id="export-results">📁 결과 내보내기</button>
+                        <button class="action-btn secondary" id="open-timeline">🎬 타임라인 편집기</button>
+                        <button class="action-btn outline" id="clear-results">🗑️ 결과 지우기</button>
+                    </div>
+                </div>
+                <div class="saved-results-panel" id="saved-results-panel" style="display: none;">
+                    <div class="saved-results-header">
+                        <h3>📚 저장된 결과</h3>
+                        <button class="action-btn small" id="close-saved-results">닫기</button>
+                    </div>
+                    <div class="saved-results-list" id="saved-results-list">
+                        <div class="empty-state">저장된 결과가 없습니다.</div>
+                    </div>
+                    <div class="saved-results-footer">
+                        <div class="saved-results-actions">
+                            <button class="action-btn secondary" id="upload-result-button">📂 파일 불러오기</button>
+                            <button class="action-btn outline" id="clear-saved-results">🧹 전체 삭제</button>
+                        </div>
+                        <input type="file" id="import-results-input" accept="application/json" style="display: none;">
+                    </div>
                 </div>
             </div>
         </div>

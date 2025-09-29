@@ -10,8 +10,15 @@ class VideoAnalysisApp {
         this.analysisResults = {};
         this.charts = {};
         this.speakerClassificationStorageKey = 'videoanalysis_saved_speaker_classification';
+        this.speakerClassificationListKey = 'videoanalysis_saved_speaker_classifications';
         this.lastReinterpretationPrompt = null;
+        this.lastReinterpretationTone = 'neutral';
+        this.lastSelectedSavedSpeakerName = null;
         this.currentAnalysisMethod = null;
+        this.savedResultsStorageKey = 'videoanalysis_saved_results';
+        this.reinterpretationHistory = {};
+        this.currentReinterpretationEditIndex = null;
+        this.activeReinterpretationTrack = null;
 
         // 하이브리드 자막 트랙 시스템 설정
         this.trackStates = {
@@ -28,6 +35,7 @@ class VideoAnalysisApp {
         this.loadFileList();
         this.loadFolderTree();
         this.updateUI();
+        this.refreshSavedResultsList();
 
         // 재생 버튼 초기 상태 설정
         setTimeout(() => {
@@ -100,6 +108,50 @@ class VideoAnalysisApp {
         document.getElementById('export-results').addEventListener('click', () => {
             this.exportResults();
         });
+
+        const importResultsBtn = document.getElementById('import-results');
+        if (importResultsBtn) {
+            importResultsBtn.addEventListener('click', () => {
+                this.toggleSavedResultsPanel(true);
+            });
+        }
+
+        const importResultsInput = document.getElementById('import-results-input');
+        if (importResultsInput) {
+            importResultsInput.addEventListener('change', (event) => {
+                const file = event.target?.files?.[0];
+                if (!file) return;
+                this.importResultsFromFile(file);
+            });
+        }
+
+        const uploadResultButton = document.getElementById('upload-result-button');
+        if (uploadResultButton) {
+            uploadResultButton.addEventListener('click', () => {
+                const input = document.getElementById('import-results-input');
+                if (input) {
+                    input.value = '';
+                    input.click();
+                }
+            });
+        }
+
+        const closeSavedButton = document.getElementById('close-saved-results');
+        if (closeSavedButton) {
+            closeSavedButton.addEventListener('click', () => this.toggleSavedResultsPanel(false));
+        }
+
+        const clearSavedButton = document.getElementById('clear-saved-results');
+        if (clearSavedButton) {
+            clearSavedButton.addEventListener('click', () => this.clearAllSavedResults());
+        }
+
+        const saveReportBtn = document.getElementById('save-report');
+        if (saveReportBtn) {
+            saveReportBtn.addEventListener('click', () => this.saveResultsToStorage());
+        }
+
+        this.setupReinterpretationEditingPanel();
 
         const reinterpretBtn = document.getElementById('reinterpret-results');
         if (reinterpretBtn) {
@@ -1158,6 +1210,171 @@ class VideoAnalysisApp {
         window.URL.revokeObjectURL(url);
     }
 
+    importResultsFromFile(file) {
+        if (!file) {
+            this.showError('불러올 파일을 찾을 수 없습니다');
+            return;
+        }
+
+        const fileName = (file.name || '').toLowerCase();
+        if (!fileName.endsWith('.json')) {
+            this.showError('JSON 형식의 분석 결과 파일을 선택해 주세요');
+            return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+            const text = event?.target?.result;
+            const resetInput = () => {
+                const input = document.getElementById('import-results-input');
+                if (input) input.value = '';
+            };
+
+            try {
+                if (typeof text !== 'string') {
+                    throw new Error('파일 내용을 읽을 수 없습니다');
+                }
+
+                const parsed = JSON.parse(text);
+                let payload = parsed;
+                if (parsed && typeof parsed === 'object' && parsed.analysisResults && typeof parsed.analysisResults === 'object') {
+                    payload = parsed.analysisResults;
+                }
+
+                if (!payload || typeof payload !== 'object') {
+                    throw new Error('분석 결과 형식이 올바르지 않습니다');
+                }
+
+                const restored = this.populateAnalysisResultsFromImport(payload, {
+                    reinterpretationHistory: parsed && parsed.reinterpretationHistory
+                });
+                if (!restored) {
+                    throw new Error('파일에서 불러올 분석 결과를 찾지 못했습니다');
+                }
+
+                if (parsed && Array.isArray(parsed.selectedFiles)) {
+                    this.selectedFiles = new Set(parsed.selectedFiles);
+                    this.updateSelectedFilesList();
+                    this.updateStatusBar();
+                }
+
+                this.showSuccess('저장된 분석 결과를 불러왔습니다');
+                this.showStatus('✅ 저장 결과 불러오기 완료');
+            } catch (error) {
+                console.error('결과 불러오기 실패:', error);
+                this.showError(error.message || '결과를 불러오는 중 오류가 발생했습니다');
+            } finally {
+                resetInput();
+            }
+        };
+
+        reader.onerror = () => {
+            console.error('파일 읽기 실패:', reader.error);
+            this.showError('파일을 읽는 중 오류가 발생했습니다');
+            const input = document.getElementById('import-results-input');
+            if (input) input.value = '';
+        };
+
+        reader.readAsText(file, 'utf-8');
+    }
+
+    populateAnalysisResultsFromImport(payload, options = {}) {
+        const reinterpretationHistoryOption = options.reinterpretationHistory;
+        const hasAudio = Array.isArray(payload.audio);
+        const hasSubtitle = Array.isArray(payload.subtitle);
+        const hasStt = Array.isArray(payload.stt);
+        const hasComparison = payload.comparison && typeof payload.comparison === 'object';
+        const hasReinterpretation = payload.reinterpretation && typeof payload.reinterpretation === 'object';
+
+        if (!hasAudio && !hasSubtitle && !hasStt && !hasComparison && !hasReinterpretation) {
+            return false;
+        }
+
+        this.clearResults();
+
+        const restored = {};
+
+        if (hasAudio) {
+            restored.audio = payload.audio;
+            try {
+                this.displayAudioResults(payload.audio);
+            } catch (error) {
+                console.error('저장된 음성 분석 결과 표시 실패:', error);
+                this.showError('저장된 음성 분석 결과를 표시하지 못했습니다');
+            }
+        }
+
+        if (hasSubtitle) {
+            restored.subtitle = payload.subtitle;
+            try {
+                this.displaySubtitleResults(payload.subtitle);
+            } catch (error) {
+                console.error('저장된 자막 분석 결과 표시 실패:', error);
+                this.showError('저장된 자막 분석 결과를 표시하지 못했습니다');
+            }
+        }
+
+        if (hasStt) {
+            restored.stt = payload.stt;
+            try {
+                this.handleSTTResults(payload.stt);
+            } catch (error) {
+                console.error('저장된 음성 인식 결과 표시 실패:', error);
+                this.showError('저장된 음성 인식 결과를 표시하지 못했습니다');
+            }
+        }
+
+        if (hasComparison) {
+            restored.comparison = payload.comparison;
+            try {
+                this.handleComparisonResults(payload.comparison);
+            } catch (error) {
+                console.error('저장된 비교 결과 표시 실패:', error);
+                this.showError('저장된 비교 결과를 표시하지 못했습니다');
+            }
+        }
+
+        if (hasReinterpretation) {
+            restored.reinterpretation = payload.reinterpretation;
+            const reinterpretationScript = payload.reinterpretation.script || '';
+            const reinterpretationOutline = payload.reinterpretation.outline || null;
+
+            if (reinterpretationScript) {
+                this.showReinterpretationResult(reinterpretationScript, reinterpretationOutline);
+            }
+
+            if (Array.isArray(payload.reinterpretation.replacements)) {
+                this.reinterpretationHistory = this.reinterpretationHistory || {};
+                payload.reinterpretation.replacements.forEach(rep => {
+                    const idx = Number(rep.index);
+                    if (!Number.isInteger(idx) || idx < 0) return;
+                    const originalText = (rep.previous_text || rep.original_text || '').trim();
+                    const updatedText = (rep.text || rep.new_text || '').trim();
+                    this.reinterpretationHistory[idx] = {
+                        original_text: originalText,
+                        updated_text: updatedText,
+                        source: rep.source || 'imported',
+                        updated_at: rep.updated_at || payload.reinterpretation.generated_at || new Date().toISOString(),
+                        reverted: originalText === updatedText
+                    };
+                });
+            }
+        }
+
+        this.analysisResults = restored;
+
+        if (reinterpretationHistoryOption && typeof reinterpretationHistoryOption === 'object') {
+            this.reinterpretationHistory = JSON.parse(JSON.stringify(reinterpretationHistoryOption));
+        }
+
+        if (!this.reinterpretationHistory) {
+            this.reinterpretationHistory = {};
+        }
+
+        return true;
+    }
+
     async startReinterpretation() {
         const reinterpretBtn = document.getElementById('reinterpret-results');
         if (!reinterpretBtn) {
@@ -1180,12 +1397,13 @@ class VideoAnalysisApp {
 
         const modeSelect = document.getElementById('reinterpret-mode');
         const mode = modeSelect ? modeSelect.value : 'api';
+        const tone = this.getReinterpretationTone();
         const originalLabel = reinterpretBtn.textContent;
         reinterpretBtn.disabled = true;
         reinterpretBtn.textContent = '🔄 재해석 중...';
 
         if (mode === 'chatgpt') {
-            const promptText = this.buildReinterpretationPrompt(dialogueSubtitles, descriptionSubtitles);
+            const promptText = this.buildReinterpretationPrompt(dialogueSubtitles, descriptionSubtitles, tone);
             const chatgptUrl = `https://chatgpt.com/?q=${encodeURIComponent(promptText)}`;
             try {
                 window.open(chatgptUrl, '_blank', 'width=1200,height=800');
@@ -1196,21 +1414,25 @@ class VideoAnalysisApp {
             reinterpretBtn.disabled = false;
             reinterpretBtn.textContent = originalLabel;
 
-            this.prepareChatGPTReinterpretation(promptText);
+            this.prepareChatGPTReinterpretation(promptText, tone);
             this.showStatus('ChatGPT 창을 열었습니다. 결과를 붙여넣으면 적용됩니다.');
             this.lastReinterpretationPrompt = promptText;
+            this.lastReinterpretationTone = tone;
             return;
         }
 
         this.showStatus('대사와 설명 자막을 분석하고 재해석 중입니다...');
+        this.lastReinterpretationPrompt = null;
+        this.lastReinterpretationTone = tone;
 
         const payload = {
-            dialogue_subtitles: dialogueSubtitles.map(sub => this.normalizeSubtitleForPayload(sub, 'main')),
-            description_subtitles: descriptionSubtitles.map(sub => this.normalizeSubtitleForPayload(sub, 'description')),
+            dialogue_subtitles: dialogueSubtitles.map(sub => this.normalizeSubtitleForPayload(sub, 'main', sub.__source_index)),
+            description_subtitles: descriptionSubtitles.map(sub => this.normalizeSubtitleForPayload(sub, 'description', sub.__source_index)),
             metadata: {
                 selected_files: Array.from(this.selectedFiles || []),
                 generated_at: new Date().toISOString(),
-                analysis_method: this.currentAnalysisMethod || 'text'
+                analysis_method: this.currentAnalysisMethod || 'text',
+                tone: tone
             }
         };
 
@@ -1237,9 +1459,16 @@ class VideoAnalysisApp {
             this.showReinterpretationResult(result.reinterpretation, result.outline || null);
             this.showSuccess('재해석 결과가 생성되었습니다.');
             this.showStatus('✅ 재해석 완료');
+            const rawReplacements = Array.isArray(result.replacements) ? result.replacements : [];
+            const sanitizedReplacements = rawReplacements.map(rep => this.normalizeReplacementPayload(rep)).filter(Boolean);
+            const appliedReplacements = this.applyDescriptionReplacements(sanitizedReplacements, 'api');
+            if (sanitizedReplacements.length > 0 && appliedReplacements.length === 0) {
+                this.showError('재해석 결과를 설명 자막에 적용하지 못했습니다.');
+            }
             this.analysisResults.reinterpretation = {
                 script: result.reinterpretation,
                 outline: result.outline || null,
+                replacements: appliedReplacements,
                 source: 'api',
                 generated_at: new Date().toISOString()
             };
@@ -1257,16 +1486,22 @@ class VideoAnalysisApp {
     getSubtitlesByTrack(trackType) {
         const collected = [];
 
+        const pushWithIndex = (sub) => {
+            if (!sub || !sub.text) return;
+            const index = this.findSubtitleIndexForData(sub);
+            if (index >= 0 && this.classifiedSubtitles && this.classifiedSubtitles[index]) {
+                this.classifiedSubtitles[index].__source_index = index;
+            }
+            const clone = { ...sub, __source_index: index };
+            collected.push(clone);
+        };
+
         if (this.timeline && this.timeline.speakerClassifiedSubtitles && Array.isArray(this.timeline.speakerClassifiedSubtitles[trackType])) {
-            this.timeline.speakerClassifiedSubtitles[trackType].forEach(sub => {
-                if (sub && sub.text) {
-                    collected.push({ ...sub });
-                }
-            });
+            this.timeline.speakerClassifiedSubtitles[trackType].forEach(pushWithIndex);
         } else if (Array.isArray(this.classifiedSubtitles)) {
             this.classifiedSubtitles.forEach(sub => {
                 if (sub && sub.text && ((sub.assigned_track || sub.track || 'unassigned') === trackType)) {
-                    collected.push({ ...sub });
+                    pushWithIndex(sub);
                 }
             });
         }
@@ -1274,13 +1509,45 @@ class VideoAnalysisApp {
         return collected;
     }
 
-    normalizeSubtitleForPayload(subtitle, fallbackTrack = 'unassigned') {
+    getReinterpretationTone() {
+        const toneSelect = document.getElementById('reinterpret-tone');
+        if (toneSelect && toneSelect.value) {
+            return toneSelect.value;
+        }
+        return this.lastReinterpretationTone || 'neutral';
+    }
+
+    describeToneLabel(tone) {
+        const map = {
+            neutral: '표준',
+            comic: '코믹',
+            dramatic: '드라마틱',
+            serious: '진중',
+            thrilling: '긴장감'
+        };
+        return map[tone] || map.neutral;
+    }
+
+    describeToneInstruction(tone) {
+        const map = {
+            neutral: 'balanced and natural',
+            comic: 'light-hearted, witty, and humorous',
+            dramatic: 'emotional, cinematic, and evocative',
+            serious: 'calm, respectful, and sincere',
+            thrilling: 'tense, urgent, and suspenseful'
+        };
+        return map[tone] || map.neutral;
+    }
+
+    normalizeSubtitleForPayload(subtitle, fallbackTrack = 'unassigned', overrideIndex = undefined) {
         const start = Number(subtitle.start_time ?? subtitle.start ?? subtitle.startTime ?? 0);
         const end = Number(subtitle.end_time ?? subtitle.end ?? subtitle.endTime ?? start);
         const text = (subtitle.text || '').trim();
         const speaker = subtitle.speaker_name || subtitle.speaker || null;
         const track = subtitle.assigned_track || subtitle.track || fallbackTrack;
         const duration = Number(subtitle.duration ?? (end > start ? end - start : 0));
+        const index = overrideIndex !== undefined ? overrideIndex : this.findSubtitleIndexForData(subtitle);
+        const originalLength = text.length;
 
         return {
             start_time: Number.isFinite(start) ? start : null,
@@ -1288,17 +1555,26 @@ class VideoAnalysisApp {
             duration: Number.isFinite(duration) ? duration : null,
             text,
             speaker,
-            track
+            track,
+            original_index: Number.isInteger(index) ? index : null,
+            target_length: originalLength,
+            original_length: originalLength
         };
     }
 
-    buildReinterpretationPrompt(dialogues, descriptions) {
+    buildReinterpretationPrompt(dialogues, descriptions, tone = 'neutral') {
+        const toneKey = typeof tone === 'string' ? tone.trim().toLowerCase() : 'neutral';
+        const toneInstruction = this.describeToneInstruction(toneKey);
+        const toneLabel = this.describeToneLabel(toneKey);
+
         const instructions = [
             '당신은 한국어 내레이션 작가입니다.',
             '주어진 대사와 설명 자막을 참고하여 새로운 내레이션 스크립트를 작성하세요.',
-            '대사 내용은 핵심만 요약해서 포함하고, 장면 전환과 감정선을 자연스럽게 설명해주세요.',
-            '최종 결과는 JSON 형식 {"outline": ["핵심 요약"], "script": "최종 내레이션"} 으로 작성하세요.',
-            'script 필드는 3~6문장 정도의 자연스러운 설명으로 제공해주세요.'
+            '설명 자막(description track)을 대체할 새로운 문장을 각 자막별로 생성해야 합니다.',
+            '최종 결과는 JSON 형식 {"outline": ["핵심 요약"], "script": "최종 내레이션", "replacements": [{"index": 설명자막_index, "new_text": "대체 문장", "target_length": 글자수}]} 로 작성하세요.',
+            'replacements 배열은 설명 자막과 동일한 개수여야 하며, 각 new_text 길이는 target_length 이하(가능하면 ±3자 이내)로 유지해야 합니다.',
+            'script 필드는 3~6문장 정도의 자연스러운 설명으로 제공해주세요.',
+            `톤 가이드: ${toneLabel} (${toneInstruction}).`
         ].join('\n');
 
         const dialogueBlock = this.composeSubtitleBlock(dialogues, '[대사 목록]');
@@ -1325,7 +1601,13 @@ class VideoAnalysisApp {
             const end = this.formatPromptTime(item.end_time ?? item.end);
             const speaker = item.speaker_name || item.speaker || '';
             const speakerPrefix = speaker ? `[${speaker}] ` : '';
-            lines.push(`${String(index).padStart(2, '0')}. ${start}-${end} ${speakerPrefix}${text}`);
+            if (title.includes('설명')) {
+                const originalIndex = Number.isInteger(item.original_index) ? item.original_index : (Number.isInteger(item.__source_index) ? item.__source_index : index - 1);
+                const targetLength = Number.isFinite(item.target_length) ? item.target_length : text.length;
+                lines.push(`${String(index).padStart(2, '0')}. desc_index=${originalIndex} target_length=${targetLength} ${start}-${end} ${speakerPrefix}${text}`);
+            } else {
+                lines.push(`${String(index).padStart(2, '0')}. ${start}-${end} ${speakerPrefix}${text}`);
+            }
             index += 1;
             if (lines.length >= limit) {
                 lines.push('... (이하 생략)');
@@ -1367,7 +1649,7 @@ class VideoAnalysisApp {
 
         textElement.innerHTML = `
             <div class="chatgpt-guide">
-                <p>ChatGPT 창이 열렸습니다. 아래 프롬프트를 활용해 재해석을 요청하고, 응답을 붙여넣어 주세요.</p>
+                <p>ChatGPT 창이 열렸습니다. 아래 프롬프트를 사용하여 JSON 형식의 재해석(설명 자막 대체 문장 포함)을 요청하고, 응답을 붙여넣어 주세요.</p>
                 <label>1. 사용 프롬프트
                     <textarea readonly id="reinterpretation-prompt" spellcheck="false">${escapedPrompt}</textarea>
                 </label>
@@ -1375,13 +1657,19 @@ class VideoAnalysisApp {
                     <button type="button" class="action-btn secondary" id="copy-reinterpretation-prompt">프롬프트 복사</button>
                 </div>
                 <label>2. ChatGPT 결과 붙여넣기
-                    <textarea id="manual-reinterpret-result" placeholder='ChatGPT 응답(JSON {"outline": [...], "script": "..."} 또는 내레이션 문단)을 여기에 붙여넣으세요.'></textarea>
+                    <textarea id="manual-reinterpret-result" placeholder='예시 JSON: {"outline": ["..."], "script": "...", "replacements": [{"index": 12, "new_text": "새 설명", "target_length": 18}] }'></textarea>
                 </label>
                 <div class="guide-actions">
                     <button type="button" class="action-btn secondary" id="manual-reinterpret-apply">결과 적용</button>
                 </div>
             </div>
         `;
+
+        this.analysisResults.reinterpretation = {
+            source: 'chatgpt-prompt',
+            prompt: promptText,
+            generated_at: new Date().toISOString()
+        };
 
         const applyBtn = document.getElementById('manual-reinterpret-apply');
         if (applyBtn) {
@@ -1420,11 +1708,17 @@ class VideoAnalysisApp {
             this.showReinterpretationResult(parsed.script, parsed.outline || null);
             this.showSuccess('재해석 결과가 적용되었습니다.');
             this.showStatus('✅ 수동 재해석 적용 완료');
+            const appliedReplacements = this.applyDescriptionReplacements(parsed.replacements || [], 'chatgpt-manual');
+            if (parsed.replacements && parsed.replacements.length && appliedReplacements.length === 0) {
+                this.showError('재해석 결과를 설명 자막에 대체하지 못했습니다. JSON 구조를 확인해주세요.');
+            }
             this.analysisResults.reinterpretation = {
                 script: parsed.script,
                 outline: parsed.outline || null,
+                replacements: appliedReplacements,
                 source: 'chatgpt-manual',
                 generated_at: new Date().toISOString(),
+                prompt: this.lastReinterpretationPrompt || null,
                 raw: rawText
             };
         } catch (error) {
@@ -1433,9 +1727,499 @@ class VideoAnalysisApp {
         }
     }
 
+    getSavedResults() {
+        try {
+            const raw = localStorage.getItem(this.savedResultsStorageKey);
+            if (!raw) {
+                return [];
+            }
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                return parsed;
+            }
+            return [];
+        } catch (error) {
+            console.warn('저장된 결과를 읽는 중 오류:', error);
+            return [];
+        }
+    }
+
+    setSavedResults(results) {
+        try {
+            localStorage.setItem(this.savedResultsStorageKey, JSON.stringify(results));
+        } catch (error) {
+            console.error('저장된 결과를 기록하지 못했습니다:', error);
+            this.showError('저장소에 기록할 수 없습니다. 용량을 확인해주세요.');
+        }
+    }
+
+    refreshSavedResultsList() {
+        const results = this.getSavedResults();
+        this.renderSavedResultsList(results);
+    }
+
+    renderSavedResultsList(results) {
+        const listEl = document.getElementById('saved-results-list');
+        if (!listEl) {
+            return;
+        }
+
+        if (!Array.isArray(results) || results.length === 0) {
+            listEl.innerHTML = '<div class="empty-state">저장된 결과가 없습니다.</div>';
+            return;
+        }
+
+        const itemsHtml = results
+            .sort((a, b) => new Date(b.saved_at || 0) - new Date(a.saved_at || 0))
+            .map(result => {
+                const savedAt = this.formatTimestampForDisplay(result.saved_at) || '알 수 없음';
+                const summaryParts = [];
+                if (result.analysisResults) {
+                    const audioCount = Array.isArray(result.analysisResults.audio)
+                        ? result.analysisResults.audio.length : 0;
+                    const subtitleCount = Array.isArray(result.analysisResults.subtitle)
+                        ? result.analysisResults.subtitle.length : 0;
+                    if (audioCount) summaryParts.push(`음성 ${audioCount}개`);
+                    if (subtitleCount) summaryParts.push(`자막 ${subtitleCount}개`);
+                }
+                if (Array.isArray(result.selectedFiles)) {
+                    summaryParts.push(`선택 파일 ${result.selectedFiles.length}개`);
+                }
+                const summary = summaryParts.length ? summaryParts.join(' · ') : '요약 정보 없음';
+                return `
+                    <div class="saved-result-item" data-result-id="${result.id}">
+                        <div class="saved-result-info">
+                            <span class="saved-result-name">${this.escapeHtml(result.name || '이름 없는 저장')}</span>
+                            <span class="saved-result-meta">저장: ${savedAt}</span>
+                            <span class="saved-result-meta">${summary}</span>
+                        </div>
+                        <div class="saved-result-actions">
+                            <button class="action-btn secondary" data-action="load" data-result-id="${result.id}">불러오기</button>
+                            <button class="action-btn outline" data-action="rename" data-result-id="${result.id}">이름 변경</button>
+                            <button class="action-btn outline" data-action="delete" data-result-id="${result.id}">삭제</button>
+                        </div>
+                    </div>
+                `;
+            })
+            .join('');
+
+        listEl.innerHTML = itemsHtml;
+
+        listEl.querySelectorAll('[data-action="load"]').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                const id = event.currentTarget.getAttribute('data-result-id');
+                this.loadSavedResult(id);
+            });
+        });
+
+        listEl.querySelectorAll('[data-action="rename"]').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                const id = event.currentTarget.getAttribute('data-result-id');
+                this.renameSavedResult(id);
+            });
+        });
+
+        listEl.querySelectorAll('[data-action="delete"]').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                const id = event.currentTarget.getAttribute('data-result-id');
+                this.deleteSavedResult(id);
+            });
+        });
+    }
+
+    toggleSavedResultsPanel(forceOpen = null) {
+        const panel = document.getElementById('saved-results-panel');
+        if (!panel) {
+            return;
+        }
+
+        const shouldOpen = forceOpen !== null ? forceOpen : panel.style.display === 'none';
+        if (shouldOpen) {
+            panel.style.display = 'flex';
+            this.refreshSavedResultsList();
+        } else {
+            panel.style.display = 'none';
+        }
+    }
+
+    saveResultsToStorage() {
+        if (!this.analysisResults || Object.keys(this.analysisResults).length === 0) {
+            this.showError('저장할 분석 결과가 없습니다');
+            return;
+        }
+
+        const nameInput = document.getElementById('save-results-name');
+        const saveName = nameInput ? nameInput.value.trim() : '';
+
+        if (!saveName) {
+            this.showError('저장할 이름을 입력하세요');
+            if (nameInput) {
+                nameInput.focus();
+            }
+            return;
+        }
+
+        const timestamp = new Date().toISOString();
+        const savedResults = this.getSavedResults();
+        const existingIndex = savedResults.findIndex(item => item.name === saveName);
+
+        if (existingIndex !== -1 && !window.confirm(`"${saveName}" 이름이 이미 존재합니다. 덮어쓸까요?`)) {
+            return;
+        }
+
+        const payload = {
+            id: existingIndex !== -1 ? savedResults[existingIndex].id : `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            name: saveName,
+            saved_at: timestamp,
+            analysisResults: JSON.parse(JSON.stringify(this.analysisResults)),
+            selectedFiles: Array.from(this.selectedFiles || []),
+            reinterpretationHistory: JSON.parse(JSON.stringify(this.reinterpretationHistory || {})),
+            metadata: {
+                analysis_method: this.currentAnalysisMethod,
+                selected_count: this.selectedFiles ? this.selectedFiles.size : 0
+            }
+        };
+
+        if (existingIndex !== -1) {
+            savedResults[existingIndex] = payload;
+        } else {
+            savedResults.push(payload);
+        }
+
+        this.setSavedResults(savedResults);
+        this.refreshSavedResultsList();
+        this.toggleSavedResultsPanel(true);
+        this.showSuccess(`"${saveName}" 이름으로 저장했습니다`);
+    }
+
+    loadSavedResult(id) {
+        if (!id) {
+            this.showError('불러올 결과를 찾을 수 없습니다');
+            return;
+        }
+
+        const savedResults = this.getSavedResults();
+        const entry = savedResults.find(item => item.id === id);
+
+        if (!entry) {
+            this.showError('저장된 결과를 찾지 못했습니다');
+            return;
+        }
+
+        const clonedResults = JSON.parse(JSON.stringify(entry.analysisResults || {}));
+        const clonedHistory = JSON.parse(JSON.stringify(entry.reinterpretationHistory || {}));
+
+        const restored = this.populateAnalysisResultsFromImport(clonedResults, {
+            reinterpretationHistory: clonedHistory
+        });
+
+        if (!restored) {
+            this.showError('저장된 분석 결과를 적용할 수 없습니다');
+            return;
+        }
+
+        if (Array.isArray(entry.selectedFiles)) {
+            this.selectedFiles = new Set(entry.selectedFiles);
+            this.updateSelectedFilesList();
+            this.updateStatusBar();
+        }
+
+        const nameInput = document.getElementById('save-results-name');
+        if (nameInput) {
+            nameInput.value = entry.name || '';
+        }
+
+        this.toggleSavedResultsPanel(false);
+        this.renderHybridSubtitleTracks();
+        this.showSuccess(`"${entry.name}" 저장 결과를 불러왔습니다`);
+    }
+
+    renameSavedResult(id) {
+        const savedResults = this.getSavedResults();
+        const entryIndex = savedResults.findIndex(item => item.id === id);
+        if (entryIndex === -1) {
+            this.showError('저장된 결과를 찾을 수 없습니다');
+            return;
+        }
+
+        const currentName = savedResults[entryIndex].name || '';
+        const newName = window.prompt('새로운 이름을 입력하세요', currentName)?.trim();
+        if (!newName) {
+            return;
+        }
+
+        if (savedResults.some((item, idx) => idx !== entryIndex && item.name === newName)) {
+            this.showError('같은 이름이 이미 존재합니다. 다른 이름을 입력하세요.');
+            return;
+        }
+
+        savedResults[entryIndex].name = newName;
+        this.setSavedResults(savedResults);
+        this.refreshSavedResultsList();
+        this.showSuccess('이름을 변경했습니다');
+    }
+
+    deleteSavedResult(id) {
+        const savedResults = this.getSavedResults();
+        const entryIndex = savedResults.findIndex(item => item.id === id);
+        if (entryIndex === -1) {
+            return;
+        }
+
+        const name = savedResults[entryIndex].name || '저장된 결과';
+        if (!window.confirm(`"${name}"을(를) 삭제할까요?`)) {
+            return;
+        }
+
+        savedResults.splice(entryIndex, 1);
+        this.setSavedResults(savedResults);
+        this.refreshSavedResultsList();
+        this.showSuccess('저장된 결과를 삭제했습니다');
+    }
+
+    clearAllSavedResults() {
+        const savedResults = this.getSavedResults();
+        if (!savedResults.length) {
+            this.showInfo('삭제할 저장 결과가 없습니다');
+            return;
+        }
+
+        if (!window.confirm('모든 저장된 결과를 삭제할까요? 이 작업은 되돌릴 수 없습니다.')) {
+            return;
+        }
+
+        this.setSavedResults([]);
+        this.refreshSavedResultsList();
+        this.showSuccess('모든 저장 결과를 삭제했습니다');
+    }
+
+    setupReinterpretationEditingPanel() {
+        const panel = document.getElementById('reinterpretation-compare');
+        if (!panel) {
+            return;
+        }
+
+        const applyBtn = document.getElementById('reinterpretation-apply-button');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', () => this.applyReinterpretationEdit());
+        }
+
+        const revertBtn = document.getElementById('reinterpretation-revert-button');
+        if (revertBtn) {
+            revertBtn.addEventListener('click', () => this.revertReinterpretationEdit());
+        }
+
+        const textarea = document.getElementById('reinterpretation-after-input');
+        if (textarea) {
+            textarea.addEventListener('keydown', (event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+                    event.preventDefault();
+                    this.applyReinterpretationEdit();
+                }
+            });
+        }
+    }
+
+    updateReinterpretationComparison(index, trackType, options = {}) {
+        const panel = document.getElementById('reinterpretation-compare');
+        if (!panel) {
+            return;
+        }
+
+        const beforeEl = document.getElementById('reinterpretation-before-text');
+        const afterInput = document.getElementById('reinterpretation-after-input');
+        const metaEl = document.getElementById('reinterpretation-meta');
+
+        if (!Number.isInteger(index) || trackType !== 'description') {
+            panel.style.display = 'none';
+            this.currentReinterpretationEditIndex = null;
+            this.activeReinterpretationTrack = null;
+            if (beforeEl) beforeEl.textContent = '';
+            if (afterInput) afterInput.value = '';
+            if (metaEl) metaEl.textContent = '';
+            return;
+        }
+
+        const subtitle = (this.timeline && this.timeline.subtitleData && Array.isArray(this.timeline.subtitleData.subtitles))
+            ? this.timeline.subtitleData.subtitles[index]
+            : null;
+        const history = this.reinterpretationHistory ? this.reinterpretationHistory[index] : null;
+
+        const originalText = (history && history.original_text) || (subtitle && subtitle.__original_description_text) || '';
+        const currentText = subtitle && typeof subtitle.text === 'string'
+            ? subtitle.text
+            : (history && history.updated_text) || '';
+
+        if (!history && (!originalText || originalText.trim() === currentText.trim())) {
+            panel.style.display = 'none';
+            this.currentReinterpretationEditIndex = null;
+            this.activeReinterpretationTrack = null;
+            if (beforeEl) beforeEl.textContent = '';
+            if (afterInput) afterInput.value = '';
+            if (metaEl) metaEl.textContent = '';
+            return;
+        }
+
+        if (beforeEl) {
+            beforeEl.textContent = originalText ? originalText : '(원본 데이터가 없습니다)';
+        }
+        if (afterInput) {
+            afterInput.value = currentText;
+        }
+        if (metaEl) {
+            metaEl.textContent = this.buildReinterpretationMeta(index, history);
+        }
+
+        panel.style.display = 'flex';
+        this.currentReinterpretationEditIndex = index;
+        this.activeReinterpretationTrack = trackType;
+    }
+
+    refreshReinterpretationPanel() {
+        if (!Number.isInteger(this.currentReinterpretationEditIndex)) {
+            return;
+        }
+        const trackType = this.activeReinterpretationTrack || 'description';
+        this.updateReinterpretationComparison(this.currentReinterpretationEditIndex, trackType);
+    }
+
+    applyReinterpretationEdit() {
+        if (!Number.isInteger(this.currentReinterpretationEditIndex)) {
+            this.showError('재해석 편집할 자막을 선택하세요');
+            return;
+        }
+        const index = this.currentReinterpretationEditIndex;
+        const textarea = document.getElementById('reinterpretation-after-input');
+        if (!textarea) {
+            this.showError('편집 영역을 찾을 수 없습니다');
+            return;
+        }
+
+        const newText = textarea.value.trim();
+        if (!newText) {
+            this.showError('변경 후 내용을 입력하세요');
+            return;
+        }
+
+        const subtitle = (this.timeline && this.timeline.subtitleData && Array.isArray(this.timeline.subtitleData.subtitles))
+            ? this.timeline.subtitleData.subtitles[index]
+            : null;
+        const currentText = subtitle && typeof subtitle.text === 'string' ? subtitle.text.trim() : '';
+        if (newText === currentText) {
+            this.showInfo('변경된 내용이 없습니다');
+            return;
+        }
+
+        const history = this.reinterpretationHistory ? this.reinterpretationHistory[index] : null;
+        const originalText = history?.original_text || subtitle?.__original_description_text || currentText;
+
+        this.updateSubtitleText(index, newText, {
+            source: 'timeline-edit',
+            forceHistory: Boolean(history || subtitle?.__original_description_text),
+            originalText
+        });
+
+        this.renderHybridSubtitleTracks();
+        this.updateReinterpretationComparison(index, 'description');
+        this.showSuccess('재해석 결과가 타임라인에 적용되었습니다');
+
+        Promise.resolve(this.refreshAllSRTSubtitlesWithUpdatedTracks())
+            .catch(error => console.warn('재해석 편집 후 자막 목록 갱신 실패:', error));
+    }
+
+    revertReinterpretationEdit() {
+        if (!Number.isInteger(this.currentReinterpretationEditIndex)) {
+            this.showError('복원할 자막을 선택하세요');
+            return;
+        }
+
+        const index = this.currentReinterpretationEditIndex;
+        const history = this.reinterpretationHistory ? this.reinterpretationHistory[index] : null;
+        const subtitle = (this.timeline && this.timeline.subtitleData && Array.isArray(this.timeline.subtitleData.subtitles))
+            ? this.timeline.subtitleData.subtitles[index]
+            : null;
+        const originalText = history?.original_text || subtitle?.__original_description_text;
+
+        if (!originalText) {
+            this.showError('원본 자막 정보를 찾을 수 없습니다');
+            return;
+        }
+
+        this.updateSubtitleText(index, originalText, {
+            source: 'timeline-revert',
+            forceHistory: true,
+            originalText
+        });
+
+        const textarea = document.getElementById('reinterpretation-after-input');
+        if (textarea) {
+            textarea.value = originalText;
+        }
+
+        this.renderHybridSubtitleTracks();
+        this.updateReinterpretationComparison(index, 'description');
+        this.showSuccess('재해석 자막을 원본으로 되돌렸습니다');
+
+        Promise.resolve(this.refreshAllSRTSubtitlesWithUpdatedTracks())
+            .catch(error => console.warn('재해석 복원 후 자막 목록 갱신 실패:', error));
+    }
+
+    buildReinterpretationMeta(index, history) {
+        const segments = [`자막 #${index + 1}`];
+        if (history?.source) {
+            segments.push(`출처: ${this.formatReinterpretationSource(history.source)}`);
+        }
+        if (history?.updated_at) {
+            const formatted = this.formatTimestampForDisplay(history.updated_at);
+            if (formatted) {
+                segments.push(`업데이트: ${formatted}`);
+            }
+        }
+        if (history?.reverted) {
+            segments.push('상태: 원본으로 복원됨');
+        }
+        return segments.join(' · ');
+    }
+
+    formatReinterpretationSource(source) {
+        switch (source) {
+            case 'api':
+                return 'API 재해석';
+            case 'chatgpt-manual':
+                return 'ChatGPT 수동 적용';
+            case 'chatgpt-prompt':
+                return 'ChatGPT 프롬프트';
+            case 'timeline-edit':
+                return '타임라인 편집';
+            case 'timeline-revert':
+                return '타임라인 복원';
+            case 'speaker-change':
+                return '화자 분류 업데이트';
+            default:
+                return source || '수동 편집';
+        }
+    }
+
+    formatTimestampForDisplay(isoString) {
+        if (!isoString) {
+            return '';
+        }
+        const date = new Date(isoString);
+        if (Number.isNaN(date.getTime())) {
+            return '';
+        }
+        const yyyy = date.getFullYear();
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        const hh = String(date.getHours()).padStart(2, '0');
+        const mi = String(date.getMinutes()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+    }
+
     parseManualReinterpretation(rawText) {
         let outline = null;
         let script = rawText;
+        let replacements = [];
 
         try {
             const parsed = JSON.parse(rawText);
@@ -1447,6 +2231,9 @@ class VideoAnalysisApp {
                 if (typeof parsed.script === 'string' && parsed.script.trim()) {
                     script = parsed.script.trim();
                 }
+                if (Array.isArray(parsed.replacements)) {
+                    replacements = parsed.replacements.map(rep => this.normalizeReplacementPayload(rep)).filter(Boolean);
+                }
             }
         } catch (error) {
             // JSON parse 실패 시 전체 텍스트를 스크립트로 사용
@@ -1457,7 +2244,163 @@ class VideoAnalysisApp {
             throw new Error('재해석 스크립트를 확인할 수 없습니다. JSON 형식 또는 내레이션 문단을 붙여넣어 주세요.');
         }
 
-        return { script, outline };
+        return { script, outline, replacements };
+    }
+
+    normalizeReplacementPayload(raw) {
+        if (!raw || typeof raw !== 'object') {
+            return null;
+        }
+        const rawIndex = raw.index ?? raw.original_index ?? raw.description_index ?? raw.target_index;
+        const indexNum = Number(rawIndex);
+        const resolvedIndex = Number.isFinite(indexNum) ? Math.round(indexNum) : null;
+        const startNum = Number(raw.start_time ?? raw.start);
+        const endNum = Number(raw.end_time ?? raw.end);
+        const lengthCandidate = Number(raw.target_length ?? raw.length ?? raw.original_length);
+        const targetLength = Number.isFinite(lengthCandidate) ? Math.max(0, Math.round(lengthCandidate)) : null;
+        const text = (raw.new_text || raw.text || raw.replacement || '').toString().trim();
+        if (!text) {
+            return null;
+        }
+        return {
+            index: resolvedIndex,
+            start_time: Number.isFinite(startNum) ? startNum : null,
+            end_time: Number.isFinite(endNum) ? endNum : null,
+            target_length: targetLength,
+            text
+        };
+    }
+
+    applyDescriptionReplacements(replacements, source = 'api') {
+        if (!Array.isArray(replacements) || replacements.length === 0) {
+            return [];
+        }
+
+        const applied = [];
+
+        replacements.forEach(rep => {
+            if (!rep) return;
+            const resolvedIndex = this.resolveReplacementIndex(rep);
+            if (!Number.isInteger(resolvedIndex) || resolvedIndex < 0 || !this.classifiedSubtitles || !this.classifiedSubtitles[resolvedIndex]) {
+                return;
+            }
+
+            const originalSubtitle = this.classifiedSubtitles[resolvedIndex];
+            const originalText = (originalSubtitle.text || '').trim();
+            const originalLength = originalText.length;
+            const desiredLength = Number.isFinite(rep.target_length) ? rep.target_length : originalLength;
+
+            let newText = (rep.text || '').trim();
+            if (!newText) {
+                return;
+            }
+
+            if (Number.isFinite(desiredLength) && desiredLength > 0 && newText.length > desiredLength) {
+                newText = newText.slice(0, desiredLength).trim();
+            }
+
+            if (newText.length === 0) {
+                return;
+            }
+
+            const timestamp = new Date().toISOString();
+            if (!this.reinterpretationHistory) {
+                this.reinterpretationHistory = {};
+            }
+
+            const existingHistory = this.reinterpretationHistory[resolvedIndex];
+            if (existingHistory) {
+                if (!existingHistory.original_text) {
+                    existingHistory.original_text = originalText;
+                }
+                if (existingHistory.updated_text && existingHistory.updated_text !== newText) {
+                    if (!Array.isArray(existingHistory.changes)) {
+                        existingHistory.changes = [];
+                    }
+                    existingHistory.changes.push({
+                        text: existingHistory.updated_text,
+                        source: existingHistory.source,
+                        updated_at: existingHistory.updated_at
+                    });
+                }
+                existingHistory.updated_text = newText;
+                existingHistory.source = source;
+                existingHistory.updated_at = timestamp;
+                existingHistory.reverted = existingHistory.original_text?.trim() === newText.trim();
+            } else {
+                this.reinterpretationHistory[resolvedIndex] = {
+                    original_text: originalText,
+                    updated_text: newText,
+                    source,
+                    updated_at: timestamp,
+                    reverted: originalText.trim() === newText.trim()
+                };
+            }
+
+            const historyEntry = this.reinterpretationHistory[resolvedIndex];
+
+            this.classifiedSubtitles[resolvedIndex].text = newText;
+            this.classifiedSubtitles[resolvedIndex].updated_by = source;
+            this.classifiedSubtitles[resolvedIndex].__source_index = resolvedIndex;
+            this.classifiedSubtitles[resolvedIndex].__original_description_text = historyEntry?.original_text || originalText;
+            this.classifiedSubtitles[resolvedIndex].reinterpretation = historyEntry ? { ...historyEntry } : undefined;
+            this.updateTrackSubtitleText('description', resolvedIndex, newText);
+            if (this.timeline && this.timeline.subtitleData && Array.isArray(this.timeline.subtitleData.subtitles)) {
+                const timelineSub = this.timeline.subtitleData.subtitles[resolvedIndex];
+                if (timelineSub) {
+                    this.timeline.subtitleData.subtitles[resolvedIndex] = {
+                        ...timelineSub,
+                        text: newText,
+                        __original_description_text: historyEntry?.original_text || timelineSub.__original_description_text || originalText,
+                        reinterpretation: historyEntry ? { ...historyEntry } : undefined
+                    };
+                }
+            }
+
+            applied.push({
+                index: resolvedIndex,
+                text: newText,
+                original_length: originalLength,
+                target_length: Number.isFinite(desiredLength) ? desiredLength : originalLength,
+                source,
+                previous_text: originalText,
+                updated_at: timestamp
+            });
+        });
+
+        if (applied.length > 0) {
+            this.refreshAllSRTSubtitlesWithUpdatedTracks();
+            this.updateSpeakerStatisticsFromSubtitles();
+            this.storeSpeakerClassification(source || 'reinterpretation');
+        }
+
+        return applied;
+    }
+
+    resolveReplacementIndex(replacement) {
+        if (!replacement) return null;
+
+        const candidateKeys = ['index', 'original_index', 'description_index', 'target_index'];
+        for (const key of candidateKeys) {
+            const value = replacement[key];
+            if (Number.isInteger(value) && value >= 0) {
+                return value;
+            }
+        }
+
+        const { start, end } = this.getSubtitleTimes(replacement);
+
+        if (Number.isFinite(start) || Number.isFinite(end)) {
+            if (Array.isArray(this.classifiedSubtitles)) {
+                for (let idx = 0; idx < this.classifiedSubtitles.length; idx += 1) {
+                    if (this.matchesSubtitleData(this.classifiedSubtitles[idx], start, end, '')) {
+                        return idx;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     showReinterpretationResult(reinterpretationText, outline = null) {
@@ -1514,6 +2457,9 @@ class VideoAnalysisApp {
         document.getElementById('stt-results').style.display = 'none';
         document.getElementById('comparison-results').style.display = 'none';
         document.getElementById('subtitle-editing-tools').style.display = 'none';
+        this.reinterpretationHistory = {};
+        this.currentReinterpretationEditIndex = null;
+        this.activeReinterpretationTrack = null;
         const reinterpretPanel = document.getElementById('reinterpretation-panel');
         if (reinterpretPanel) {
             reinterpretPanel.style.display = 'none';
@@ -1522,6 +2468,27 @@ class VideoAnalysisApp {
         if (reinterpretText) {
             reinterpretText.textContent = '재해석 결과가 여기에 표시됩니다.';
         }
+        const comparePanel = document.getElementById('reinterpretation-compare');
+        if (comparePanel) {
+            comparePanel.style.display = 'none';
+        }
+        const compareBefore = document.getElementById('reinterpretation-before-text');
+        if (compareBefore) {
+            compareBefore.textContent = '';
+        }
+        const compareAfter = document.getElementById('reinterpretation-after-input');
+        if (compareAfter) {
+            compareAfter.value = '';
+        }
+        const compareMeta = document.getElementById('reinterpretation-meta');
+        if (compareMeta) {
+            compareMeta.textContent = '';
+        }
+        const saveNameInput = document.getElementById('save-results-name');
+        if (saveNameInput) {
+            saveNameInput.value = '';
+        }
+        this.toggleSavedResultsPanel(false);
         this.hideProgress();
     }
 
@@ -3606,8 +4573,30 @@ class VideoAnalysisApp {
         subtitles.forEach((subtitle, index) => {
             const block = document.createElement('div');
             block.className = 'subtitle-block hybrid-subtitle';
-            block.dataset.index = subtitle.originalIndex || index;
+            const globalIndexGuess = this.findSubtitleIndexForData(subtitle);
+            const resolvedIndex = Number.isInteger(globalIndexGuess) && globalIndexGuess >= 0
+                ? globalIndexGuess
+                : (typeof subtitle.globalIndex === 'number'
+                    ? subtitle.globalIndex
+                    : (typeof subtitle.originalIndex === 'number'
+                        ? subtitle.originalIndex
+                        : index));
+
+            block.dataset.index = resolvedIndex;
+            block.dataset.globalIndex = resolvedIndex;
             block.dataset.trackType = trackType;
+
+            subtitle.globalIndex = resolvedIndex;
+            if (typeof subtitle.originalIndex !== 'number') {
+                subtitle.originalIndex = resolvedIndex;
+            }
+
+            const historyEntry = this.reinterpretationHistory ? this.reinterpretationHistory[resolvedIndex] : null;
+            if (historyEntry && trackType === 'description') {
+                block.classList.add('has-reinterpretation');
+                block.dataset.originalText = historyEntry.original_text || '';
+                block.dataset.updatedText = subtitle.text || '';
+            }
 
             // 자막 시간이 음수인 경우 0으로 조정
             const startTime = Math.max(0, subtitle.start_time);
@@ -3719,9 +4708,16 @@ class VideoAnalysisApp {
             block.appendChild(numberElement);
             block.appendChild(textElement);
 
+            const tooltipOriginal = historyEntry?.original_text || subtitle.__original_description_text;
+            if (trackType === 'description' && tooltipOriginal && tooltipOriginal.trim() && tooltipOriginal.trim() !== (subtitle.text || '').trim()) {
+                block.title = `#${resolvedIndex + 1}: ${this.formatSubtitleTime(subtitle.start_time)} - ${this.formatSubtitleTime(subtitle.end_time)}\n[변경 전]\n${tooltipOriginal}\n\n[변경 후]\n${subtitle.text}`;
+            } else {
+                block.title = `#${resolvedIndex + 1}: ${this.formatSubtitleTime(subtitle.start_time)} - ${this.formatSubtitleTime(subtitle.end_time)}\n${subtitle.text}`;
+            }
+
             // 이벤트 리스너 추가 (편집 기능 + 드래그)
-            this.addSubtitleBlockEvents(block, subtitle, subtitle.originalIndex || index);
-            this.addDragFunctionality(block, subtitle, subtitle.originalIndex || index);
+            this.addSubtitleBlockEvents(block, subtitle, resolvedIndex);
+            this.addDragFunctionality(block, subtitle, resolvedIndex);
 
             // 트랙에 블록 추가
             trackContent.appendChild(block);
@@ -3777,6 +4773,8 @@ class VideoAnalysisApp {
 
             this.seekToTime(subtitle.start_time);
             this.showSubtitleEditInfo(subtitle, index);
+            const datasetTrackType = block.dataset.trackType || subtitle.assigned_track || subtitle.track || 'main';
+            this.updateReinterpretationComparison(index, datasetTrackType);
             // 파형과 자막 매칭 하이라이트
             this.highlightWaveformForSubtitle(subtitle);
 
@@ -6065,7 +7063,6 @@ class VideoAnalysisApp {
     setupSpeakerRecognition() {
         console.log('🎭 화자 인식 시스템 설정');
 
-        // 화자 인식 시작 버튼
         const startBtn = document.getElementById('start-speaker-recognition');
         if (startBtn) {
             startBtn.addEventListener('click', () => {
@@ -6073,20 +7070,59 @@ class VideoAnalysisApp {
             });
         }
 
-        const loadSavedMainBtn = document.getElementById('load-saved-speaker-main');
-        if (loadSavedMainBtn) {
-            loadSavedMainBtn.addEventListener('click', () => {
-                this.loadSavedSpeakerClassification();
+        const loadMainBtn = document.getElementById('load-saved-speaker-main');
+        if (loadMainBtn) {
+            loadMainBtn.addEventListener('click', () => {
+                const selectedName = this.getSelectedSavedSpeakerName();
+                this.loadSavedSpeakerClassification(selectedName);
             });
         }
 
-        // 트랙 배치 적용 버튼
+        const loadBottomBtn = document.getElementById('load-saved-speaker-bottom');
+        if (loadBottomBtn) {
+            loadBottomBtn.addEventListener('click', () => {
+                const selectedName = this.getSelectedSavedSpeakerName();
+                this.loadSavedSpeakerClassification(selectedName);
+            });
+        }
+
+        const saveProfileBtn = document.getElementById('save-speaker-profile');
+        if (saveProfileBtn) {
+            saveProfileBtn.addEventListener('click', () => {
+                this.promptSaveSpeakerClassification();
+            });
+        }
+
+        const renameProfileBtn = document.getElementById('rename-speaker-profile');
+        if (renameProfileBtn) {
+            renameProfileBtn.addEventListener('click', () => {
+                this.renameSavedSpeakerClassification();
+            });
+        }
+
+        const deleteProfileBtn = document.getElementById('delete-speaker-profile');
+        if (deleteProfileBtn) {
+            deleteProfileBtn.addEventListener('click', () => {
+                this.deleteSavedSpeakerClassification();
+            });
+        }
+
+        const savedDropdown = document.getElementById('saved-speaker-dropdown');
+        if (savedDropdown) {
+            savedDropdown.addEventListener('change', () => {
+                this.lastSelectedSavedSpeakerName = savedDropdown.value || null;
+                this.updateSavedSpeakerButtonsState();
+            });
+        }
+
         const applyBtn = document.getElementById('apply-speaker-mapping');
         if (applyBtn) {
             applyBtn.addEventListener('click', () => {
                 this.applySpeakerMapping();
             });
         }
+
+        this.refreshSavedSpeakerDropdown();
     }
 
     async startSpeakerRecognition() {
@@ -7015,6 +8051,66 @@ class VideoAnalysisApp {
         return speakerColors;
     }
 
+    findSubtitleIndexForData(subtitle) {
+        if (!Array.isArray(this.classifiedSubtitles)) return -1;
+
+        const candidateFields = ['__source_index', 'original_index', 'originalIndex', 'global_index', 'globalIndex', 'index'];
+        for (const field of candidateFields) {
+            const value = subtitle ? subtitle[field] : undefined;
+            if (Number.isInteger(value) && value >= 0 && this.matchesSubtitleAtIndex(value, subtitle)) {
+                return value;
+            }
+        }
+
+        const { start, end } = this.getSubtitleTimes(subtitle);
+        const text = (subtitle && subtitle.text ? subtitle.text : '').trim();
+
+        for (let idx = 0; idx < this.classifiedSubtitles.length; idx += 1) {
+            if (this.matchesSubtitleData(this.classifiedSubtitles[idx], start, end, text)) {
+                return idx;
+            }
+        }
+
+        return -1;
+    }
+
+    matchesSubtitleAtIndex(index, subtitle) {
+        if (!Array.isArray(this.classifiedSubtitles) || index < 0 || index >= this.classifiedSubtitles.length) {
+            return false;
+        }
+        const candidate = this.classifiedSubtitles[index];
+        const { start, end } = this.getSubtitleTimes(subtitle);
+        const text = (subtitle && subtitle.text ? subtitle.text : '').trim();
+        return this.matchesSubtitleData(candidate, start, end, text);
+    }
+
+    matchesSubtitleData(candidate, start, end, text) {
+        if (!candidate) {
+            return false;
+        }
+        const candidateText = (candidate.text || '').trim();
+        const candidateTimes = this.getSubtitleTimes(candidate);
+
+        const sameText = text ? candidateText === text : true;
+        const sameStart = Number.isFinite(start) && Number.isFinite(candidateTimes.start)
+            ? Math.abs(candidateTimes.start - start) < 0.05
+            : true;
+        const sameEnd = Number.isFinite(end) && Number.isFinite(candidateTimes.end)
+            ? Math.abs(candidateTimes.end - end) < 0.05
+            : true;
+
+        return sameText && sameStart && sameEnd;
+    }
+
+    getSubtitleTimes(subtitle) {
+        const start = Number(subtitle?.start_time ?? subtitle?.start ?? subtitle?.startTime);
+        const end = Number(subtitle?.end_time ?? subtitle?.end ?? subtitle?.endTime);
+        return {
+            start: Number.isFinite(start) ? start : null,
+            end: Number.isFinite(end) ? end : null
+        };
+    }
+
     sanitizeSpeakerNameForId(speakerName) {
         if (!speakerName) {
             return 'speaker';
@@ -7079,6 +8175,27 @@ class VideoAnalysisApp {
 
         // 선택된 자막 개수 업데이트
         this.updateSelectedCount(speakerName);
+    }
+
+    updateTrackSubtitleText(trackName, index, newText) {
+        if (!this.timeline || !this.timeline.speakerClassifiedSubtitles) return;
+        const trackArray = this.timeline.speakerClassifiedSubtitles[trackName];
+        if (!Array.isArray(trackArray)) return;
+        const historyEntry = this.reinterpretationHistory ? this.reinterpretationHistory[index] : null;
+        for (let i = 0; i < trackArray.length; i += 1) {
+            const item = trackArray[i];
+            if (!item) continue;
+            const candidateIndex = this.findSubtitleIndexForData(item);
+            if (candidateIndex === index) {
+                trackArray[i] = {
+                    ...item,
+                    text: newText,
+                    __original_description_text: historyEntry?.original_text ?? item.__original_description_text,
+                    reinterpretation: historyEntry ? { ...historyEntry } : item.reinterpretation
+                };
+                return;
+            }
+        }
     }
 
     async addSpeakerSubtitlesFromSRT(speakerName, speakerData, speakerColor) {
@@ -7323,7 +8440,7 @@ class VideoAnalysisApp {
                     <div class="control-row">
                         <div class="apply-selection-controls">
                             <button onclick="app.applySelectedSubtitles()" class="action-btn primary">변경 사항 저장</button>
-                            <button onclick="app.loadSavedSpeakerClassification()" class="action-btn secondary">저장 내용 불러오기</button>
+                            <button class="action-btn secondary" id="load-saved-speaker-bottom">저장 내용 불러오기</button>
                             <button onclick="app.refreshAllSRTSubtitlesWithUpdatedTracks()" class="action-btn">변경 적용</button>
                         </div>
                     </div>
@@ -7792,86 +8909,354 @@ class VideoAnalysisApp {
         });
     }
 
+    buildSpeakerClassificationSnapshot(source = 'manual-save') {
+        if (!Array.isArray(this.classifiedSubtitles) || this.classifiedSubtitles.length === 0) {
+            if (!this.timeline || !this.timeline.speakerClassifiedSubtitles) {
+                return null;
+            }
+        }
+
+        const subtitlesClone = Array.isArray(this.classifiedSubtitles)
+            ? JSON.parse(JSON.stringify(this.classifiedSubtitles))
+            : [];
+
+        const classificationSource = this.timeline && this.timeline.speakerClassifiedSubtitles
+            ? this.timeline.speakerClassifiedSubtitles
+            : this.groupSubtitlesByTrack(subtitlesClone);
+
+        const classificationClone = JSON.parse(JSON.stringify(classificationSource));
+
+        return {
+            saved_at: new Date().toISOString(),
+            source,
+            classified_subtitles: subtitlesClone,
+            classification: classificationClone,
+            current_speakers: this.currentSpeakers ? JSON.parse(JSON.stringify(this.currentSpeakers)) : {},
+            track_states: this.trackStates ? JSON.parse(JSON.stringify(this.trackStates)) : {},
+            selected_files: Array.from(this.selectedFiles || []),
+            status: {
+                current_tab: this.currentTab,
+                analysis_method: this.currentAnalysisMethod || 'text'
+            }
+        };
+    }
+
     storeSpeakerClassification(source = 'manual-save') {
-        if (!this.isStorageAvailable() || !this.timeline) {
+        if (!this.isStorageAvailable()) {
             return;
         }
 
         try {
-            const classification = (this.timeline && this.timeline.speakerClassifiedSubtitles)
-                ? this.timeline.speakerClassifiedSubtitles
-                : this.groupSubtitlesByTrack(this.classifiedSubtitles || []);
-
-            const payload = {
-                saved_at: new Date().toISOString(),
-                source,
-                classified_subtitles: this.classifiedSubtitles || [],
-                classification,
-                current_speakers: this.currentSpeakers || {},
-                track_states: this.trackStates || {},
-                selected_files: Array.from(this.selectedFiles || []),
-                status: {
-                    current_tab: this.currentTab,
-                    analysis_method: this.currentAnalysisMethod || 'text'
-                }
-            };
-
-            window.localStorage.setItem(this.speakerClassificationStorageKey, JSON.stringify(payload));
-            console.log('💾 화자 분류 상태 저장', payload);
+            const snapshot = this.buildSpeakerClassificationSnapshot(source);
+            if (!snapshot) {
+                return;
+            }
+            window.localStorage.setItem(this.speakerClassificationStorageKey, JSON.stringify(snapshot));
         } catch (error) {
             console.error('화자 분류 상태 저장 실패:', error);
         }
     }
 
-    loadSavedSpeakerClassification() {
+    getSavedSpeakerEntries() {
+        if (!this.isStorageAvailable()) {
+            return [];
+        }
+        try {
+            const raw = window.localStorage.getItem(this.speakerClassificationListKey);
+            let entries = [];
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    entries = parsed;
+                } else if (parsed && Array.isArray(parsed.entries)) {
+                    entries = parsed.entries;
+                }
+            }
+            entries = entries
+                .filter(entry => entry && entry.name && entry.data)
+                .map(entry => ({
+                    name: String(entry.name),
+                    saved_at: entry.saved_at || new Date().toISOString(),
+                    source: entry.source || null,
+                    data: entry.data
+                }));
+            entries.sort((a, b) => new Date(b.saved_at || 0) - new Date(a.saved_at || 0));
+            return entries;
+        } catch (error) {
+            console.error('저장된 화자 분류 목록 로드 실패:', error);
+            return [];
+        }
+    }
+
+    setSavedSpeakerEntries(entries) {
+        if (!this.isStorageAvailable()) {
+            return;
+        }
+        try {
+            window.localStorage.setItem(this.speakerClassificationListKey, JSON.stringify(entries));
+        } catch (error) {
+            console.error('저장된 화자 분류 목록 저장 실패:', error);
+        }
+    }
+
+    refreshSavedSpeakerDropdown(selectedName = undefined) {
+        const dropdown = document.getElementById('saved-speaker-dropdown');
+        if (!dropdown) {
+            return;
+        }
+
+        const entries = this.getSavedSpeakerEntries();
+        const previousValue = selectedName !== undefined ? selectedName : dropdown.value;
+
+        dropdown.innerHTML = '';
+        const autoOption = document.createElement('option');
+        autoOption.value = '';
+        autoOption.textContent = '자동 저장 (최근)';
+        dropdown.appendChild(autoOption);
+
+        entries.forEach(entry => {
+            const option = document.createElement('option');
+            option.value = entry.name;
+            option.textContent = entry.name;
+            dropdown.appendChild(option);
+        });
+
+        if (previousValue && entries.some(entry => entry.name === previousValue)) {
+            dropdown.value = previousValue;
+            this.lastSelectedSavedSpeakerName = previousValue;
+        } else {
+            dropdown.value = '';
+            this.lastSelectedSavedSpeakerName = null;
+        }
+
+        this.updateSavedSpeakerButtonsState();
+    }
+
+    updateSavedSpeakerButtonsState() {
+        const dropdown = document.getElementById('saved-speaker-dropdown');
+        const selectedName = dropdown ? dropdown.value : '';
+        const hasSelection = !!selectedName;
+        const renameBtn = document.getElementById('rename-speaker-profile');
+        const deleteBtn = document.getElementById('delete-speaker-profile');
+
+        if (renameBtn) renameBtn.disabled = !hasSelection;
+        if (deleteBtn) deleteBtn.disabled = !hasSelection;
+    }
+
+    getSelectedSavedSpeakerName() {
+        const dropdown = document.getElementById('saved-speaker-dropdown');
+        if (dropdown && dropdown.value) {
+            return dropdown.value;
+        }
+        return null;
+    }
+
+    promptSaveSpeakerClassification() {
+        if (!Array.isArray(this.classifiedSubtitles) || this.classifiedSubtitles.length === 0) {
+            this.showError('저장할 화자 분류가 없습니다');
+            return;
+        }
+
+        const defaultName = this.generateDefaultProfileName();
+        const name = window.prompt('저장할 이름을 입력하세요.', defaultName);
+        if (name === null) {
+            return;
+        }
+        const trimmed = name.trim();
+        if (!trimmed) {
+            this.showError('이름을 입력해야 합니다');
+            return;
+        }
+
+        const entries = this.getSavedSpeakerEntries();
+        const exists = entries.some(entry => entry.name === trimmed);
+        if (exists) {
+            const confirmReplace = window.confirm(`'${trimmed}' 이름이 이미 존재합니다. 덮어쓸까요?`);
+            if (!confirmReplace) {
+                return;
+            }
+        }
+
+        this.saveSpeakerClassificationWithName(trimmed, 'manual-save');
+    }
+
+    saveSpeakerClassificationWithName(name, source = 'manual-save') {
+        if (!name) {
+            return;
+        }
+        const snapshot = this.buildSpeakerClassificationSnapshot(source);
+        if (!snapshot) {
+            this.showError('저장할 화자 분류가 없습니다');
+            return;
+        }
+
+        const entries = this.getSavedSpeakerEntries();
+        const snapshotClone = JSON.parse(JSON.stringify(snapshot));
+        const savedAt = new Date().toISOString();
+        const existingIndex = entries.findIndex(entry => entry.name === name);
+        if (existingIndex >= 0) {
+            entries[existingIndex] = {
+                name,
+                saved_at: savedAt,
+                source,
+                data: snapshotClone
+            };
+        } else {
+            entries.unshift({
+                name,
+                saved_at: savedAt,
+                source,
+                data: snapshotClone
+            });
+        }
+        this.setSavedSpeakerEntries(entries);
+        this.refreshSavedSpeakerDropdown(name);
+        this.showSuccess(`'${name}' 프로필이 저장되었습니다.`);
+    }
+
+    deleteSavedSpeakerClassification() {
+        const name = this.getSelectedSavedSpeakerName();
+        if (!name) {
+            this.showError('삭제할 저장 프로필을 선택하세요');
+            return;
+        }
+
+        const confirmDelete = window.confirm(`'${name}' 프로필을 삭제할까요?`);
+        if (!confirmDelete) {
+            return;
+        }
+
+        const entries = this.getSavedSpeakerEntries().filter(entry => entry.name !== name);
+        this.setSavedSpeakerEntries(entries);
+        this.refreshSavedSpeakerDropdown();
+        this.showSuccess(`'${name}' 프로필이 삭제되었습니다.`);
+    }
+
+    renameSavedSpeakerClassification() {
+        const name = this.getSelectedSavedSpeakerName();
+        if (!name) {
+            this.showError('이름을 변경할 프로필을 선택하세요');
+            return;
+        }
+
+        const newName = window.prompt('새 이름을 입력하세요.', name);
+        if (newName === null) {
+            return;
+        }
+        const trimmed = newName.trim();
+        if (!trimmed) {
+            this.showError('이름을 입력해야 합니다');
+            return;
+        }
+        if (trimmed === name) {
+            return;
+        }
+
+        const entries = this.getSavedSpeakerEntries();
+        if (entries.some(entry => entry.name === trimmed)) {
+            this.showError('같은 이름의 프로필이 이미 존재합니다');
+            return;
+        }
+
+        const entry = entries.find(item => item.name === name);
+        if (!entry) {
+            this.showError('저장된 데이터를 찾을 수 없습니다');
+            return;
+        }
+
+        entry.name = trimmed;
+        entry.saved_at = new Date().toISOString();
+        this.setSavedSpeakerEntries(entries);
+        this.refreshSavedSpeakerDropdown(trimmed);
+        this.showSuccess(`'${name}' 프로필 이름을 '${trimmed}'으로 변경했습니다.`);
+    }
+
+    loadSavedSpeakerClassification(name = null) {
         if (!this.isStorageAvailable()) {
             this.showError('저장소를 사용할 수 없습니다 (브라우저 설정 확인)');
             return;
         }
 
-        try {
-            const raw = window.localStorage.getItem(this.speakerClassificationStorageKey);
-            if (!raw) {
-                this.showError('저장된 화자 분류가 없습니다');
+        if (name === null || name === undefined) {
+            const dropdown = document.getElementById('saved-speaker-dropdown');
+            if (dropdown && dropdown.value) {
+                name = dropdown.value;
+            }
+        }
+
+        if (name) {
+            const entries = this.getSavedSpeakerEntries();
+            const entry = entries.find(item => item.name === name);
+            if (!entry) {
+                this.showError(`'${name}' 프로필을 찾을 수 없습니다`);
                 return;
             }
+            this.applySpeakerClassificationSnapshot(entry.data, name);
+            this.refreshSavedSpeakerDropdown(name);
+            return;
+        }
 
-            const data = JSON.parse(raw);
-            if (!data || !Array.isArray(data.classified_subtitles)) {
-                throw new Error('저장된 데이터 형식이 올바르지 않습니다');
-            }
+        const raw = window.localStorage.getItem(this.speakerClassificationStorageKey);
+        if (!raw) {
+            this.showError('저장된 화자 분류가 없습니다');
+            return;
+        }
 
-            this.classifiedSubtitles = data.classified_subtitles;
-            if (data.current_speakers) {
-                this.currentSpeakers = data.current_speakers;
-            }
-            if (data.track_states) {
-                this.trackStates = data.track_states;
-            }
-
-            this.currentAnalysisMethod = (data.status && data.status.analysis_method) || this.currentAnalysisMethod || 'text';
-
-            const classification = data.classification || this.groupSubtitlesByTrack(this.classifiedSubtitles);
-            this.updateHybridTracksWithSpeakers(classification);
-
-            if (this.currentSpeakers && Object.keys(this.currentSpeakers).length > 0) {
-                const method = (this.currentAnalysisMethod || '').toLowerCase();
-                if (method.includes('audio')) {
-                    this.displayAudioBasedSpeakers(this.currentSpeakers, this.currentAnalysisMethod);
-                } else {
-                    this.displayDetectedSpeakers(this.currentSpeakers);
-                }
-            }
-
-            this.storeSpeakerClassification('load-saved');
-
-            this.showSuccess('저장된 화자 분류를 불러왔습니다');
-            this.showStatus('✅ 저장된 분류 적용됨');
-
+        try {
+            const snapshot = JSON.parse(raw);
+            this.applySpeakerClassificationSnapshot(snapshot, '자동 저장');
+            this.refreshSavedSpeakerDropdown();
         } catch (error) {
-            console.error('저장된 화자 분류 불러오기 실패:', error);
+            console.error('자동 저장 화자 분류 불러오기 실패:', error);
             this.showError('저장된 화자 분류를 불러오지 못했습니다');
         }
+    }
+
+    applySpeakerClassificationSnapshot(snapshot, label = '저장된 분류') {
+        if (!snapshot || !Array.isArray(snapshot.classified_subtitles)) {
+            this.showError('저장된 데이터 형식이 올바르지 않습니다');
+            return;
+        }
+
+        this.classifiedSubtitles = Array.isArray(snapshot.classified_subtitles)
+            ? snapshot.classified_subtitles.map(sub => ({ ...sub }))
+            : [];
+
+        this.currentSpeakers = snapshot.current_speakers
+            ? JSON.parse(JSON.stringify(snapshot.current_speakers))
+            : {};
+
+        if (snapshot.track_states) {
+            this.trackStates = JSON.parse(JSON.stringify(snapshot.track_states));
+        }
+
+        this.currentAnalysisMethod = snapshot.status?.analysis_method || this.currentAnalysisMethod || 'text';
+
+        const classification = snapshot.classification
+            ? JSON.parse(JSON.stringify(snapshot.classification))
+            : this.groupSubtitlesByTrack(this.classifiedSubtitles);
+
+        this.updateHybridTracksWithSpeakers(classification);
+
+        if (this.currentSpeakers && Object.keys(this.currentSpeakers).length > 0) {
+            const method = (this.currentAnalysisMethod || '').toLowerCase();
+            if (method.includes('audio')) {
+                this.displayAudioBasedSpeakers(this.currentSpeakers, this.currentAnalysisMethod);
+            } else {
+                this.displayDetectedSpeakers(this.currentSpeakers);
+            }
+        }
+
+        this.storeSpeakerClassification('load-snapshot');
+        this.refreshSavedSpeakerDropdown(label && label !== '자동 저장' ? label : undefined);
+        this.showSuccess(`'${label}' 프로필을 불러왔습니다.`);
+        this.showStatus(`✅ '${label}' 분류 적용됨`);
+    }
+
+    generateDefaultProfileName() {
+        const now = new Date();
+        const pad = (value) => value.toString().padStart(2, '0');
+        return `분류-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
     }
 
     groupSubtitlesByTrack(subtitles) {
@@ -7892,12 +9277,11 @@ class VideoAnalysisApp {
             if (!grouped[track]) {
                 grouped[track] = [];
             }
-            grouped[track].push(sub);
+            grouped[track].push(JSON.parse(JSON.stringify(sub)));
         });
 
         return grouped;
     }
-
     isStorageAvailable() {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -8118,8 +9502,19 @@ class VideoAnalysisApp {
         });
     }
 
-    updateSubtitleText(globalIndex, newText) {
+    updateSubtitleText(globalIndex, newText, options = {}) {
         console.log(`🔄 자막 데이터 업데이트: #${globalIndex + 1} → "${newText}"`);
+
+        let previousText = null;
+        if (this.classifiedSubtitles && this.classifiedSubtitles[globalIndex]) {
+            previousText = this.classifiedSubtitles[globalIndex].text;
+        }
+        if (previousText === null && this.timeline.subtitleData && this.timeline.subtitleData.subtitles && this.timeline.subtitleData.subtitles[globalIndex]) {
+            previousText = this.timeline.subtitleData.subtitles[globalIndex].text;
+        }
+        if (previousText === null) {
+            previousText = '';
+        }
 
         // 1. classifiedSubtitles 업데이트
         if (this.classifiedSubtitles && this.classifiedSubtitles[globalIndex]) {
@@ -8147,11 +9542,162 @@ class VideoAnalysisApp {
         blocks.forEach(block => {
             const subtitle = this.timeline.subtitleData.subtitles[globalIndex];
             if (subtitle) {
-                block.title = `#${globalIndex + 1}: ${this.formatSubtitleTime(subtitle.start_time)} - ${this.formatSubtitleTime(subtitle.end_time)}\n${newText}`;
+                const originalTooltip = subtitle.__original_description_text;
+                if ((block.dataset.trackType || subtitle.assigned_track || subtitle.track) === 'description'
+                    && originalTooltip
+                    && originalTooltip.trim()
+                    && originalTooltip.trim() !== newText.trim()) {
+                    block.classList.add('has-reinterpretation');
+                    block.dataset.originalText = originalTooltip;
+                    block.dataset.updatedText = newText;
+                    block.title = `#${globalIndex + 1}: ${this.formatSubtitleTime(subtitle.start_time)} - ${this.formatSubtitleTime(subtitle.end_time)}\n[변경 전]\n${originalTooltip}\n\n[변경 후]\n${newText}`;
+                } else {
+                    block.classList.remove('has-reinterpretation');
+                    delete block.dataset.originalText;
+                    delete block.dataset.updatedText;
+                    block.title = `#${globalIndex + 1}: ${this.formatSubtitleTime(subtitle.start_time)} - ${this.formatSubtitleTime(subtitle.end_time)}\n${newText}`;
+                }
             }
         });
 
         console.log(`✅ 자막 #${globalIndex + 1} 데이터 업데이트 완료`);
+
+        this.afterSubtitleTextChange(globalIndex, previousText, newText, options.source || 'manual-edit', options);
+    }
+
+    afterSubtitleTextChange(index, previousText, newText, source = 'manual-edit', options = {}) {
+        const trimmedPrev = (previousText || '').trim();
+        const trimmedNew = (newText || '').trim();
+        const timestamp = new Date().toISOString();
+
+        if (!this.reinterpretationHistory) {
+            this.reinterpretationHistory = {};
+        }
+
+        const forceHistory = Boolean(options.forceHistory);
+        const history = this.reinterpretationHistory[index];
+        const originalText = options.originalText || history?.original_text || trimmedPrev;
+
+        if (history) {
+            if (!history.original_text) {
+                history.original_text = originalText;
+            }
+            if (history.updated_text !== trimmedNew) {
+                if (history.updated_text && history.updated_text !== trimmedNew) {
+                    if (!Array.isArray(history.changes)) {
+                        history.changes = [];
+                    }
+                    history.changes.push({
+                        text: history.updated_text,
+                        source: history.source,
+                        updated_at: history.updated_at
+                    });
+                }
+                history.updated_text = trimmedNew;
+            }
+            history.source = source;
+            history.updated_at = timestamp;
+            history.reverted = history.original_text?.trim() === trimmedNew;
+        } else if (forceHistory) {
+            this.reinterpretationHistory[index] = {
+                original_text: originalText,
+                updated_text: trimmedNew,
+                source,
+                updated_at: timestamp,
+                reverted: originalText?.trim() === trimmedNew
+            };
+        }
+
+        const historyEntry = this.reinterpretationHistory[index];
+
+        if (this.timeline && this.timeline.subtitleData && this.timeline.subtitleData.subtitles && this.timeline.subtitleData.subtitles[index]) {
+            const subtitle = this.timeline.subtitleData.subtitles[index];
+            subtitle.__original_description_text = historyEntry?.original_text || subtitle.__original_description_text || originalText;
+            subtitle.reinterpretation = historyEntry ? { ...historyEntry } : subtitle.reinterpretation;
+        }
+
+        if (this.classifiedSubtitles && this.classifiedSubtitles[index]) {
+            this.classifiedSubtitles[index].__original_description_text = historyEntry?.original_text || this.classifiedSubtitles[index].__original_description_text || originalText;
+            this.classifiedSubtitles[index].reinterpretation = historyEntry ? { ...historyEntry } : this.classifiedSubtitles[index].reinterpretation;
+        }
+
+        if (this.timeline && this.timeline.speakerClassifiedSubtitles) {
+            Object.keys(this.timeline.speakerClassifiedSubtitles).forEach(trackName => {
+                const trackArray = this.timeline.speakerClassifiedSubtitles[trackName];
+                if (!Array.isArray(trackArray)) return;
+                for (let i = 0; i < trackArray.length; i += 1) {
+                    const item = trackArray[i];
+                    if (!item) continue;
+                    const candidateIndex = this.findSubtitleIndexForData(item);
+                    if (candidateIndex === index) {
+                        trackArray[i] = {
+                            ...item,
+                            __original_description_text: historyEntry?.original_text || item.__original_description_text || originalText,
+                            reinterpretation: historyEntry ? { ...historyEntry } : item.reinterpretation
+                        };
+                    }
+                }
+            });
+        }
+
+        if (this.analysisResults && this.analysisResults.reinterpretation) {
+            this.updateAnalysisReplacements(index, trimmedPrev, trimmedNew, source, historyEntry ? historyEntry.original_text : originalText);
+        }
+
+        if (this.currentReinterpretationEditIndex === index) {
+            this.refreshReinterpretationPanel();
+        }
+    }
+
+    updateAnalysisReplacements(index, previousText, newText, source = 'manual-edit', originalText = null) {
+        if (!this.analysisResults) {
+            this.analysisResults = {};
+        }
+
+        if (!this.analysisResults.reinterpretation) {
+            this.analysisResults.reinterpretation = {
+                script: this.analysisResults.reinterpretation?.script || '',
+                outline: this.analysisResults.reinterpretation?.outline || null,
+                replacements: []
+            };
+        }
+
+        if (!Array.isArray(this.analysisResults.reinterpretation.replacements)) {
+            this.analysisResults.reinterpretation.replacements = [];
+        }
+
+        const replacements = this.analysisResults.reinterpretation.replacements;
+        const existingIndex = replacements.findIndex(rep => Number(rep.index) === Number(index));
+        const baselineOriginal = originalText || previousText;
+
+        if (previousText === newText) {
+            if (existingIndex !== -1) {
+                replacements.splice(existingIndex, 1);
+            }
+            return;
+        }
+
+        if (existingIndex !== -1) {
+            replacements[existingIndex] = {
+                ...replacements[existingIndex],
+                previous_text: replacements[existingIndex].previous_text || baselineOriginal,
+                text: newText,
+                source,
+                target_length: newText.length,
+                original_length: (baselineOriginal || '').length,
+                updated_at: new Date().toISOString()
+            };
+        } else {
+            replacements.push({
+                index,
+                previous_text: baselineOriginal,
+                text: newText,
+                source,
+                original_length: (baselineOriginal || '').length,
+                target_length: newText.length,
+                updated_at: new Date().toISOString()
+            });
+        }
     }
 }
 

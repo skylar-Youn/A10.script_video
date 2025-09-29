@@ -639,7 +639,10 @@ async def reinterpret_subtitles(request: dict = Body(...)):
         if not dialogues and not descriptions:
             raise HTTPException(status_code=400, detail="재해석할 자막 데이터가 없습니다")
 
-        reinterpretation_result = ai_reinterpret_subtitles(dialogues, descriptions)
+        metadata = request.get("metadata") or {}
+        tone = metadata.get("tone")
+
+        reinterpretation_result = ai_reinterpret_subtitles(dialogues, descriptions, tone=tone)
 
         response = {"status": "success", **reinterpretation_result}
         logger.info(
@@ -656,4 +659,5 @@ async def reinterpret_subtitles(request: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.exception("재해석 처리 실패: %s", exc)
-        raise HTTPException(status_code=500, detail="재해석 중 오류가 발생했습니다")
+        detail_message = str(exc).strip() or "재해석 중 오류가 발생했습니다"
+        raise HTTPException(status_code=500, detail=detail_message)
