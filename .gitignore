@@ -1,6 +1,10 @@
 node_modules/*
 .env
 .env.example
+
+# Spec Kit - 보안: credentials, auth tokens 보호
+.claude/
+.specify/memory/*.private.md
 .venv/*
 ai_shorts_maker/__pycache__
 web_app/__pycache__
