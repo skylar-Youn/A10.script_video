@@ -18,6 +18,7 @@ class TranslatorSegment(BaseModel):
     source_text: Optional[str] = None
     translated_text: Optional[str] = None
     reverse_translated_text: Optional[str] = None
+    speaker_name: Optional[str] = None  # 화자 이름
     commentary: Optional[str] = None  # 해설 텍스트 (호환성용)
     commentary_korean: Optional[str] = None  # 해설 한국어
     commentary_japanese: Optional[str] = None  # 해설 일본어
@@ -102,6 +103,7 @@ class TranslatorSegmentUpdate(BaseModel):
     source_text: Optional[str] = None
     translated_text: Optional[str] = None
     reverse_translated_text: Optional[str] = None
+    speaker_name: Optional[str] = None
     commentary: Optional[str] = None
     commentary_korean: Optional[str] = None
     commentary_japanese: Optional[str] = None

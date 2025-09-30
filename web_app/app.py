@@ -447,6 +447,29 @@ async def api_translate_project(project_id: str) -> TranslatorProject:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@translator_router.post("/projects/{project_id}/translate-segments", response_model=TranslatorProject)
+async def api_translate_segments(project_id: str, payload: Dict[str, Any] = Body(...)) -> TranslatorProject:
+    try:
+        segment_ids = payload.get("segment_ids", [])
+        target_lang = payload.get("target_lang", "ja")
+        translation_mode = payload.get("translation_mode", "reinterpret")
+        tone_hint = payload.get("tone_hint")
+
+        from ai_shorts_maker.translator import translate_selected_segments
+
+        return await run_in_threadpool(
+            translate_selected_segments,
+            project_id,
+            segment_ids,
+            target_lang,
+            translation_mode,
+            tone_hint
+        )
+    except Exception as exc:
+        logger.exception("Failed to translate segments for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @translator_router.post("/projects/{project_id}/voice", response_model=TranslatorProject)
 async def api_synthesize_voice(project_id: str) -> TranslatorProject:
     try:
@@ -689,10 +712,19 @@ async def api_update_voice_synthesis_mode(project_id: str, payload: Dict[str, An
 
 
 @translator_router.post("/projects/{project_id}/clone")
-async def api_clone_translator_project(project_id: str):
+async def api_clone_translator_project(project_id: str, payload: Dict[str, Any] = Body(default=None)):
     """번역기 프로젝트를 복제하여 백업본을 생성합니다."""
     try:
-        return await run_in_threadpool(clone_translator_project, project_id)
+        new_name = None
+        if payload:
+            new_name = payload.get("new_name")
+
+        from ai_shorts_maker.translator import clone_translator_project_with_name
+
+        if new_name:
+            return await run_in_threadpool(clone_translator_project_with_name, project_id, new_name)
+        else:
+            return await run_in_threadpool(clone_translator_project, project_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

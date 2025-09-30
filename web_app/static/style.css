@@ -690,6 +690,63 @@ summary {
     margin-right: 6px;
 }
 
+.selection-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 10px 12px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+}
+
+.selection-summary {
+    font-weight: 600;
+    color: #c7d6eb;
+}
+
+.selection-buttons,
+.bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bulk-actions label {
+    font-size: 0.85rem;
+    color: #aab9cd;
+}
+
+.form-control-sm {
+    padding: 6px 8px;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: inherit;
+}
+
+.segment-select-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 60px;
+}
+
+.segment-index {
+    font-weight: 600;
+    color: #9fb2c6;
+}
+
+.segment-select {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
 .hidden {
     display: none;
 }
@@ -910,8 +967,9 @@ summary {
 }
 
 .timeline-col.timeline-index {
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
+    gap: 6px;
     font-weight: 700;
     color: #ffd166;
 }

@@ -120,6 +120,7 @@
                 <p class="modal-description">`youtube/download` 폴더에서 사용할 영상과 자막을 선택하세요.</p>
                 <div class="source-selector-tabs" id="source-selector-tabs">
                     <button type="button" class="tab active" data-mode="downloads">다운로드된 파일</button>
+                    <button type="button" class="tab" data-mode="projects">저장된 프로젝트</button>
                     <button type="button" class="tab" data-mode="saved">재해석 저장본</button>
                 </div>
                 <div id="source-selector-list" class="source-selector-list">
@@ -156,13 +157,20 @@
 
         let selectedSource = null;
         let currentProject = null;
-        let isTimelineView = true;
+        let isTimelineView = false;
         let availableSourceOptions = [];
         let selectedSourceIndex = null;
         let sourceSelectorMode = 'downloads';
         let savedResultOptions = [];
         const savedResultDetailCache = {};
         let selectedSavedResultId = null;
+        let translatorProjects = [];
+        let selectedProjectId = null;
+        const selectedSegmentIds = new Set();
+        let selectionCountElem = null;
+        let bulkTargetLangSelect = null;
+        let bulkTranslateBtn = null;
+        let bulkReverseBtn = null;
 
         if (openSourceSelectorBtn) {
             openSourceSelectorBtn.style.display = 'none';
@@ -284,13 +292,18 @@
         }
 
 
+        function buildSegmentCheckbox(seg) {
+            return `<input type="checkbox" class="segment-select" data-segment-id="${seg.id}" aria-label="세그먼트 선택">`;
+        }
+
+
         function buildCardSegments(project) {
             if (!project.segments || !project.segments.length) {
                 return '<p class="empty-state">세그먼트가 없습니다. 번역을 실행한 뒤 다시 시도해주세요.</p>';
             }
 
             return project.segments
-                .map((seg) => {
+                .map((seg, index) => {
                     const sourceRow = buildTextRow({
                         segmentId: seg.id,
                         label: TEXT_TYPE_LABELS.source,
@@ -330,6 +343,10 @@
                     return `
                 <div class="segment-item" data-segment-id="${seg.id}">
                     <div class="segment-header">
+                        <div class="segment-select-cell">
+                            ${buildSegmentCheckbox(seg)}
+                            <span class="segment-index">${index + 1}</span>
+                        </div>
                         <div class="segment-time" data-segment-id="${seg.id}">
                             ${buildSegmentTime(seg)}
                         </div>
@@ -394,7 +411,10 @@
 
             return `
                 <div class="timeline-row segment-item" data-segment-id="${seg.id}">
-                    <div class="timeline-col timeline-index">${index + 1}</div>
+                    <div class="timeline-col timeline-index">
+                        ${buildSegmentCheckbox(seg)}
+                        <span class="segment-index">${index + 1}</span>
+                    </div>
                     <div class="timeline-col timeline-time">
                         <div class="segment-time" data-segment-id="${seg.id}">
                             ${buildSegmentTime(seg)}
@@ -455,6 +475,8 @@
 
             attachSegmentEventListeners();
             attachTimeEditListeners();
+            attachSelectionCheckboxListeners();
+            updateSelectionUI();
         }
 
         function openSourceSelectorModal() {
@@ -482,6 +504,8 @@
         function updateSourceApplyState() {
             if (sourceSelectorMode === 'downloads') {
                 sourceSelectorApplyBtn.disabled = selectedSourceIndex === null;
+            } else if (sourceSelectorMode === 'projects') {
+                sourceSelectorApplyBtn.disabled = !selectedProjectId;
             } else {
                 sourceSelectorApplyBtn.disabled = !selectedSavedResultId || !savedResultDetailCache[selectedSavedResultId];
             }
@@ -531,6 +555,93 @@
             sourceSelectorList.querySelectorAll('input[name="source-selection"]').forEach(input => {
                 input.addEventListener('change', (event) => {
                     selectedSourceIndex = parseInt(event.target.value, 10);
+                    selectedSavedResultId = null;
+                    updateSourceApplyState();
+                });
+            });
+            updateSourceApplyState();
+        }
+
+        function loadTranslatorProjects() {
+            sourceSelectorList.innerHTML = '<p class="empty-state">프로젝트 목록을 불러오는 중...</p>';
+            fetch('/api/translator/projects')
+                .then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
+                .then(projects => {
+                    translatorProjects = Array.isArray(projects) ? projects : [];
+                    renderTranslatorProjects();
+                })
+                .catch(err => {
+                    console.error('Failed to load translator projects:', err);
+                    sourceSelectorList.innerHTML = '<p class="empty-state error">프로젝트 목록을 불러오지 못했습니다.</p>';
+                });
+        }
+
+        function renderTranslatorProjects() {
+            if (!translatorProjects.length) {
+                sourceSelectorList.innerHTML = '<p class="empty-state">저장된 프로젝트가 없습니다.</p>';
+                return;
+            }
+
+            // 현재 프로젝트는 제외
+            const otherProjects = translatorProjects.filter(p => p.id !== (currentProject?.id));
+
+            if (!otherProjects.length) {
+                sourceSelectorList.innerHTML = '<p class="empty-state">다른 프로젝트가 없습니다.</p>';
+                return;
+            }
+
+            console.log('📋 Rendering translator projects:', otherProjects.length);
+
+            const html = otherProjects.map((project, index) => {
+                console.log(`Project ${index}:`, {
+                    id: project.id,
+                    base_name: project.base_name,
+                    created_at: project.created_at,
+                    segments: project.segments?.length
+                });
+
+                // 프로젝트 이름 표시 (base_name 또는 id에서 추출)
+                let displayName = project.base_name || project.id || '이름 없음';
+
+                // backup_ 접두사 제거
+                if (displayName.startsWith('backup_')) {
+                    displayName = displayName.substring(7); // 'backup_' 제거
+                }
+
+                // 타임스탬프 패턴 제거 (_20250930_194830 형태)
+                displayName = displayName.replace(/_\d{8}_\d{6}$/, '');
+
+                // 이름이 너무 길면 자르기 (50자 이상)
+                if (displayName.length > 50) {
+                    displayName = displayName.substring(0, 47) + '...';
+                }
+
+                const createdDate = project.created_at ? new Date(project.created_at).toLocaleString('ko-KR') : '시간 정보 없음';
+                const updatedDate = project.updated_at ? new Date(project.updated_at).toLocaleString('ko-KR') : null;
+                const segmentCount = project.segments?.length || 0;
+                const statusText = project.status || 'draft';
+
+                return `
+                    <label class="source-option">
+                        <input type="radio" name="project-selection" value="${project.id}">
+                        <div class="source-option-body">
+                            <div class="option-title">📁 ${escapeHtml(displayName)}</div>
+                            <div class="option-meta">
+                                <span>📊 세그먼트: ${segmentCount}개</span>
+                                <span>📌 상태: ${statusText}</span>
+                                <span>🕒 생성: ${escapeHtml(createdDate)}</span>
+                                ${updatedDate ? `<span>✏️ 수정: ${escapeHtml(updatedDate)}</span>` : ''}
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('');
+
+            sourceSelectorList.innerHTML = html;
+            sourceSelectorList.querySelectorAll('input[name="project-selection"]').forEach(input => {
+                input.addEventListener('change', (event) => {
+                    selectedProjectId = event.target.value;
+                    selectedSourceIndex = null;
                     selectedSavedResultId = null;
                     updateSourceApplyState();
                 });
@@ -604,6 +715,463 @@
             updateSourceApplyState();
         }
 
+        function buildSelectionControls() {
+            const container = document.createElement('div');
+            container.className = 'selection-toolbar';
+            container.innerHTML = `
+                <div class="selection-summary">선택: <span id="selected-count">0</span>개</div>
+                <div class="selection-buttons">
+                    <button type="button" class="btn-secondary btn-sm" id="select-all-btn">전체 체크</button>
+                    <button type="button" class="btn-secondary btn-sm" id="clear-selection-btn">전체 해제</button>
+                    <button type="button" class="btn-secondary btn-sm" id="toggle-selection-btn">체크 반전</button>
+                    <button type="button" class="btn-secondary btn-sm" id="select-speaker1-btn">화자1</button>
+                    <button type="button" class="btn-secondary btn-sm" id="select-speaker2-btn">화자2</button>
+                    <button type="button" class="btn-secondary btn-sm" id="select-speaker3-btn">화자3</button>
+                </div>
+                <div class="bulk-actions">
+                    <label for="bulk-target-lang">번역 대상:</label>
+                    <select id="bulk-target-lang" class="form-control form-control-sm">
+                        <option value="ja">일본어</option>
+                        <option value="ko">한국어</option>
+                        <option value="en">영어</option>
+                    </select>
+                    <button type="button" class="btn-primary btn-sm" id="bulk-translate-btn">선택 자막 번역</button>
+                    <button type="button" class="btn-secondary btn-sm" id="bulk-reverse-btn">선택 역번역 (한국어)</button>
+                    <button type="button" class="btn-success btn-sm" id="save-selected-btn">체크 다른이름 저장</button>
+                    <button type="button" class="btn-danger btn-sm" id="delete-unselected-btn">미선택 화자 전체 삭제</button>
+                </div>
+            `;
+
+            selectionCountElem = container.querySelector('#selected-count');
+            bulkTargetLangSelect = container.querySelector('#bulk-target-lang');
+            bulkTranslateBtn = container.querySelector('#bulk-translate-btn');
+            bulkReverseBtn = container.querySelector('#bulk-reverse-btn');
+
+            const selectAllBtn = container.querySelector('#select-all-btn');
+            const clearSelectionBtn = container.querySelector('#clear-selection-btn');
+            const toggleSelectionBtn = container.querySelector('#toggle-selection-btn');
+            const selectSpeaker1Btn = container.querySelector('#select-speaker1-btn');
+            const selectSpeaker2Btn = container.querySelector('#select-speaker2-btn');
+            const selectSpeaker3Btn = container.querySelector('#select-speaker3-btn');
+
+            selectAllBtn.addEventListener('click', selectAllSegments);
+            clearSelectionBtn.addEventListener('click', clearSelectedSegments);
+            toggleSelectionBtn.addEventListener('click', toggleAllSegments);
+            selectSpeaker1Btn.addEventListener('click', () => selectSegmentsBySpeakers(['화자1']));
+            selectSpeaker2Btn.addEventListener('click', () => selectSegmentsBySpeakers(['화자2']));
+            selectSpeaker3Btn.addEventListener('click', () => selectSegmentsBySpeakers(['화자3']));
+
+            const saveSelectedBtn = container.querySelector('#save-selected-btn');
+            const deleteUnselectedBtn = container.querySelector('#delete-unselected-btn');
+
+            if (bulkTranslateBtn) {
+                bulkTranslateBtn.addEventListener('click', bulkTranslateSelectedSegments);
+            }
+            if (bulkReverseBtn) {
+                bulkReverseBtn.addEventListener('click', bulkReverseSelectedSegments);
+            }
+            if (saveSelectedBtn) {
+                saveSelectedBtn.addEventListener('click', saveSelectedSegmentsAs);
+            }
+            if (deleteUnselectedBtn) {
+                deleteUnselectedBtn.addEventListener('click', deleteUnselectedSegments);
+            }
+
+            return container;
+        }
+
+        function selectAllSegments() {
+            if (!currentProject) {
+                return;
+            }
+            currentProject.segments.forEach(seg => selectedSegmentIds.add(seg.id));
+            updateSelectionUI();
+        }
+
+        function clearSelectedSegments() {
+            selectedSegmentIds.clear();
+            updateSelectionUI();
+        }
+
+        function toggleAllSegments() {
+            if (!currentProject) {
+                return;
+            }
+            // 각 세그먼트의 선택 상태를 반전
+            currentProject.segments.forEach(seg => {
+                if (selectedSegmentIds.has(seg.id)) {
+                    selectedSegmentIds.delete(seg.id);
+                } else {
+                    selectedSegmentIds.add(seg.id);
+                }
+            });
+            updateSelectionUI();
+        }
+
+        function selectSegmentsBySpeakers(speakers) {
+            if (!currentProject) {
+                return;
+            }
+            const normalized = speakers.map(s => s.trim()).filter(Boolean);
+            if (!normalized.length) {
+                return;
+            }
+            currentProject.segments.forEach(seg => {
+                if (seg.speaker_name && normalized.includes(seg.speaker_name)) {
+                    selectedSegmentIds.add(seg.id);
+                }
+            });
+            updateSelectionUI();
+        }
+
+        function getSelectedSegmentIds() {
+            if (selectedSegmentIds.size) {
+                return Array.from(selectedSegmentIds);
+            }
+            if (!currentProject) {
+                return [];
+            }
+            return currentProject.segments.map(seg => seg.id);
+        }
+
+        function bulkTranslateSelectedSegments() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const segmentIds = selectedSegmentIds.size
+                ? Array.from(selectedSegmentIds)
+                : [];
+
+            if (!segmentIds.length && !confirm('선택된 세그먼트가 없습니다. 전체 세그먼트를 번역할까요?')) {
+                return;
+            }
+
+            const targetLang = bulkTargetLangSelect?.value || document.getElementById('target-lang')?.value || currentProject.target_lang || 'ja';
+            const translationMode = document.getElementById('translation-mode')?.value || currentProject.translation_mode || 'reinterpret';
+            const toneHintValue = document.getElementById('tone-hint')?.value || currentProject.tone_hint || null;
+
+            if (bulkTranslateBtn) {
+                bulkTranslateBtn.disabled = true;
+            }
+
+            fetch(`/api/translator/projects/${currentProject.id}/translate-segments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    segment_ids: segmentIds,
+                    target_lang: targetLang,
+                    translation_mode: translationMode,
+                    tone_hint: toneHintValue,
+                })
+            })
+                .then(res => res.ok ? res.json() : res.text().then(text => { throw new Error(text || `HTTP ${res.status}`); }))
+                .then(project => {
+                    renderProject(project);
+                })
+                .catch(err => {
+                    console.error('Failed to translate segments:', err);
+                    alert('선택된 자막을 번역하지 못했습니다: ' + err.message);
+                })
+                .finally(() => {
+                    if (bulkTranslateBtn) {
+                        bulkTranslateBtn.disabled = false;
+                    }
+                });
+        }
+
+        function bulkReverseSelectedSegments() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const segmentIds = selectedSegmentIds.size
+                ? Array.from(selectedSegmentIds)
+                : [];
+
+            if (!segmentIds.length && !confirm('선택된 세그먼트가 없습니다. 전체 세그먼트를 역번역할까요?')) {
+                return;
+            }
+
+            if (bulkReverseBtn) {
+                bulkReverseBtn.disabled = true;
+            }
+
+            fetch(`/api/translator/projects/${currentProject.id}/reverse-translate-segments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    segment_ids: segmentIds,
+                })
+            })
+                .then(res => res.ok ? res.json() : res.text().then(text => { throw new Error(text || `HTTP ${res.status}`); }))
+                .then(project => {
+                    renderProject(project);
+                })
+                .catch(err => {
+                    console.error('Failed to reverse translate segments:', err);
+                    alert('선택된 자막을 역번역하지 못했습니다: ' + err.message);
+                })
+                .finally(() => {
+                    if (bulkReverseBtn) {
+                        bulkReverseBtn.disabled = false;
+                    }
+                });
+        }
+
+        function syncSelectionWithProject() {
+            if (!currentProject) {
+                selectedSegmentIds.clear();
+                updateSelectionUI();
+                return;
+            }
+            const validIds = new Set(currentProject.segments.map(seg => seg.id));
+            Array.from(selectedSegmentIds).forEach(id => {
+                if (!validIds.has(id)) {
+                    selectedSegmentIds.delete(id);
+                }
+            });
+            updateSelectionUI();
+        }
+
+        async function saveSelectedSegmentsAs() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            if (selectedSegmentIds.size === 0) {
+                alert('저장할 세그먼트를 선택해주세요.');
+                return;
+            }
+
+            const selectedSegments = currentProject.segments.filter(seg => selectedSegmentIds.has(seg.id));
+            const newName = prompt(
+                `${selectedSegments.length}개의 선택된 세그먼트를 새 프로젝트로 저장합니다.\n새 프로젝트 이름을 입력하세요:`,
+                currentProject.base_name + '_선택본'
+            );
+
+            if (!newName || newName.trim() === '') {
+                return;
+            }
+
+            const saveBtn = document.getElementById('save-selected-btn');
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.textContent = '💾 저장 중...';
+            }
+
+            try {
+                const trimmedName = newName.trim();
+                console.log(`💾 Saving selected segments with name: "${trimmedName}"`);
+
+                // 먼저 프로젝트를 복제
+                const clonePayload = { new_name: trimmedName };
+                console.log('📤 Clone request payload:', clonePayload);
+
+                const cloneResponse = await fetch(`/api/translator/projects/${currentProject.id}/clone`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(clonePayload)
+                });
+
+                if (!cloneResponse.ok) {
+                    const errorText = await cloneResponse.text();
+                    console.error('❌ Clone failed:', errorText);
+                    throw new Error('프로젝트 복사 실패');
+                }
+
+                const newProject = await cloneResponse.json();
+                console.log('✅ Project cloned:', {
+                    id: newProject.id,
+                    base_name: newProject.base_name,
+                    expected_name: trimmedName
+                });
+
+                // 복제된 프로젝트에서 선택되지 않은 세그먼트 삭제
+                const segmentsToDelete = newProject.segments.filter(seg => !selectedSegmentIds.has(seg.id));
+                console.log(`🗑️ Deleting ${segmentsToDelete.length} unselected segments from cloned project...`);
+
+                let deletedCount = 0;
+                for (const segment of segmentsToDelete) {
+                    try {
+                        const deleteResponse = await fetch(`/api/translator/projects/${newProject.id}/segments/${segment.id}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (deleteResponse.ok) {
+                            deletedCount++;
+                        }
+                    } catch (error) {
+                        console.error(`Failed to delete segment ${segment.id}:`, error);
+                    }
+                }
+
+                console.log(`✅ Deleted ${deletedCount} segments from cloned project`);
+
+                alert(`✅ ${selectedSegments.length}개의 세그먼트가 "${newName}"로 저장되었습니다.`);
+
+                // 새 프로젝트로 이동할지 물어보기
+                if (confirm('저장된 프로젝트로 이동하시겠습니까?')) {
+                    window.location.href = `/translator?id=${newProject.id}`;
+                }
+            } catch (error) {
+                console.error('Save selected segments error:', error);
+                alert('❌ 선택된 세그먼트 저장에 실패했습니다.');
+            } finally {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = '체크 다른이름 저장';
+                }
+            }
+        }
+
+        async function deleteUnselectedSegments() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const unselectedSegments = currentProject.segments.filter(seg => !selectedSegmentIds.has(seg.id));
+
+            if (unselectedSegments.length === 0) {
+                alert('삭제할 미선택 세그먼트가 없습니다.');
+                return;
+            }
+
+            const selectedCount = selectedSegmentIds.size;
+            const totalCount = currentProject.segments.length;
+            const deleteCount = unselectedSegments.length;
+
+            const confirmMessage = `총 ${totalCount}개 중 ${selectedCount}개가 선택되었습니다.\n선택되지 않은 ${deleteCount}개의 세그먼트를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`;
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+
+            // Show progress
+            const deleteBtn = document.getElementById('delete-unselected-btn');
+            if (deleteBtn) {
+                deleteBtn.disabled = true;
+                deleteBtn.textContent = `삭제 중... 0/${deleteCount}`;
+            }
+
+            let deletedCount = 0;
+            let failedCount = 0;
+
+            for (let i = 0; i < unselectedSegments.length; i++) {
+                const segment = unselectedSegments[i];
+                try {
+                    const response = await fetch(`/api/translator/projects/${currentProject.id}/segments/${segment.id}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        deletedCount++;
+                        // Update progress
+                        if (deleteBtn) {
+                            deleteBtn.textContent = `삭제 중... ${deletedCount}/${deleteCount}`;
+                        }
+                    } else {
+                        failedCount++;
+                        console.error(`Failed to delete segment ${segment.id}: ${response.status}`);
+                    }
+                } catch (error) {
+                    failedCount++;
+                    console.error(`Error deleting segment ${segment.id}:`, error);
+                }
+            }
+
+            // Reset button
+            if (deleteBtn) {
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = '미선택 화자 전체 삭제';
+            }
+
+            if (failedCount > 0) {
+                alert(`${deletedCount}개 삭제 완료, ${failedCount}개 실패`);
+            } else {
+                alert(`✅ ${deletedCount}개 세그먼트가 삭제되었습니다.`);
+            }
+
+            // Clear selection after deletion
+            selectedSegmentIds.clear();
+
+            // Reload the project to reflect changes
+            try {
+                console.log('🔄 Fetching updated project...');
+                const response = await fetch(`/api/translator/projects/${currentProject.id}`);
+                if (response.ok) {
+                    const updatedProject = await response.json();
+
+                    console.log('📦 Received project data:', {
+                        id: updatedProject.id,
+                        segmentCount: updatedProject.segments.length,
+                        status: updatedProject.status
+                    });
+
+                    // Update current project reference
+                    currentProject = updatedProject;
+
+                    // Update project title and status
+                    if (projectTitle) {
+                        projectTitle.textContent = updatedProject.base_name;
+                    }
+                    if (projectStatus) {
+                        projectStatus.textContent = `상태: ${updatedProject.status} | 세그먼트: ${updatedProject.segments.length}개`;
+                    }
+
+                    console.log('🎨 Re-rendering segments...');
+                    // Re-render segments with updated data
+                    renderSegments(updatedProject);
+
+                    console.log('✅ Segments rendered. DOM element count:', document.querySelectorAll('.segment-item').length);
+
+                    // Update selection UI
+                    updateSelectionUI();
+
+                    console.log('✅ Project reloaded successfully. New segment count:', updatedProject.segments.length);
+                    console.log('📊 Segment IDs:', updatedProject.segments.map(s => s.id).join(', '));
+                } else {
+                    console.error('❌ Failed to reload project:', response.status);
+                    alert('프로젝트 새로고침에 실패했습니다. 페이지를 새로고침합니다.');
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error('❌ Failed to reload project:', error);
+                alert('프로젝트 새로고침 중 오류가 발생했습니다. 페이지를 새로고침합니다.');
+                window.location.reload();
+            }
+        }
+
+        function updateSelectionUI() {
+            if (selectionCountElem) {
+                selectionCountElem.textContent = selectedSegmentIds.size.toString();
+            }
+            document.querySelectorAll('.segment-select').forEach(cb => {
+                const id = cb.dataset.segmentId;
+                cb.checked = selectedSegmentIds.has(id);
+            });
+        }
+
+        function attachSelectionCheckboxListeners() {
+            document.querySelectorAll('.segment-select').forEach(cb => {
+                const segmentId = cb.dataset.segmentId;
+                cb.addEventListener('change', (event) => {
+                    if (!segmentId) {
+                        return;
+                    }
+                    if (event.target.checked) {
+                        selectedSegmentIds.add(segmentId);
+                    } else {
+                        selectedSegmentIds.delete(segmentId);
+                    }
+                    updateSelectionUI();
+                });
+            });
+        }
+
         function switchSourceSelectorMode(mode) {
             if (sourceSelectorMode === mode) {
                 updateSourceApplyState();
@@ -613,6 +1181,7 @@
             sourceSelectorMode = mode;
             selectedSourceIndex = null;
             selectedSavedResultId = null;
+            selectedProjectId = null;
             updateSourceApplyState();
 
             if (sourceSelectorTabs) {
@@ -628,6 +1197,8 @@
 
             if (mode === 'downloads') {
                 loadDownloadSources();
+            } else if (mode === 'projects') {
+                loadTranslatorProjects();
             } else {
                 loadSavedResultOptions();
             }
@@ -670,6 +1241,17 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
+            } else if (sourceSelectorMode === 'projects') {
+                if (!selectedProjectId) {
+                    alert('불러올 프로젝트를 선택하세요.');
+                    sourceSelectorApplyBtn.textContent = originalLabel;
+                    updateSourceApplyState();
+                    return;
+                }
+
+                // 선택한 프로젝트로 이동
+                window.location.href = `/translator?id=${selectedProjectId}`;
+                return;
             } else {
                 if (!selectedSavedResultId) {
                     alert('재해석 저장본을 선택하세요.');
@@ -850,6 +1432,7 @@
 
         function renderProject(project) {
             currentProject = project;
+            syncSelectionWithProject();
             creationView.classList.add('hidden');
             projectView.classList.remove('hidden');
 
@@ -857,7 +1440,14 @@
                 openSourceSelectorBtn.style.display = 'inline-flex';
             }
 
-            projectTitle.textContent = project.base_name;
+            // base_name 또는 id에서 타임스탬프 제거한 값 표시
+            let displayTitle = project.base_name || project.id || '이름 없음';
+            if (displayTitle.startsWith('backup_')) {
+                displayTitle = displayTitle.substring(7);
+            }
+            displayTitle = displayTitle.replace(/_\d{8}_\d{6}$/, '');
+
+            projectTitle.textContent = displayTitle;
             projectStatus.textContent = `상태: ${project.status}`;
 
             // Reconstruct selectedSource from project data
@@ -876,10 +1466,11 @@
             const timelineToggleBtn = document.createElement('button');
             timelineToggleBtn.id = 'timeline-toggle-btn';
             timelineToggleBtn.className = 'btn-secondary';
-            timelineToggleBtn.textContent = isTimelineView ? '카드 보기' : '타임라인 번역편집기';
+            // 현재 모드를 표시: 타임라인 모드면 "📋 타임라인 편집기 (현재)", 카드 모드면 "타임라인 편집기로 전환"
+            timelineToggleBtn.textContent = isTimelineView ? '📋 카드 보기' : '📋 타임라인 편집기';
             timelineToggleBtn.addEventListener('click', () => {
                 isTimelineView = !isTimelineView;
-                timelineToggleBtn.textContent = isTimelineView ? '카드 보기' : '타임라인 번역편집기';
+                timelineToggleBtn.textContent = isTimelineView ? '📋 카드 보기' : '📋 타임라인 편집기';
                 renderSegments(currentProject);
             });
 
@@ -890,6 +1481,25 @@
             sourceSelectorActionBtn.addEventListener('click', openSourceSelectorModal);
             projectActions.appendChild(sourceSelectorActionBtn);
             projectActions.appendChild(timelineToggleBtn);
+
+            const selectionControls = buildSelectionControls();
+            projectActions.appendChild(selectionControls);
+            updateSelectionUI();
+
+            // Save buttons
+            const saveBtn = document.createElement('button');
+            saveBtn.id = 'save-project-btn';
+            saveBtn.className = 'btn-primary';
+            saveBtn.textContent = '💾 저장';
+            saveBtn.addEventListener('click', saveProject);
+            projectActions.appendChild(saveBtn);
+
+            const saveAsBtn = document.createElement('button');
+            saveAsBtn.id = 'save-as-project-btn';
+            saveAsBtn.className = 'btn-secondary';
+            saveAsBtn.textContent = '💾 다른 이름으로 저장';
+            saveAsBtn.addEventListener('click', saveProjectAs);
+            projectActions.appendChild(saveAsBtn);
 
             // Always show delete button
             const deleteBtn = document.createElement('button');
@@ -1504,6 +2114,9 @@
                 triggerBtn.disabled = true;
             }
 
+            selectedSegmentIds.delete(segmentId);
+            updateSelectionUI();
+
             fetch(`/api/translator/projects/${currentProject.id}/segments/${segmentId}`, {
                 method: 'DELETE'
             })
@@ -1765,6 +2378,83 @@
                 if (btn) {
                     btn.disabled = false;
                     btn.textContent = '한국어 AI 해설 넣기';
+                }
+            }
+        }
+
+        async function saveProject() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const saveBtn = document.getElementById('save-project-btn');
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.textContent = '💾 저장 중...';
+            }
+
+            try {
+                // 현재 프로젝트 상태를 서버에 저장 (이미 각 수정 시 저장되므로 확인 메시지만 표시)
+                const response = await fetch(`/api/translator/projects/${currentProject.id}`);
+                if (response.ok) {
+                    alert('✅ 프로젝트가 저장되었습니다.');
+                } else {
+                    throw new Error('프로젝트 저장 실패');
+                }
+            } catch (error) {
+                console.error('Save project error:', error);
+                alert('❌ 프로젝트 저장에 실패했습니다.');
+            } finally {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = '💾 저장';
+                }
+            }
+        }
+
+        async function saveProjectAs() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const newName = prompt('새 프로젝트 이름을 입력하세요:', currentProject.base_name + '_복사본');
+            if (!newName || newName.trim() === '') {
+                return;
+            }
+
+            const saveAsBtn = document.getElementById('save-as-project-btn');
+            if (saveAsBtn) {
+                saveAsBtn.disabled = true;
+                saveAsBtn.textContent = '💾 저장 중...';
+            }
+
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/clone`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_name: newName.trim() })
+                });
+
+                if (response.ok) {
+                    const newProject = await response.json();
+                    alert(`✅ 프로젝트가 "${newProject.base_name}"로 복사되었습니다.`);
+
+                    // 새 프로젝트로 이동할지 물어보기
+                    if (confirm('복사된 프로젝트로 이동하시겠습니까?')) {
+                        window.location.href = `/translator?id=${newProject.id}`;
+                    }
+                } else {
+                    throw new Error('프로젝트 복사 실패');
+                }
+            } catch (error) {
+                console.error('Save project as error:', error);
+                alert('❌ 프로젝트 복사에 실패했습니다.');
+            } finally {
+                if (saveAsBtn) {
+                    saveAsBtn.disabled = false;
+                    saveAsBtn.textContent = '💾 다른 이름으로 저장';
                 }
             }
         }
@@ -2097,6 +2787,137 @@
 
         .status-message p {
             margin: 0;
+        }
+
+        .selection-toolbar {
+            background: #ffffff;
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .selection-summary {
+            font-weight: bold;
+            color: #000000;
+            font-size: 14px;
+        }
+
+        .selection-summary #selected-count {
+            color: #007bff;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .selection-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .selection-buttons button {
+            background: #ffffff;
+            color: #000000;
+            border: 1px solid #333;
+        }
+
+        .selection-buttons button:hover {
+            background: #f0f0f0;
+            color: #000000;
+        }
+
+        .bulk-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            padding-top: 10px;
+            border-top: 2px solid #333;
+        }
+
+        .bulk-actions label {
+            font-weight: bold;
+            color: #000000;
+            margin: 0;
+        }
+
+        .bulk-actions select {
+            min-width: 120px;
+            background: #ffffff;
+            color: #000000;
+            border: 1px solid #333;
+        }
+
+        .bulk-actions button {
+            background: #ffffff;
+            color: #000000;
+            border: 1px solid #333;
+        }
+
+        .bulk-actions button:hover {
+            background: #f0f0f0;
+            color: #000000;
+        }
+
+        .bulk-actions button.btn-primary {
+            background: #007bff;
+            color: #ffffff;
+            border: 1px solid #0056b3;
+        }
+
+        .bulk-actions button.btn-primary:hover {
+            background: #0056b3;
+            color: #ffffff;
+        }
+
+        .bulk-actions button.btn-success {
+            background: #28a745;
+            color: #ffffff;
+            border: 1px solid #218838;
+        }
+
+        .bulk-actions button.btn-success:hover {
+            background: #218838;
+            color: #ffffff;
+        }
+
+        .bulk-actions button.btn-danger {
+            background: #dc3545;
+            color: #ffffff;
+            border: 1px solid #bd2130;
+        }
+
+        .bulk-actions button.btn-danger:hover {
+            background: #bd2130;
+            color: #ffffff;
+        }
+
+        .segment-select {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+
+        .segment-select-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .segment-index {
+            font-weight: bold;
+            color: #000000;
+            min-width: 30px;
+        }
+
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 13px;
         }
     </style>
 </body>

@@ -1512,6 +1512,146 @@ def render_translated_project(project_id: str) -> TranslatorProject:
         return save_project(project)
 
 
+def translate_selected_segments(
+    project_id: str,
+    segment_ids: List[str],
+    target_lang: str = "ja",
+    translation_mode: str = "reinterpret",
+    tone_hint: Optional[str] = None
+) -> TranslatorProject:
+    """선택된 세그먼트만 번역합니다."""
+    project = load_project(project_id)
+
+    # 선택된 세그먼트가 없으면 전체 번역
+    if not segment_ids:
+        segment_ids = [seg.id for seg in project.segments]
+
+    # 선택된 세그먼트만 필터링
+    segments_to_translate = [seg for seg in project.segments if seg.id in segment_ids]
+
+    if not segments_to_translate:
+        raise ValueError("번역할 세그먼트가 없습니다.")
+
+    logger.info(
+        "Translating %d selected segments for project %s to %s",
+        len(segments_to_translate),
+        project_id,
+        target_lang
+    )
+
+    # 각 세그먼트 번역
+    for segment in segments_to_translate:
+        if not segment.source_text:
+            continue
+
+        try:
+            # 번역 실행
+            translated = translate_text(
+                segment.source_text,
+                target_lang=target_lang,
+                translation_mode=translation_mode,
+                tone_hint=tone_hint
+            )
+            segment.translated_text = translated
+
+            # 역번역 실행 (일본어인 경우)
+            if target_lang == "ja" and translated:
+                reverse_translated = translate_text(
+                    translated,
+                    target_lang="ko",
+                    translation_mode="literal",
+                    tone_hint=None
+                )
+                segment.reverse_translated_text = reverse_translated
+
+        except Exception as e:
+            logger.error("Failed to translate segment %s: %s", segment.id, e)
+            continue
+
+    # 프로젝트 저장
+    return save_project(project)
+
+
+def clone_translator_project_with_name(project_id: str, new_name: str) -> TranslatorProject:
+    """번역기 프로젝트를 사용자 지정 이름으로 복제합니다."""
+    import shutil
+    from datetime import datetime
+    import re
+
+    ensure_directories()
+
+    logger.info(f"🔄 Cloning project {project_id} with new name: '{new_name}'")
+
+    # 원본 프로젝트 로드
+    original_project = load_project(project_id)
+
+    # 파일명으로 사용할 수 있도록 이름 정제
+    safe_name = re.sub(r'[^\w\s가-힣-]', '', new_name)
+    safe_name = safe_name.strip().replace(' ', '_')
+
+    logger.info(f"📝 Sanitized name: '{safe_name}'")
+
+    if not safe_name:
+        safe_name = f"clone_{original_project.base_name}"
+        logger.warning(f"⚠️ Empty safe_name, using default: '{safe_name}'")
+
+    # 새 프로젝트 ID 생성
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    clone_id = f"{safe_name}_{timestamp}"
+
+    logger.info(f"🆔 New project ID: '{clone_id}'")
+    logger.info(f"📛 New base_name: '{safe_name}'")
+
+    # 프로젝트 메타데이터 복제
+    cloned_project = TranslatorProject.model_validate(original_project.model_dump())
+    cloned_project.id = clone_id
+    cloned_project.base_name = safe_name
+    cloned_project.created_at = datetime.utcnow()
+    cloned_project.updated_at = datetime.utcnow()
+
+    # 자산 보관 디렉터리 생성
+    assets_dir = TRANSLATOR_DIR / clone_id
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    # 표준 위치에 메타데이터 저장되도록 경로 지정
+    cloned_project.metadata_path = str(_project_path(clone_id))
+
+    # 파일들 복제 (원본 파일이 존재하는 경우)
+    original_video_path = Path(original_project.source_video)
+    if original_video_path.exists():
+        new_video_path = assets_dir / f"{safe_name}.webm"
+        shutil.copy2(original_video_path, new_video_path)
+        cloned_project.source_video = str(new_video_path)
+
+    if original_project.source_subtitle:
+        original_subtitle_path = Path(original_project.source_subtitle)
+        if original_subtitle_path.exists():
+            new_subtitle_path = assets_dir / f"{safe_name}.srt"
+            shutil.copy2(original_subtitle_path, new_subtitle_path)
+            cloned_project.source_subtitle = str(new_subtitle_path)
+
+    # 렌더링된 영상이 있으면 복제
+    if "rendered_video_path" in original_project.extra:
+        original_rendered_path = Path(original_project.extra["rendered_video_path"])
+        if original_rendered_path.exists():
+            new_rendered_path = assets_dir / f"{safe_name}_translated.mp4"
+            shutil.copy2(original_rendered_path, new_rendered_path)
+            cloned_project.extra["rendered_video_path"] = str(new_rendered_path)
+
+    # 음성 파일들 복사
+    if "audio_files" in original_project.extra:
+        cloned_project.extra["audio_files"] = {}
+        for key, audio_path in original_project.extra["audio_files"].items():
+            if audio_path and Path(audio_path).exists():
+                original_audio_path = Path(audio_path)
+                new_audio_path = assets_dir / f"{safe_name}_{key}{original_audio_path.suffix}"
+                shutil.copy2(original_audio_path, new_audio_path)
+                cloned_project.extra["audio_files"][key] = str(new_audio_path)
+
+    # 복제된 프로젝트 저장
+    return save_project(cloned_project)
+
+
 def clone_translator_project(project_id: str) -> TranslatorProject:
     """번역기 프로젝트를 복제하여 백업본을 생성합니다."""
     import shutil
