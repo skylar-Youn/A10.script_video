@@ -14,6 +14,7 @@ from ai_shorts_maker.translator import (
     delete_project as translator_delete_project,
     list_projects as translator_list_projects,
     load_project as translator_load_project,
+    clone_translator_project_with_name,
 )
 
 router = APIRouter(prefix="/api/translator", tags=["translator"])
@@ -90,3 +91,31 @@ async def api_delete_translator_project(project_id: str):
             detail=f"Translator project '{project_id}' not found."
         )
     return {"message": f"Translator project '{project_id}' deleted successfully."}
+
+
+@router.post("/projects/{project_id}/clone", response_model=TranslatorProject)
+async def api_clone_translator_project(project_id: str, payload: dict) -> TranslatorProject:
+    """Clone a translator project with a new name."""
+    new_name = payload.get("new_name")
+    if not new_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="new_name is required"
+        )
+
+    def _clone_project():
+        return clone_translator_project_with_name(project_id, new_name)
+
+    try:
+        cloned_project = await run_in_threadpool(_clone_project)
+        return cloned_project
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Translator project '{project_id}' not found."
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clone project: {str(e)}"
+        )
