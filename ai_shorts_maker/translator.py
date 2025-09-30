@@ -36,6 +36,7 @@ class TranslatorSegment(BaseModel):
     commentary_korean: Optional[str] = None  # 해설 한국어
     commentary_japanese: Optional[str] = None  # 해설 일본어
     commentary_reverse_korean: Optional[str] = None  # 해설 역번역 한국어
+    speaker_name: Optional[str] = None  # 화자 표시
 
 
 class TranslatorProject(BaseModel):
@@ -106,6 +107,10 @@ class TranslatorProjectUpdate(BaseModel):
     prompt_hint: Optional[str] = None
     voice: Optional[str] = None
     music_track: Optional[str] = None
+    source_video: Optional[str] = None
+    source_subtitle: Optional[str] = None
+    target_lang: Optional[Literal["ko", "en", "ja"]] = None
+    translation_mode: Optional[Literal["literal", "adaptive", "reinterpret"]] = None
 
 
 def ensure_directories() -> None:
@@ -397,8 +402,84 @@ def _migrate_project_schema(project_data: Dict[str, Any]) -> Dict[str, Any]:
         for segment in project_data["segments"]:
             if "commentary" not in segment:
                 segment["commentary"] = None
+            if "speaker_name" not in segment:
+                segment["speaker_name"] = None
 
     return project_data
+
+
+def _match_segment_by_time(
+    segments: List[TranslatorSegment],
+    start_time: Optional[float],
+    fallback_text: Optional[str] = None,
+    tolerance: float = 0.3,
+) -> Optional[TranslatorSegment]:
+    if start_time is None:
+        return None
+    candidates: List[TranslatorSegment] = []
+    for seg in segments:
+        if abs(seg.start - start_time) <= tolerance:
+            candidates.append(seg)
+        elif fallback_text and seg.source_text and seg.source_text.strip() == fallback_text.strip():
+            candidates.append(seg)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda seg: abs(seg.start - start_time))
+
+
+def apply_saved_result_to_project(project_id: str, saved_result: Dict[str, Any]) -> TranslatorProject:
+    """Merge timeline classification data into a translator project."""
+
+    project = load_project(project_id)
+    classification = (
+        saved_result.get("timelineSnapshot", {})
+        .get("classification")
+    )
+
+    if not isinstance(classification, dict):
+        raise ValueError("Saved result does not contain timeline classification data")
+
+    updated = False
+
+    # Update main track speaker info
+    for entry in classification.get("main", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        segment = _match_segment_by_time(
+            project.segments,
+            entry.get("start_time"),
+            entry.get("text"),
+        )
+        if not segment:
+            continue
+        speaker = entry.get("speaker_name")
+        if speaker and segment.speaker_name != speaker:
+            segment.speaker_name = speaker
+            updated = True
+
+    # Update description track with reinterpretation text and speaker info
+    for entry in classification.get("description", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        segment = _match_segment_by_time(project.segments, entry.get("start_time"))
+        if not segment:
+            continue
+
+        speaker = entry.get("speaker_name")
+        text = entry.get("text")
+
+        if speaker and segment.speaker_name != speaker:
+            segment.speaker_name = speaker
+            updated = True
+
+        if text and segment.commentary_korean != text:
+            segment.commentary_korean = text
+            updated = True
+
+    if not updated:
+        return project
+
+    return save_project(project)
 
 
 def load_project(project_id: str) -> TranslatorProject:
@@ -478,7 +559,35 @@ def update_project(project_id: str, payload: TranslatorProjectUpdate) -> Transla
         project.voice = payload.voice
     if payload.music_track is not None:
         project.music_track = payload.music_track
+    if payload.target_lang is not None:
+        project.target_lang = payload.target_lang
+    if payload.translation_mode is not None:
+        project.translation_mode = payload.translation_mode
+    if payload.source_video is not None:
+        project.source_video = payload.source_video
+        try:
+            project.base_name = Path(payload.source_video).stem or project.base_name
+        except Exception:  # pragma: no cover - fallback if Path fails
+            pass
+    if payload.source_subtitle is not None:
+        project.source_subtitle = payload.source_subtitle
 
+    return save_project(project)
+
+
+def delete_project_segment(project_id: str, segment_id: str) -> TranslatorProject:
+    project = load_project(project_id)
+
+    original_count = len(project.segments)
+    segments = [seg for seg in project.segments if seg.id != segment_id]
+
+    if len(segments) == original_count:
+        raise ValueError(f"Segment {segment_id} not found in project {project_id}")
+
+    for index, seg in enumerate(segments):
+        seg.clip_index = index
+
+    project.segments = segments
     return save_project(project)
 
 
@@ -1129,21 +1238,36 @@ def update_segment_text(project_id: str, segment_id: str, text_type: str, text_v
     if not segment:
         raise ValueError(f"Segment {segment_id} not found in project {project_id}")
 
-    # Update the appropriate text field
-    if text_type == "source":
-        segment.source_text = text_value
-    elif text_type == "translated":
-        segment.translated_text = text_value
-    elif text_type == "reverse_translated":
-        segment.reverse_translated_text = text_value
-    elif text_type == "commentary":
-        segment.commentary = text_value
-    else:
+    # Map text_type values to TranslatorSegment attributes
+    field_map = {
+        "source": "source_text",
+        "translated": "translated_text",
+        "reverse_translated": "reverse_translated_text",
+        "commentary": "commentary",
+        "commentary_korean": "commentary_korean",
+        "commentary_japanese": "commentary_japanese",
+        "commentary_reverse_korean": "commentary_reverse_korean",
+        "reinterpretation": "commentary_korean",
+    }
+
+    field_name = field_map.get(text_type)
+    if not field_name:
         raise ValueError(f"Invalid text_type: {text_type}")
+
+    setattr(segment, field_name, text_value)
 
     # Save the updated project
     save_project(project)
-    logger.info(f"Updated {text_type} text for segment {segment_id} in project {project_id}")
+    logger.info(
+        "Updated %s text for segment %s in project %s",
+        text_type,
+        segment_id,
+        project_id,
+    )
+
+    # Keep exported translation summaries in sync when reverse translations change
+    if text_type == "reverse_translated":
+        _save_translation_texts(project)
 
 
 def update_segment_time(project_id: str, segment_id: str, start_time: float, end_time: float) -> None:
@@ -1168,11 +1292,13 @@ def update_segment_time(project_id: str, segment_id: str, start_time: float, end
 
     # Save the updated project
     save_project(project)
-    logger.info(f"Updated timing for segment {segment_id} in project {project_id}: {start_time:.2f} - {end_time:.2f}")
-
-    # If this is a reverse translation update, re-save the translation texts
-    if text_type == "reverse_translated":
-        _save_translation_texts(project)
+    logger.info(
+        "Updated timing for segment %s in project %s: %.2f - %.2f",
+        segment_id,
+        project_id,
+        start_time,
+        end_time,
+    )
 
 
 def reorder_project_segments(project_id: str, segment_orders: List[Dict[str, Any]]) -> TranslatorProject:

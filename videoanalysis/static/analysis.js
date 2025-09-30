@@ -6,6 +6,7 @@
 class VideoAnalysisApp {
     constructor() {
         this.selectedFiles = new Set();
+        this.fileMetadata = new Map();
         this.currentTab = 'audio';
         this.analysisResults = {};
         this.charts = {};
@@ -19,6 +20,9 @@ class VideoAnalysisApp {
         this.currentReinterpretationEditIndex = null;
         this.activeReinterpretationTrack = null;
         this.cachedSavedResults = [];
+        this.lastTranslatorProjectId = null;
+        this.translatorApiBase = null;
+        this.creatingTranslatorProject = false;
 
         // 하이브리드 자막 트랙 시스템 설정
         this.trackStates = {
@@ -36,6 +40,15 @@ class VideoAnalysisApp {
         this.loadFolderTree();
         this.updateUI();
         this.refreshSavedResultsList();
+
+        try {
+            const storedTranslatorId = window.localStorage.getItem('videoanalysis_last_translator_project_id');
+            if (storedTranslatorId) {
+                this.lastTranslatorProjectId = storedTranslatorId;
+            }
+        } catch (error) {
+            console.warn('translator project id storage unavailable:', error);
+        }
 
         // 재생 버튼 초기 상태 설정
         setTimeout(() => {
@@ -219,6 +232,16 @@ class VideoAnalysisApp {
             });
         }
 
+        const openTimelineTranslationBtn = document.getElementById('open-timeline-translation');
+        if (openTimelineTranslationBtn) {
+            openTimelineTranslationBtn.addEventListener('click', () => {
+                this.handleOpenTranslatorTimeline().catch(error => {
+                    console.error('번역 타임라인 열기 실패:', error);
+                    this.showError('번역 타임라인 편집기를 여는 중 오류가 발생했습니다.');
+                });
+            });
+        }
+
         const openTimelineBtn = document.getElementById('open-timeline');
         if (openTimelineBtn) {
             openTimelineBtn.addEventListener('click', () => {
@@ -384,6 +407,14 @@ class VideoAnalysisApp {
             return;
         }
 
+        // 최신 파일 메타정보 저장 (0바이트 파일 감지 등에서 활용)
+        this.fileMetadata.clear();
+        files.forEach((file) => {
+            if (file && file.path) {
+                this.fileMetadata.set(file.path, file);
+            }
+        });
+
         grid.innerHTML = files.map(file => this.createFileCard(file)).join('');
 
         // 파일 카드 클릭 이벤트 추가
@@ -496,6 +527,16 @@ class VideoAnalysisApp {
         const filePath = card.getAttribute('data-file-path');
 
         if (isSelected) {
+            const meta = this.fileMetadata.get(filePath);
+            if (meta && (!meta.size || meta.size <= 0)) {
+                this.showError('선택한 파일의 크기가 0바이트라 재생할 수 없습니다. 다운로드 상태를 확인하세요.');
+                card.classList.remove('selected');
+                const checkbox = card.querySelector('input[type="checkbox"]');
+                if (checkbox) checkbox.checked = false;
+                this.selectedFiles.delete(filePath);
+                return;
+            }
+
             this.selectedFiles.add(filePath);
             card.classList.add('selected');
 
@@ -756,7 +797,7 @@ class VideoAnalysisApp {
         this.updateStatusBar();
     }
 
-    openTimelineEditor() {
+    openTimelineEditor({ focusTrack = 'description' } = {}) {
         this.switchTab('video-edit');
 
         const videoEditTab = document.getElementById('video-edit-tab');
@@ -772,11 +813,419 @@ class VideoAnalysisApp {
             }
         }
 
-        const descriptionTrack = document.getElementById('description-subtitle-track');
-        if (descriptionTrack) {
-            descriptionTrack.classList.add('highlight-focus');
-            setTimeout(() => descriptionTrack.classList.remove('highlight-focus'), 1500);
+        const fallbackTrack = document.getElementById('description-subtitle-track');
+        const targetTrackId = focusTrack ? `${focusTrack}-subtitle-track` : null;
+        const targetTrack = targetTrackId ? document.getElementById(targetTrackId) : null;
+        const highlightTarget = targetTrack || fallbackTrack;
+
+        if (highlightTarget) {
+            highlightTarget.classList.add('highlight-focus');
+            setTimeout(() => highlightTarget.classList.remove('highlight-focus'), 1500);
         }
+    }
+
+    async handleOpenTranslatorTimeline() {
+        const { project, projects } = await this.resolveTranslatorProject();
+        if (project && project.id) {
+            this.openTranslatorTimeline(project.id);
+            return;
+        }
+
+        const manualId = this.promptTranslatorProjectId(projects);
+        if (manualId) {
+            this.openTranslatorTimeline(manualId);
+            return;
+        }
+
+        this.showError('연결된 번역 프로젝트를 찾지 못했습니다. /translator에서 먼저 프로젝트를 생성하거나 선택해주세요.');
+    }
+
+    openTranslatorTimeline(projectId) {
+        if (!projectId) {
+            return;
+        }
+
+        const base = this.getTranslatorPageBase();
+        const url = `${base}/translator?id=${encodeURIComponent(projectId)}&view=timeline`;
+        try {
+            window.open(url, '_blank');
+        } catch (error) {
+            console.warn('새 창 열기 실패, 현재 창에서 이동합니다:', error);
+            window.location.href = url;
+        }
+
+        this.showStatus('번역 타임라인 편집기를 새 창에서 열었습니다.');
+        this.lastTranslatorProjectId = projectId;
+
+        try {
+            window.localStorage.setItem('videoanalysis_last_translator_project_id', projectId);
+        } catch (error) {
+            console.warn('translator project id 저장 실패:', error);
+        }
+    }
+
+    async resolveTranslatorProject() {
+        const projects = await this.fetchTranslatorProjects();
+        if (!Array.isArray(projects) || projects.length === 0) {
+            return { project: null, projects: [] };
+        }
+
+        const hints = this.getTranslatorNameHints();
+        const normalizedHints = hints
+            .map(hint => this.normalizeForMatch(hint))
+            .filter(Boolean);
+
+        let bestProject = null;
+        let bestScore = 0;
+
+        for (const project of projects) {
+            const searchFields = this.buildTranslatorProjectSearchFields(project);
+            let score = 0;
+
+            for (const hint of normalizedHints) {
+                if (searchFields.some(field => field.includes(hint))) {
+                    score += 1;
+                }
+            }
+
+            if (project.id === this.lastTranslatorProjectId) {
+                score += 0.5;
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestProject = project;
+            }
+        }
+
+        if (bestScore > 0 && bestProject) {
+            return { project: bestProject, projects };
+        }
+
+        const createdProject = await this.createTranslatorProjectFromSelection(projects);
+        if (createdProject) {
+            projects.push(createdProject);
+            return { project: createdProject, projects };
+        }
+
+        if (this.lastTranslatorProjectId) {
+            const fallback = projects.find(item => item.id === this.lastTranslatorProjectId) || null;
+            if (fallback) {
+                return { project: fallback, projects };
+            }
+        }
+
+        return { project: null, projects };
+    }
+
+    async fetchTranslatorProjects() {
+        const endpoints = this.buildTranslatorApiEndpoints();
+        let lastError = null;
+
+        for (const endpoint of endpoints) {
+            try {
+                const response = await fetch(endpoint, { credentials: 'include' });
+                if (!response.ok) {
+                    lastError = new Error(`HTTP ${response.status}`);
+                    continue;
+                }
+
+                const data = await response.json();
+                const projects = Array.isArray(data)
+                    ? data
+                    : Array.isArray(data?.projects)
+                        ? data.projects
+                        : [];
+
+                if (projects.length > 0 || !lastError) {
+                    const resolvedBase = this.resolveTranslatorBaseFromEndpoint(endpoint);
+                    if (resolvedBase) {
+                        this.translatorApiBase = resolvedBase;
+                    }
+                    return projects;
+                }
+
+                lastError = new Error('Empty translator project list');
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        console.error('번역 프로젝트 목록을 불러오지 못했습니다:', lastError);
+        throw lastError || new Error('translator projects unavailable');
+    }
+
+    buildTranslatorApiEndpoints() {
+        const endpoints = [];
+
+        if (this.translatorApiBase) {
+            endpoints.push(`${this.translatorApiBase}/api/translator/projects`);
+        }
+
+        endpoints.push('/api/analysis/translator-projects');
+        endpoints.push('/api/translator/projects');
+
+        try {
+            const current = new URL(window.location.href);
+            if (current.port) {
+                const altPort = current.port === '8002' ? '8001' : current.port;
+                const altOrigin = `${current.protocol}//${current.hostname}:${altPort}`;
+                endpoints.push(`${altOrigin}/api/translator/projects`);
+            } else {
+                endpoints.push(`${current.protocol}//${current.hostname}:8001/api/translator/projects`);
+            }
+        } catch (error) {
+            console.warn('translator endpoint detection failed:', error);
+        }
+
+        endpoints.push('http://127.0.0.1:8001/api/translator/projects');
+
+        const unique = [];
+        const seen = new Set();
+        endpoints.forEach(endpoint => {
+            if (!endpoint) return;
+            if (seen.has(endpoint)) return;
+            seen.add(endpoint);
+            unique.push(endpoint);
+        });
+
+        return unique;
+    }
+
+    resolveTranslatorBaseFromEndpoint(endpoint) {
+        try {
+            const url = new URL(endpoint, window.location.origin);
+            if (url.pathname.includes('/analysis/translator-projects')) {
+                return null;
+            }
+            return `${url.protocol}//${url.host}`;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    getTranslatorPageBase() {
+        if (this.translatorApiBase) {
+            try {
+                const url = new URL(this.translatorApiBase, window.location.origin);
+                if (url.port === '8002') {
+                    url.port = '8001';
+                } else if (!url.port) {
+                    url.port = '8001';
+                }
+                return `${url.protocol}//${url.host}`;
+            } catch (error) {
+                console.warn('translator base parsing 실패:', error);
+            }
+        }
+
+        try {
+            const current = new URL(window.location.href);
+            const guessedPort = current.port === '8002' ? '8001' : (current.port || '8001');
+            return `${current.protocol}//${current.hostname}:${guessedPort}`;
+        } catch (error) {
+            return 'http://127.0.0.1:8001';
+        }
+    }
+
+    getTranslatorNameHints() {
+        const hints = new Set();
+        const selectedList = Array.from(this.selectedFiles || []);
+
+        selectedList.forEach(path => {
+            const base = this.extractFileName(path, true);
+            if (base) {
+                hints.add(base);
+            }
+            const parent = this.extractParentFolder(path);
+            if (parent) {
+                hints.add(parent);
+            }
+        });
+
+        const nameInput = document.getElementById('save-results-name');
+        if (nameInput && nameInput.value) {
+            hints.add(nameInput.value);
+        }
+
+        return Array.from(hints).filter(Boolean);
+    }
+
+    buildTranslatorProjectSearchFields(project) {
+        const fields = [];
+        if (project && project.id) {
+            fields.push(project.id);
+        }
+        if (project && project.base_name) {
+            fields.push(project.base_name);
+        }
+        if (project && project.source_video) {
+            fields.push(this.extractFileName(project.source_video, true));
+        }
+        if (project && project.source_subtitle) {
+            fields.push(this.extractFileName(project.source_subtitle, true));
+        }
+
+        return fields
+            .map(value => this.normalizeForMatch(value))
+            .filter(Boolean);
+    }
+
+    normalizeForMatch(value) {
+        if (!value) {
+            return '';
+        }
+        return value
+            .toString()
+            .toLowerCase()
+            .normalize('NFKC')
+            .replace(/[\s\-_/\\()\[\]{}<>]/g, '')
+            .replace(/[!@#$%^&*+,.'"|~`]/g, '');
+    }
+
+    extractFileName(path, withoutExtension = false) {
+        if (!path) {
+            return '';
+        }
+        const parts = path.split(/[\\/]/).filter(Boolean);
+        if (parts.length === 0) {
+            return '';
+        }
+        const fileName = parts[parts.length - 1];
+        if (!withoutExtension) {
+            return fileName;
+        }
+        const dotIndex = fileName.lastIndexOf('.');
+        return dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+    }
+
+    extractParentFolder(path) {
+        if (!path) {
+            return '';
+        }
+        const parts = path.split(/[\\/]/).filter(Boolean);
+        if (parts.length < 2) {
+            return '';
+        }
+        return parts[parts.length - 2];
+    }
+
+    promptTranslatorProjectId(projects) {
+        if (!Array.isArray(projects) || projects.length === 0) {
+            this.showError('번역 프로젝트가 없습니다. /translator에서 프로젝트를 생성해주세요.');
+            return null;
+        }
+
+        const preview = projects
+            .slice(0, 8)
+            .map(item => `${item.id}${item.base_name ? ` · ${item.base_name}` : ''}`)
+            .join('\n');
+
+        const defaultValue = this.lastTranslatorProjectId || '';
+        const message = preview
+            ? `연결할 번역 프로젝트 ID를 입력하세요:\n${preview}`
+            : '연결할 번역 프로젝트 ID를 입력하세요:';
+
+        const answer = window.prompt(message, defaultValue);
+        const trimmed = answer ? answer.trim() : '';
+        return trimmed || null;
+    }
+
+    async createTranslatorProjectFromSelection(existingProjects = []) {
+        if (this.creatingTranslatorProject) {
+            return null;
+        }
+
+        const { video, subtitle } = this.getSelectedMediaCandidates();
+        if (!video) {
+            return null;
+        }
+
+        const videoBase = this.normalizeForMatch(this.extractFileName(video, true));
+        if (existingProjects.some(project => {
+            if (!project || !project.source_video) return false;
+            const existingBase = this.normalizeForMatch(this.extractFileName(project.source_video, true));
+            if (!existingBase) return false;
+            return existingBase === videoBase || existingBase.endsWith(videoBase);
+        })) {
+            return null;
+        }
+
+        this.creatingTranslatorProject = true;
+
+        const payload = {
+            source_video: video,
+            source_subtitle: subtitle || null,
+            target_lang: 'ja',
+            translation_mode: 'reinterpret',
+            tone_hint: this.getReinterpretationTone(),
+        };
+
+        try {
+            this.showStatus('번역 프로젝트가 없어 새로 생성합니다...');
+            const response = await fetch('/api/analysis/translator-projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || `HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            const project = data?.project || data;
+            if (!project || !project.id) {
+                throw new Error('생성된 번역 프로젝트 정보를 확인할 수 없습니다.');
+            }
+
+            this.lastTranslatorProjectId = project.id;
+            try {
+                window.localStorage.setItem('videoanalysis_last_translator_project_id', project.id);
+            } catch (error) {
+                console.warn('translator project id 저장 실패:', error);
+            }
+
+            this.showSuccess('번역 프로젝트를 자동으로 생성했습니다.');
+            this.showStatus('✅ 번역 프로젝트 생성 완료');
+            return project;
+        } catch (error) {
+            console.error('번역 프로젝트 자동 생성 실패:', error);
+            this.showError(`번역 프로젝트를 자동 생성하지 못했습니다: ${error.message}`);
+            return null;
+        } finally {
+            this.creatingTranslatorProject = false;
+        }
+    }
+
+    getSelectedMediaCandidates() {
+        const selectedList = Array.from(this.selectedFiles || []);
+        const videoExtensions = ['.mp4', '.webm', '.mov', '.mkv', '.avi'];
+        const subtitleExtensions = ['.srt', '.vtt', '.ass', '.ssa'];
+
+        let video = null;
+        let subtitle = null;
+
+        selectedList.forEach(path => {
+            const ext = (this.getExtension(path) || '').toLowerCase();
+            if (!video && videoExtensions.includes(ext)) {
+                video = path;
+            }
+            if (!subtitle && subtitleExtensions.includes(ext)) {
+                subtitle = path;
+            }
+        });
+
+        if (!video && this.timeline && this.timeline.subtitleData && Array.isArray(this.timeline.subtitleData.sources)) {
+            const videoSource = this.timeline.subtitleData.sources.find(src => src && src.type === 'video' && src.path);
+            if (videoSource) {
+                video = videoSource.path;
+            }
+        }
+
+        return { video, subtitle };
     }
 
     async startAudioAnalysis() {
@@ -2930,12 +3379,23 @@ class VideoAnalysisApp {
             // 파일 경로를 서버에서 제공하는 정적 파일 경로로 변환
             const videoUrl = `/api/file-content?path=${encodeURIComponent(filePath)}`;
 
-            // 기존 이벤트 리스너 제거
-            videoPlayer.removeEventListener('loadedmetadata', this.onVideoLoadedMetadata);
-            videoPlayer.removeEventListener('timeupdate', this.onVideoTimeUpdate);
-            videoPlayer.removeEventListener('canplay', this.onVideoCanPlay);
+            const meta = this.fileMetadata.get(filePath);
+            if (meta && (!meta.size || meta.size <= 0)) {
+                console.warn('비디오 로드 건너뜀 - 0바이트 파일', meta);
+                this.showError('이 영상 파일은 비어 있어 재생할 수 없습니다. 다시 다운로드해 주세요.');
+                return;
+            }
 
-            videoPlayer.src = videoUrl;
+            // 기존 이벤트 리스너 제거 (초기 호출 시 undefined로 인한 예외 방지)
+            if (this.onVideoLoadedMetadata) {
+                videoPlayer.removeEventListener('loadedmetadata', this.onVideoLoadedMetadata);
+            }
+            if (this.onVideoTimeUpdate) {
+                videoPlayer.removeEventListener('timeupdate', this.onVideoTimeUpdate);
+            }
+            if (this.onVideoCanPlay) {
+                videoPlayer.removeEventListener('canplay', this.onVideoCanPlay);
+            }
 
             // 이벤트 리스너를 인스턴스 메서드로 바인딩
             this.onVideoLoadedMetadata = () => {
@@ -3000,11 +3460,25 @@ class VideoAnalysisApp {
             videoPlayer.volume = 1.0;
 
             // 동적으로 소스 타입 설정
-            if (filePath.toLowerCase().includes('.mp4')) {
-                videoPlayer.querySelector('source[type="video/mp4"]').src = videoUrl;
-            } else if (filePath.toLowerCase().includes('.webm')) {
-                videoPlayer.querySelector('source[type="video/webm"]').src = videoUrl;
+            const mp4Source = videoPlayer.querySelector('source[type="video/mp4"]');
+            const webmSource = videoPlayer.querySelector('source[type="video/webm"]');
+            if (mp4Source) mp4Source.removeAttribute('src');
+            if (webmSource) webmSource.removeAttribute('src');
+            videoPlayer.removeAttribute('src');
+
+            const lowerPath = filePath.toLowerCase();
+            if (lowerPath.endsWith('.mp4') && mp4Source) {
+                mp4Source.src = videoUrl;
+            } else if (lowerPath.endsWith('.webm') && webmSource) {
+                webmSource.src = videoUrl;
+            } else {
+                videoPlayer.src = videoUrl;
             }
+
+            // 새로운 소스를 강제로 로드해 즉시 반영
+            videoPlayer.load();
+
+            console.log('비디오 로드 시도', { filePath, videoUrl, meta });
 
             console.log(`비디오 로드 시작: ${filePath}`);
         }

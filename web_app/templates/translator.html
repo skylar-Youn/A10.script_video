@@ -55,6 +55,9 @@
                         <p><strong>영상:</strong> <span id="selected-video-name">선택되지 않음</span></p>
                         <p><strong>자막:</strong> <span id="selected-subtitle-name">선택되지 않음</span></p>
                     </div>
+                    <div class="source-actions">
+                        <button type="button" id="open-source-selector-btn" class="btn-secondary btn-sm">파일 불러오기</button>
+                    </div>
                 </div>
                 <div class="ai-commentary-controls">
                     <button type="button" id="generate-commentary-btn" class="btn-primary">
@@ -107,6 +110,30 @@
     </div>
 
 
+    <div id="source-selector-modal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3>영상/자막 파일 선택</h3>
+                <button type="button" class="modal-close" id="source-selector-close" aria-label="닫기">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">`youtube/download` 폴더에서 사용할 영상과 자막을 선택하세요.</p>
+                <div class="source-selector-tabs" id="source-selector-tabs">
+                    <button type="button" class="tab active" data-mode="downloads">다운로드된 파일</button>
+                    <button type="button" class="tab" data-mode="saved">재해석 저장본</button>
+                </div>
+                <div id="source-selector-list" class="source-selector-list">
+                    <p class="empty-state">목록을 불러오는 중...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="source-selector-cancel">취소</button>
+                <button type="button" class="btn-primary" id="source-selector-apply" disabled>적용</button>
+            </div>
+        </div>
+    </div>
+
+
 
     <script>
     (function () {
@@ -119,9 +146,567 @@
         const projectStatus = document.getElementById('project-status');
         const projectActions = document.getElementById('project-actions');
         const segmentsTable = document.getElementById('segments-table');
+        const openSourceSelectorBtn = document.getElementById('open-source-selector-btn');
+        const sourceSelectorModal = document.getElementById('source-selector-modal');
+        const sourceSelectorList = document.getElementById('source-selector-list');
+        const sourceSelectorApplyBtn = document.getElementById('source-selector-apply');
+        const sourceSelectorCloseBtn = document.getElementById('source-selector-close');
+        const sourceSelectorCancelBtn = document.getElementById('source-selector-cancel');
+        const sourceSelectorTabs = document.getElementById('source-selector-tabs');
 
         let selectedSource = null;
         let currentProject = null;
+        let isTimelineView = true;
+        let availableSourceOptions = [];
+        let selectedSourceIndex = null;
+        let sourceSelectorMode = 'downloads';
+        let savedResultOptions = [];
+        const savedResultDetailCache = {};
+        let selectedSavedResultId = null;
+
+        if (openSourceSelectorBtn) {
+            openSourceSelectorBtn.style.display = 'none';
+        }
+
+        const TEXT_FIELDS_MAP = {
+            source: 'source_text',
+            translated: 'translated_text',
+            reverse_translated: 'reverse_translated_text',
+            commentary: 'commentary',
+            commentary_korean: 'commentary_korean',
+            commentary_japanese: 'commentary_japanese',
+            commentary_reverse_korean: 'commentary_reverse_korean',
+        };
+
+        const TEXT_TYPE_LABELS = {
+            source: '현재 자막 (한국어)',
+            commentary_korean: '재해석 자막 (한국어)',
+            translated: '번역 일본어 자막',
+            reverse_translated: '역번역 자막 (한국어)',
+            commentary: '해설',
+            commentary_japanese: '해설 일본어',
+            commentary_reverse_korean: '해설 역번역 한국어',
+        };
+
+        function escapeHtml(text) {
+            if (text === undefined || text === null) {
+                return '';
+            }
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function updateSegmentCache(segmentId, textType, value) {
+            if (!currentProject) {
+                return;
+            }
+            const field = TEXT_FIELDS_MAP[textType];
+            if (!field) {
+                return;
+            }
+            const target = currentProject.segments.find(seg => seg.id === segmentId);
+            if (target) {
+                target[field] = value;
+            }
+        }
+
+        function buildTextRow({ segmentId, label, type, value, rowClass, extraButtons = '', showLabel = true, speaker = null }) {
+            const safeValue = escapeHtml(value || '');
+            const labelAttr = showLabel ? '' : ' class="hidden-label"';
+            const extraRowClass = showLabel ? '' : ' no-label';
+            const speakerBadge = speaker ? `<span class="speaker-badge">${escapeHtml(speaker)}</span>` : '';
+            return `
+                <div class="text-row ${rowClass}${extraRowClass}">
+                    <label${labelAttr}>${speakerBadge ? speakerBadge + ' ' : ''}${label}</label>
+                    <div class="text-content" data-type="${type}" data-segment-id="${segmentId}">
+                        <span class="text-display">${safeValue}</span>
+                        <textarea class="text-edit" style="display: none;" rows="2">${safeValue}</textarea>
+                        <div class="text-buttons">
+                            <button class="btn-edit-text" data-type="${type}" data-segment-id="${segmentId}" title="${label} 수정">수정</button>
+                            <button class="btn-copy-text" data-type="${type}" data-segment-id="${segmentId}" title="${label} 복사">복사</button>
+                            ${extraButtons}
+                            <button class="btn-delete-text" data-type="${type}" data-segment-id="${segmentId}" title="${label} 삭제">삭제</button>
+                        </div>
+                        <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function extractFileName(path) {
+            if (!path) {
+                return '';
+            }
+            const normalized = String(path).replace(/\\/g, '/');
+            const parts = normalized.split('/').filter(Boolean);
+            return parts.length ? parts[parts.length - 1] : normalized;
+        }
+
+
+        function formatTimestamp(seconds) {
+            if (typeof seconds !== 'number' || Number.isNaN(seconds)) {
+                return '00:00.00';
+            }
+            const totalSeconds = Math.max(seconds, 0);
+            const minutes = Math.floor(totalSeconds / 60);
+            const remainder = totalSeconds - minutes * 60;
+            const secondsStr = remainder.toFixed(2).padStart(5, '0');
+            const minutesStr = String(minutes).padStart(2, '0');
+            return `${minutesStr}:${secondsStr}`;
+        }
+
+
+        function buildSegmentTime(seg) {
+            const startTime = formatTimestamp(seg.start || 0);
+            const endTime = formatTimestamp(seg.end || 0);
+            const duration = Math.max((seg.end || 0) - (seg.start || 0), 0).toFixed(1);
+            return `
+                <div class="time-display" data-segment-id="${seg.id}" title="클릭하여 시간 수정">
+                    <span class="start-time">${startTime}</span>
+                    <span class="time-separator">→</span>
+                    <span class="end-time">${endTime}</span>
+                    <span class="time-duration">(${duration}초)</span>
+                </div>
+                <div class="time-edit" data-segment-id="${seg.id}" style="display: none;">
+                    <input type="number" class="start-input" step="0.01" value="${(seg.start || 0).toFixed(2)}" min="0">
+                    <span class="time-separator">→</span>
+                    <input type="number" class="end-input" step="0.01" value="${(seg.end || 0).toFixed(2)}" min="0">
+                    <div class="time-edit-buttons">
+                        <button type="button" class="btn-save-time" data-segment-id="${seg.id}">저장</button>
+                        <button type="button" class="btn-cancel-time" data-segment-id="${seg.id}">취소</button>
+                    </div>
+                </div>
+            `;
+        }
+
+
+        function buildCardSegments(project) {
+            if (!project.segments || !project.segments.length) {
+                return '<p class="empty-state">세그먼트가 없습니다. 번역을 실행한 뒤 다시 시도해주세요.</p>';
+            }
+
+            return project.segments
+                .map((seg) => {
+                    const sourceRow = buildTextRow({
+                        segmentId: seg.id,
+                        label: TEXT_TYPE_LABELS.source,
+                        type: 'source',
+                        value: seg.source_text || '',
+                        rowClass: 'korean original',
+                        speaker: seg.speaker_name || null,
+                        showLabel: true
+                    });
+                    const reinterpretRow = buildTextRow({
+                        segmentId: seg.id,
+                        label: TEXT_TYPE_LABELS.commentary_korean,
+                        type: 'commentary_korean',
+                        value: seg.commentary_korean || seg.source_text || '',
+                        rowClass: 'korean reinterpretation',
+                        speaker: seg.speaker_name || null,
+                        showLabel: true
+                    });
+                    const japaneseRow = buildTextRow({
+                        segmentId: seg.id,
+                        label: TEXT_TYPE_LABELS.translated,
+                        type: 'translated',
+                        value: seg.translated_text || '',
+                        rowClass: 'japanese',
+                        extraButtons: `<button class="btn-translate-reverse" data-segment-id="${seg.id}" title="일본어→한국어 역번역">역번역</button>`,
+                        showLabel: true
+                    });
+                    const reverseRow = buildTextRow({
+                        segmentId: seg.id,
+                        label: TEXT_TYPE_LABELS.reverse_translated,
+                        type: 'reverse_translated',
+                        value: seg.reverse_translated_text || '',
+                        rowClass: 'korean reverse',
+                        showLabel: true
+                    });
+
+                    return `
+                <div class="segment-item" data-segment-id="${seg.id}">
+                    <div class="segment-header">
+                        <div class="segment-time" data-segment-id="${seg.id}">
+                            ${buildSegmentTime(seg)}
+                        </div>
+                        <div class="segment-actions">
+                            <button class="btn-move-up" data-segment-id="${seg.id}" title="위로 이동">⬆️</button>
+                            <button class="btn-move-down" data-segment-id="${seg.id}" title="아래로 이동">⬇️</button>
+                            <button class="btn-edit-segment" data-segment-id="${seg.id}" title="세그먼트 수정">✏️</button>
+                            <button class="btn-delete-segment" data-segment-id="${seg.id}" title="세그먼트 삭제">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="segment-content">
+                        <div class="text-pair translation-stack">
+                            ${sourceRow}
+                            ${reinterpretRow}
+                            ${japaneseRow}
+                            ${reverseRow}
+                        </div>
+                    </div>
+                </div>
+            `;
+                })
+                .join('');
+        }
+
+
+        function buildTimelineRow(seg, index) {
+            const sourceCell = buildTextRow({
+                segmentId: seg.id,
+                label: TEXT_TYPE_LABELS.source,
+                type: 'source',
+                value: seg.source_text || '',
+                rowClass: 'korean original',
+                speaker: seg.speaker_name || null,
+                showLabel: false
+            });
+            const reinterpretCell = buildTextRow({
+                segmentId: seg.id,
+                label: TEXT_TYPE_LABELS.commentary_korean,
+                type: 'commentary_korean',
+                value: seg.commentary_korean || seg.source_text || '',
+                rowClass: 'korean reinterpretation',
+                speaker: seg.speaker_name || null,
+                showLabel: false
+            });
+            const japaneseCell = buildTextRow({
+                segmentId: seg.id,
+                label: TEXT_TYPE_LABELS.translated,
+                type: 'translated',
+                value: seg.translated_text || '',
+                rowClass: 'japanese',
+                extraButtons: `<button class="btn-translate-reverse" data-segment-id="${seg.id}" title="일본어→한국어 역번역">역번역</button>`,
+                showLabel: false
+            });
+            const reverseCell = buildTextRow({
+                segmentId: seg.id,
+                label: TEXT_TYPE_LABELS.reverse_translated,
+                type: 'reverse_translated',
+                value: seg.reverse_translated_text || '',
+                rowClass: 'korean reverse',
+                showLabel: false
+            });
+
+            return `
+                <div class="timeline-row segment-item" data-segment-id="${seg.id}">
+                    <div class="timeline-col timeline-index">${index + 1}</div>
+                    <div class="timeline-col timeline-time">
+                        <div class="segment-time" data-segment-id="${seg.id}">
+                            ${buildSegmentTime(seg)}
+                            <div class="segment-actions timeline-actions">
+                                <button class="btn-move-up" data-segment-id="${seg.id}" title="위로 이동">⬆️</button>
+                                <button class="btn-move-down" data-segment-id="${seg.id}" title="아래로 이동">⬇️</button>
+                                <button class="btn-edit-segment" data-segment-id="${seg.id}" title="세그먼트 수정">✏️</button>
+                                <button class="btn-delete-segment" data-segment-id="${seg.id}" title="세그먼트 삭제">🗑️</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="timeline-col timeline-text">${sourceCell}</div>
+                    <div class="timeline-col timeline-text">${reinterpretCell}</div>
+                    <div class="timeline-col timeline-text">${japaneseCell}</div>
+                    <div class="timeline-col timeline-text">${reverseCell}</div>
+                </div>
+            `;
+        }
+
+
+        function buildTimelineSegments(project) {
+            if (!project.segments || !project.segments.length) {
+                return '<p class="empty-state">세그먼트가 없습니다. 번역을 실행한 뒤 다시 시도해주세요.</p>';
+            }
+
+            const header = `
+                <div class="timeline-row timeline-header">
+                    <div class="timeline-col timeline-index">#</div>
+                    <div class="timeline-col timeline-time">타임스탬프</div>
+                    <div class="timeline-col timeline-text">${TEXT_TYPE_LABELS.source}</div>
+                    <div class="timeline-col timeline-text">${TEXT_TYPE_LABELS.commentary_korean}</div>
+                    <div class="timeline-col timeline-text">${TEXT_TYPE_LABELS.translated}</div>
+                    <div class="timeline-col timeline-text">${TEXT_TYPE_LABELS.reverse_translated}</div>
+                </div>
+            `;
+
+            const rows = project.segments
+                .map((seg, index) => buildTimelineRow(seg, index))
+                .join('');
+
+            return `<div class="timeline-scroll">${header}${rows}</div>`;
+        }
+
+
+        function renderSegments(project) {
+            if (!project || !project.segments) {
+                segmentsTable.innerHTML = '<p class="empty-state">세그먼트를 불러오지 못했습니다.</p>';
+                return;
+            }
+
+            if (isTimelineView) {
+                segmentsTable.classList.add('timeline-active');
+                segmentsTable.innerHTML = buildTimelineSegments(project);
+            } else {
+                segmentsTable.classList.remove('timeline-active');
+                segmentsTable.innerHTML = buildCardSegments(project);
+            }
+
+            attachSegmentEventListeners();
+            attachTimeEditListeners();
+        }
+
+        function openSourceSelectorModal() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            selectedSourceIndex = null;
+            selectedSavedResultId = null;
+            sourceSelectorApplyBtn.disabled = true;
+            sourceSelectorModal.classList.remove('hidden');
+            document.body.classList.add('modal-open');
+            switchSourceSelectorMode('downloads');
+        }
+
+        function closeSourceSelectorModal() {
+            sourceSelectorModal.classList.add('hidden');
+            document.body.classList.remove('modal-open');
+            selectedSourceIndex = null;
+            selectedSavedResultId = null;
+            sourceSelectorApplyBtn.disabled = true;
+        }
+
+        function updateSourceApplyState() {
+            if (sourceSelectorMode === 'downloads') {
+                sourceSelectorApplyBtn.disabled = selectedSourceIndex === null;
+            } else {
+                sourceSelectorApplyBtn.disabled = !selectedSavedResultId || !savedResultDetailCache[selectedSavedResultId];
+            }
+        }
+
+        function loadDownloadSources() {
+            const cacheBuster = Date.now();
+            sourceSelectorList.innerHTML = '<p class="empty-state">목록을 불러오는 중...</p>';
+
+            fetch(`/api/translator/downloads?_cb=${cacheBuster}`)
+                .then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
+                .then(items => {
+                    availableSourceOptions = Array.isArray(items) ? items : [];
+                    renderDownloadOptions();
+                })
+                .catch(err => {
+                    console.error('Failed to load source options:', err);
+                    sourceSelectorList.innerHTML = '<p class="empty-state error">목록을 불러오지 못했습니다.</p>';
+                });
+        }
+
+        function renderDownloadOptions() {
+            if (!availableSourceOptions.length) {
+                sourceSelectorList.innerHTML = '<p class="empty-state">사용 가능한 영상이 없습니다. 먼저 다운로드 도구에서 파일을 받아주세요.</p>';
+                return;
+            }
+
+            const html = availableSourceOptions.map((item, index) => {
+                const baseName = item.base_name || extractFileName(item.video_path) || `영상 ${index + 1}`;
+                const subtitleName = item.subtitle_path ? extractFileName(item.subtitle_path) : '자막 없음';
+                const videoName = extractFileName(item.video_path);
+                return `
+                    <label class="source-option">
+                        <input type="radio" name="source-selection" value="${index}">
+                        <div class="source-option-body">
+                            <div class="option-title">${escapeHtml(baseName)}</div>
+                            <div class="option-meta">
+                                <span class="option-video">🎬 ${escapeHtml(videoName || '알 수 없음')}</span>
+                                <span class="option-subtitle">📝 ${escapeHtml(subtitleName)}</span>
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('');
+
+            sourceSelectorList.innerHTML = html;
+            sourceSelectorList.querySelectorAll('input[name="source-selection"]').forEach(input => {
+                input.addEventListener('change', (event) => {
+                    selectedSourceIndex = parseInt(event.target.value, 10);
+                    selectedSavedResultId = null;
+                    updateSourceApplyState();
+                });
+            });
+            updateSourceApplyState();
+        }
+
+        function loadSavedResultOptions() {
+            sourceSelectorList.innerHTML = '<p class="empty-state">목록을 불러오는 중...</p>';
+            fetch('/api/translator/saved-results')
+                .then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
+                .then(data => {
+                    const results = Array.isArray(data?.results) ? data.results : [];
+                    savedResultOptions = results;
+                    renderSavedResultOptions();
+                })
+                .catch(err => {
+                    console.error('Failed to load saved results:', err);
+                    sourceSelectorList.innerHTML = '<p class="empty-state error">재해석 저장본을 불러오지 못했습니다.</p>';
+                });
+        }
+
+        function renderSavedResultOptions() {
+            if (!savedResultOptions.length) {
+                sourceSelectorList.innerHTML = '<p class="empty-state">저장된 재해석 결과가 없습니다.</p>';
+                return;
+            }
+
+            const html = savedResultOptions.map(item => {
+                const name = item.name || '이름 없는 저장';
+                const savedAt = item.saved_at ? new Date(item.saved_at).toLocaleString('ko-KR') : '시간 정보 없음';
+                return `
+                    <label class="source-option">
+                        <input type="radio" name="saved-result-selection" value="${item.id}">
+                        <div class="source-option-body">
+                            <div class="option-title">${escapeHtml(name)}</div>
+                            <div class="option-meta">
+                                <span>🗂 ID: ${escapeHtml(item.id)}</span>
+                                <span>🕒 ${escapeHtml(savedAt)}</span>
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('');
+
+            sourceSelectorList.innerHTML = html;
+            sourceSelectorList.querySelectorAll('input[name="saved-result-selection"]').forEach(input => {
+                input.addEventListener('change', async (event) => {
+                    selectedSavedResultId = event.target.value;
+                    selectedSourceIndex = null;
+                    updateSourceApplyState();
+
+                    if (selectedSavedResultId && !savedResultDetailCache[selectedSavedResultId]) {
+                        try {
+                            sourceSelectorApplyBtn.disabled = true;
+                            const res = await fetch(`/api/translator/saved-results/${encodeURIComponent(selectedSavedResultId)}`);
+                            if (!res.ok) {
+                                throw new Error(`HTTP ${res.status}`);
+                            }
+                            const detail = await res.json();
+                            savedResultDetailCache[selectedSavedResultId] = detail?.result;
+                        } catch (error) {
+                            console.error('Failed to fetch saved result detail:', error);
+                            alert('재해석 저장본을 불러오지 못했습니다.');
+                            selectedSavedResultId = null;
+                        }
+                    }
+                    updateSourceApplyState();
+                });
+            });
+            updateSourceApplyState();
+        }
+
+        function switchSourceSelectorMode(mode) {
+            if (sourceSelectorMode === mode) {
+                updateSourceApplyState();
+                return;
+            }
+
+            sourceSelectorMode = mode;
+            selectedSourceIndex = null;
+            selectedSavedResultId = null;
+            updateSourceApplyState();
+
+            if (sourceSelectorTabs) {
+                sourceSelectorTabs.querySelectorAll('.tab').forEach(tab => {
+                    const tabMode = tab.dataset.mode;
+                    if (tabMode === mode) {
+                        tab.classList.add('active');
+                    } else {
+                        tab.classList.remove('active');
+                    }
+                });
+            }
+
+            if (mode === 'downloads') {
+                loadDownloadSources();
+            } else {
+                loadSavedResultOptions();
+            }
+        }
+
+        function applySourceSelection() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+            sourceSelectorApplyBtn.disabled = true;
+            const originalLabel = sourceSelectorApplyBtn.textContent;
+            sourceSelectorApplyBtn.textContent = '적용 중...';
+
+            let request;
+
+            if (sourceSelectorMode === 'downloads') {
+                if (selectedSourceIndex === null || selectedSourceIndex < 0) {
+                    alert('사용할 파일을 선택하세요.');
+                    sourceSelectorApplyBtn.textContent = originalLabel;
+                    updateSourceApplyState();
+                    return;
+                }
+
+                const option = availableSourceOptions[selectedSourceIndex];
+                if (!option || !option.video_path) {
+                    alert('선택한 항목이 올바르지 않습니다.');
+                    sourceSelectorApplyBtn.textContent = originalLabel;
+                    updateSourceApplyState();
+                    return;
+                }
+
+                const payload = {
+                    source_video: option.video_path,
+                    source_subtitle: option.subtitle_path || null
+                };
+
+                request = fetch(`/api/translator/projects/${currentProject.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                if (!selectedSavedResultId) {
+                    alert('재해석 저장본을 선택하세요.');
+                    sourceSelectorApplyBtn.textContent = originalLabel;
+                    updateSourceApplyState();
+                    return;
+                }
+                const savedResult = savedResultDetailCache[selectedSavedResultId];
+                if (!savedResult) {
+                    alert('저장본 데이터를 불러오지 못했습니다. 다시 시도해주세요.');
+                    sourceSelectorApplyBtn.textContent = originalLabel;
+                    updateSourceApplyState();
+                    return;
+                }
+
+                request = fetch(`/api/translator/projects/${currentProject.id}/apply-saved-result`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ saved_result: savedResult })
+                });
+            }
+
+            request
+                .then(res => res.ok ? res.json() : res.text().then(text => { throw new Error(text || `HTTP ${res.status}`); }))
+                .then(project => {
+                    renderProject(project);
+                    closeSourceSelectorModal();
+                })
+                .catch(err => {
+                    console.error('Failed to update project source:', err);
+                    alert('소스를 업데이트하지 못했습니다: ' + err.message);
+                })
+                .finally(() => {
+                    sourceSelectorApplyBtn.textContent = originalLabel;
+                    updateSourceApplyState();
+                });
+        }
 
 
 
@@ -268,6 +853,10 @@
             creationView.classList.add('hidden');
             projectView.classList.remove('hidden');
 
+            if (openSourceSelectorBtn) {
+                openSourceSelectorBtn.style.display = 'inline-flex';
+            }
+
             projectTitle.textContent = project.base_name;
             projectStatus.textContent = `상태: ${project.status}`;
 
@@ -276,11 +865,31 @@
                 selectedSource = {
                     video_path: project.source_video,
                     subtitle_path: project.source_subtitle,
-                    base_name: project.base_name
+                    base_name: project.base_name,
+                    video_name: extractFileName(project.source_video),
+                    subtitle_name: extractFileName(project.source_subtitle)
                 };
             }
 
             projectActions.innerHTML = ''; // Clear actions
+
+            const timelineToggleBtn = document.createElement('button');
+            timelineToggleBtn.id = 'timeline-toggle-btn';
+            timelineToggleBtn.className = 'btn-secondary';
+            timelineToggleBtn.textContent = isTimelineView ? '카드 보기' : '타임라인 번역편집기';
+            timelineToggleBtn.addEventListener('click', () => {
+                isTimelineView = !isTimelineView;
+                timelineToggleBtn.textContent = isTimelineView ? '카드 보기' : '타임라인 번역편집기';
+                renderSegments(currentProject);
+            });
+
+            const sourceSelectorActionBtn = document.createElement('button');
+            sourceSelectorActionBtn.id = 'project-source-selector-btn';
+            sourceSelectorActionBtn.className = 'btn-secondary';
+            sourceSelectorActionBtn.textContent = '파일 불러오기';
+            sourceSelectorActionBtn.addEventListener('click', openSourceSelectorModal);
+            projectActions.appendChild(sourceSelectorActionBtn);
+            projectActions.appendChild(timelineToggleBtn);
 
             // Always show delete button
             const deleteBtn = document.createElement('button');
@@ -414,118 +1023,7 @@
                 projectActions.appendChild(renderBtn);
             }
 
-            const segmentsHtml = project.segments.map((seg, index) => `
-                <div class="segment-item" data-segment-id="${seg.id}">
-                    <div class="segment-header">
-                        <div class="segment-time" data-segment-id="${seg.id}">
-                            <span class="time-display" style="cursor: pointer; color: #007bff; text-decoration: underline;" title="클릭하여 시간 수정">
-                                ${seg.start.toFixed(2)} - ${seg.end.toFixed(2)}
-                            </span>
-                            <div class="time-edit" style="display: none;">
-                                <input type="number" class="start-input" step="0.01" value="${seg.start.toFixed(2)}" min="0" style="width: 60px;">
-                                <span> - </span>
-                                <input type="number" class="end-input" step="0.01" value="${seg.end.toFixed(2)}" min="0" style="width: 60px;">
-                                <button class="btn-save-time" style="margin-left: 5px; font-size: 12px; padding: 2px 6px; background: #28a745; color: white; border: none; border-radius: 3px;">저장</button>
-                                <button class="btn-cancel-time" style="margin-left: 2px; font-size: 12px; padding: 2px 6px; background: #6c757d; color: white; border: none; border-radius: 3px;">취소</button>
-                            </div>
-                        </div>
-                        <div class="segment-actions">
-                            <button class="btn-move-up" data-segment-id="${seg.id}" title="위로 이동">⬆️</button>
-                            <button class="btn-move-down" data-segment-id="${seg.id}" title="아래로 이동">⬇️</button>
-                            <button class="btn-edit-segment" data-segment-id="${seg.id}" title="세그먼트 수정">✏️</button>
-                            <button class="btn-delete-segment" data-segment-id="${seg.id}" title="세그먼트 삭제">🗑️</button>
-                        </div>
-                    </div>
-                    <div class="segment-content">
-                        <div class="text-pair">
-                            <div class="text-row korean original">
-                                <label>원본 한국어:</label>
-                                <div class="text-content" data-type="source" data-segment-id="${seg.id}">
-                                    <span class="text-display">${seg.source_text || ''}</span>
-                                    <input class="text-edit" type="text" value="${(seg.source_text || '').replace(/"/g, '&quot;')}" style="display: none;">
-                                    <div class="text-buttons">
-                                        <button class="btn-edit-text" data-type="source" data-segment-id="${seg.id}" title="한국어 수정">수정</button>
-                                        <button class="btn-copy-text" data-type="source" data-segment-id="${seg.id}" title="한국어 복사">복사</button>
-                                        <button class="btn-delete-text" data-type="source" data-segment-id="${seg.id}" title="한국어 삭제">삭제</button>
-                                    </div>
-                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
-                                </div>
-                            </div>
-                            <div class="text-row japanese">
-                                <label>번역 일본어:</label>
-                                <div class="text-content" data-type="translated" data-segment-id="${seg.id}">
-                                    <span class="text-display">${seg.translated_text || ''}</span>
-                                    <input class="text-edit" type="text" value="${(seg.translated_text || '').replace(/"/g, '&quot;')}" style="display: none;">
-                                    <div class="text-buttons">
-                                        <button class="btn-edit-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 수정">수정</button>
-                                        <button class="btn-copy-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 복사">복사</button>
-                                        <button class="btn-translate-reverse" data-segment-id="${seg.id}" title="일본어→한국어 번역">역번역</button>
-                                        <button class="btn-delete-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 삭제">삭제</button>
-                                    </div>
-                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
-                                </div>
-                            </div>
-                            <div class="text-row korean reverse">
-                                <label>역번역 한국어:</label>
-                                <div class="text-content" data-type="reverse_translated" data-segment-id="${seg.id}">
-                                    <span class="text-display">${seg.reverse_translated_text || ''}</span>
-                                    <input class="text-edit" type="text" value="${(seg.reverse_translated_text || '').replace(/"/g, '&quot;')}" style="display: none;">
-                                    <div class="text-buttons">
-                                        <button class="btn-edit-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 수정">수정</button>
-                                        <button class="btn-copy-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 복사">복사</button>
-                                        <button class="btn-delete-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 삭제">삭제</button>
-                                    </div>
-                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
-                                </div>
-                            </div>
-                            <div class="text-row commentary korean">
-                                <label>해설 한국어:</label>
-                                <div class="text-content" data-type="commentary_korean" data-segment-id="${seg.id}">
-                                    <span class="text-display">${seg.commentary_korean || ''}</span>
-                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_korean || '').replace(/"/g, '&quot;')}</textarea>
-                                    <div class="text-buttons">
-                                        <button class="btn-edit-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 수정">수정</button>
-                                        <button class="btn-copy-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 복사">복사</button>
-                                        <button class="btn-delete-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 삭제">삭제</button>
-                                    </div>
-                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
-                                </div>
-                            </div>
-                            <div class="text-row commentary japanese">
-                                <label>해설 일본어:</label>
-                                <div class="text-content" data-type="commentary_japanese" data-segment-id="${seg.id}">
-                                    <span class="text-display">${seg.commentary_japanese || ''}</span>
-                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_japanese || '').replace(/"/g, '&quot;')}</textarea>
-                                    <div class="text-buttons">
-                                        <button class="btn-edit-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 수정">수정</button>
-                                        <button class="btn-copy-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 복사">복사</button>
-                                        <button class="btn-delete-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 삭제">삭제</button>
-                                    </div>
-                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
-                                </div>
-                            </div>
-                            <div class="text-row commentary reverse">
-                                <label>해설 역번역 한국어:</label>
-                                <div class="text-content" data-type="commentary_reverse_korean" data-segment-id="${seg.id}">
-                                    <span class="text-display">${seg.commentary_reverse_korean || ''}</span>
-                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_reverse_korean || '').replace(/"/g, '&quot;')}</textarea>
-                                    <div class="text-buttons">
-                                        <button class="btn-edit-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 수정">수정</button>
-                                        <button class="btn-copy-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 복사">복사</button>
-                                        <button class="btn-delete-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 삭제">삭제</button>
-                                    </div>
-                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-            segmentsTable.innerHTML = segmentsHtml;
-
-            // Add event listeners for edit/delete buttons
-            attachSegmentEventListeners();
-            attachTimeEditListeners();
+            renderSegments(project);
 
             // Update AI commentary section with selected source info
             showAICommentarySection();
@@ -601,32 +1099,33 @@
                 });
         }
 
-        async function saveSegmentText(segmentId, textType, textValue) {
-            try {
-                const response = await fetch(`/api/translator/projects/${currentProject.id}/segments`, {
-                    method: 'PATCH',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        segment_id: segmentId,
-                        text_type: textType,
-                        text_value: textValue
-                    })
-                });
+    async function saveSegmentText(segmentId, textType, textValue) {
+        try {
+            const response = await fetch(`/api/translator/projects/${currentProject.id}/segments`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    segment_id: segmentId,
+                    text_type: textType,
+                    text_value: textValue
+                })
+            });
 
-                if (response.ok) {
-                    console.log(`Successfully saved ${textType} text for segment ${segmentId}`);
-                    return true;
-                } else {
-                    console.error('Failed to save segment text:', response.status, response.statusText);
-                    return false;
-                }
-            } catch (error) {
-                console.error('Error saving segment text:', error);
+            if (response.ok) {
+                updateSegmentCache(segmentId, textType, textValue);
+                console.log(`Successfully saved ${textType} text for segment ${segmentId}`);
+                return true;
+            } else {
+                console.error('Failed to save segment text:', response.status, response.statusText);
                 return false;
             }
+        } catch (error) {
+            console.error('Error saving segment text:', error);
+            return false;
         }
+    }
 
         function loadProject(id) {
             fetch(`/api/translator/projects/${id}`)
@@ -640,6 +1139,15 @@
 
         const urlParams = new URLSearchParams(window.location.search);
         const projectId = urlParams.get('id');
+        const viewModeParam = urlParams.get('view') || urlParams.get('mode');
+        if (viewModeParam) {
+            const normalized = viewModeParam.toLowerCase();
+            if (normalized === 'card' || normalized === 'list') {
+                isTimelineView = false;
+            } else if (normalized === 'timeline') {
+                isTimelineView = true;
+            }
+        }
 
         function loadInitialSettings() {
             const cacheBuster = Date.now();
@@ -691,6 +1199,7 @@
                                 textDisplay.textContent = newText;
                                 textDisplay.style.display = '';
                                 textEdit.style.display = 'none';
+                                textEdit.value = newText;
                                 e.target.textContent = '수정';
 
                                 // 저장 시간 표시
@@ -800,6 +1309,29 @@
                         const reverseKoreanTextDisplay = segmentItem.querySelector('.text-row.korean.reverse .text-display');
                         if (reverseKoreanTextDisplay) {
                             reverseKoreanTextDisplay.textContent = result.korean_text;
+                            const reverseTextContent = reverseKoreanTextDisplay.closest('.text-content');
+                            if (reverseTextContent) {
+                                const reverseEdit = reverseTextContent.querySelector('.text-edit');
+                                if (reverseEdit) {
+                                    reverseEdit.value = result.korean_text;
+                                }
+                                const reverseLastModified = reverseTextContent.querySelector('.last-modified');
+                                if (reverseLastModified) {
+                                    const now = new Date();
+                                    const timeString = now.toLocaleString('ko-KR', {
+                                        month: '2-digit',
+                                        day: '2-digit',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        second: '2-digit'
+                                    });
+                                    reverseLastModified.textContent = `마지막 저장: ${timeString}`;
+                                    reverseLastModified.style.color = '#28a745';
+                                    setTimeout(() => {
+                                        reverseLastModified.style.color = '#888';
+                                    }, 3000);
+                                }
+                            }
                         } else {
                             console.error('Cannot find reverse translation text display element');
                         }
@@ -822,12 +1354,36 @@
                 btn.addEventListener('click', (e) => {
                     const segmentId = e.target.dataset.segmentId;
                     const textType = e.target.dataset.type;
+                    const label = TEXT_TYPE_LABELS[textType] || '선택한 내용';
 
-                    if (confirm(`정말로 ${textType === 'source' ? '한국어' : '일본어'} 텍스트를 삭제하시겠습니까?`)) {
+                    if (confirm(`정말로 "${label}" 내용을 삭제하시겠습니까?`)) {
                         updateSegmentText(segmentId, textType, '');
-                        const textDisplay = e.target.closest('.text-content').querySelector('.text-display');
+                        const textContent = e.target.closest('.text-content');
+                        const textDisplay = textContent.querySelector('.text-display');
+                        const textEdit = textContent.querySelector('.text-edit');
+                        const lastModifiedDiv = textContent.querySelector('.last-modified');
                         textDisplay.textContent = '';
+                        if (textEdit) {
+                            textEdit.value = '';
+                        }
+                        if (lastModifiedDiv) {
+                            lastModifiedDiv.textContent = '';
+                        }
                     }
+                });
+            });
+
+            // Delete segment buttons
+            document.querySelectorAll('.btn-delete-segment').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    if (!segmentId) {
+                        return;
+                    }
+                    if (!confirm('이 세그먼트를 삭제하시겠습니까?')) {
+                        return;
+                    }
+                    deleteSegment(segmentId, e.target);
                 });
             });
 
@@ -868,6 +1424,7 @@
             })
             .then(() => {
                 // Update successful
+                updateSegmentCache(segmentId, textType, newText);
                 console.log(`Updated ${textType} for segment ${segmentId}`);
             })
             .catch(err => {
@@ -935,6 +1492,32 @@
                 segments[newIndex] = segmentToMove;
                 segments[currentIndex] = segmentAtTarget;
             });
+        }
+
+        function deleteSegment(segmentId, triggerBtn) {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            if (triggerBtn) {
+                triggerBtn.disabled = true;
+            }
+
+            fetch(`/api/translator/projects/${currentProject.id}/segments/${segmentId}`, {
+                method: 'DELETE'
+            })
+                .then(res => res.ok ? res.json() : res.text().then(text => { throw new Error(text || `HTTP ${res.status}`); }))
+                .then(project => {
+                    renderProject(project);
+                })
+                .catch(err => {
+                    console.error('Failed to delete segment:', err);
+                    alert('세그먼트를 삭제하지 못했습니다: ' + err.message);
+                    if (triggerBtn) {
+                        triggerBtn.disabled = false;
+                    }
+                });
         }
 
         function updateVoiceSynthesisMode() {
@@ -1021,107 +1604,6 @@
             });
         }
 
-        function attachTimeEditListeners() {
-            // Time display click to edit
-            document.querySelectorAll('.time-display').forEach(timeDisplay => {
-                timeDisplay.addEventListener('click', (e) => {
-                    const segmentId = e.currentTarget.dataset.segmentId;
-                    const timeEdit = document.querySelector(`.time-edit[data-segment-id="${segmentId}"]`);
-
-                    // Hide display, show edit
-                    e.currentTarget.style.display = 'none';
-                    timeEdit.style.display = 'block';
-
-                    // Focus on start input
-                    timeEdit.querySelector('.start-input').focus();
-                });
-            });
-
-            // Save time changes
-            document.querySelectorAll('.btn-save-time').forEach(saveBtn => {
-                saveBtn.addEventListener('click', async (e) => {
-                    const segmentId = e.target.dataset.segmentId;
-                    const timeEdit = e.target.closest('.time-edit');
-                    const startInput = timeEdit.querySelector('.start-input');
-                    const endInput = timeEdit.querySelector('.end-input');
-
-                    const newStart = parseFloat(startInput.value);
-                    const newEnd = parseFloat(endInput.value);
-
-                    // Validation
-                    if (newStart >= newEnd) {
-                        alert('시작 시간은 종료 시간보다 작아야 합니다.');
-                        return;
-                    }
-
-                    if (newStart < 0 || newEnd < 0) {
-                        alert('시간은 0보다 크거나 같아야 합니다.');
-                        return;
-                    }
-
-                    // Save to server
-                    try {
-                        const response = await fetch(`/api/translator/projects/${currentProject.id}/segments/timing`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                segment_id: segmentId,
-                                start_time: newStart,
-                                end_time: newEnd
-                            })
-                        });
-
-                        if (response.ok) {
-                            // Update display
-                            const timeDisplay = document.querySelector(`.time-display[data-segment-id="${segmentId}"]`);
-                            const startTime = timeDisplay.querySelector('.start-time');
-                            const endTime = timeDisplay.querySelector('.end-time');
-                            const duration = timeDisplay.querySelector('.time-duration');
-
-                            startTime.textContent = `${Math.floor(newStart / 60)}:${(newStart % 60).toFixed(2).padStart(5, '0')}`;
-                            endTime.textContent = `${Math.floor(newEnd / 60)}:${(newEnd % 60).toFixed(2).padStart(5, '0')}`;
-                            duration.textContent = ` (${(newEnd - newStart).toFixed(1)}초)`;
-
-                            // Hide edit, show display
-                            timeEdit.style.display = 'none';
-                            timeDisplay.style.display = 'block';
-
-                            // Success feedback
-                            saveBtn.textContent = '✓';
-                            setTimeout(() => {
-                                saveBtn.textContent = '저장';
-                            }, 1000);
-                        } else {
-                            alert('시간 저장에 실패했습니다.');
-                        }
-                    } catch (error) {
-                        console.error('Time save error:', error);
-                        alert('시간 저장 중 오류가 발생했습니다.');
-                    }
-                });
-            });
-
-            // Cancel time edit
-            document.querySelectorAll('.btn-cancel-time').forEach(cancelBtn => {
-                cancelBtn.addEventListener('click', (e) => {
-                    const segmentId = e.target.dataset.segmentId;
-                    const timeEdit = e.target.closest('.time-edit');
-                    const timeDisplay = document.querySelector(`.time-display[data-segment-id="${segmentId}"]`);
-
-                    // Reset inputs to original values
-                    const segment = currentProject.segments.find(s => s.id === segmentId);
-                    if (segment) {
-                        timeEdit.querySelector('.start-input').value = segment.start.toFixed(1);
-                        timeEdit.querySelector('.end-input').value = segment.end.toFixed(1);
-                    }
-
-                    // Hide edit, show display
-                    timeEdit.style.display = 'none';
-                    timeDisplay.style.display = 'block';
-                });
-            });
-        }
-
         function showAICommentarySection() {
             const aiCommentarySection = document.getElementById('ai-commentary-section');
             const translationSettingsSection = document.getElementById('translation-settings-section');
@@ -1136,14 +1618,24 @@
             const videoNameElem = document.getElementById('selected-video-name');
             const subtitleNameElem = document.getElementById('selected-subtitle-name');
 
-            if (selectedSource) {
-                videoNameElem.textContent = selectedSource.base_name || '';
-                subtitleNameElem.textContent = selectedSource.subtitle_path ? selectedSource.subtitle_path.split('/').pop() : '자막 없음';
-            } else {
-                // If no selectedSource, show placeholder text
-                videoNameElem.textContent = '프로젝트에서 소스 정보를 가져오는 중...';
-                subtitleNameElem.textContent = '프로젝트에서 소스 정보를 가져오는 중...';
+            const fallbackVideoPath = (selectedSource && selectedSource.video_path) || (currentProject && currentProject.source_video) || null;
+            const fallbackSubtitlePath = (selectedSource && selectedSource.subtitle_path) || (currentProject && currentProject.source_subtitle) || null;
+
+            if (!selectedSource && (fallbackVideoPath || fallbackSubtitlePath) && currentProject) {
+                selectedSource = {
+                    video_path: fallbackVideoPath,
+                    subtitle_path: fallbackSubtitlePath,
+                    base_name: currentProject.base_name,
+                    video_name: extractFileName(fallbackVideoPath),
+                    subtitle_name: extractFileName(fallbackSubtitlePath)
+                };
             }
+
+            const videoLabel = extractFileName(fallbackVideoPath) || (currentProject && currentProject.base_name) || '선택되지 않음';
+            const subtitleLabel = fallbackSubtitlePath ? extractFileName(fallbackSubtitlePath) : '자막 없음';
+
+            videoNameElem.textContent = videoLabel;
+            subtitleNameElem.textContent = subtitleLabel;
 
             // Scroll to AI commentary section with a slight delay for better UX
             setTimeout(() => {
@@ -1314,17 +1806,26 @@
         function attachTimeEditListeners() {
             // Time display click to edit
             document.querySelectorAll('.time-display').forEach(timeDisplay => {
-                timeDisplay.addEventListener('click', (e) => {
-                    const segmentTimeDiv = e.target.closest('.segment-time');
+                timeDisplay.addEventListener('click', () => {
+                    const segmentTimeDiv = timeDisplay.closest('.segment-time');
+                    if (!segmentTimeDiv) {
+                        return;
+                    }
                     const timeEdit = segmentTimeDiv.querySelector('.time-edit');
+                    if (!timeEdit) {
+                        return;
+                    }
 
                     // Hide display, show edit
-                    e.target.style.display = 'none';
-                    timeEdit.style.display = 'inline-block';
+                    timeDisplay.style.display = 'none';
+                    timeEdit.style.display = 'flex';
 
                     // Focus on first input
-                    timeEdit.querySelector('.start-input').focus();
-                    timeEdit.querySelector('.start-input').select();
+                    const startInput = timeEdit.querySelector('.start-input');
+                    if (startInput) {
+                        startInput.focus();
+                        startInput.select();
+                    }
                 });
             });
 
@@ -1335,6 +1836,10 @@
                     const segmentId = segmentTimeDiv.dataset.segmentId;
                     const timeDisplay = segmentTimeDiv.querySelector('.time-display');
                     const timeEdit = segmentTimeDiv.querySelector('.time-edit');
+                    if (!timeDisplay || !timeEdit) {
+                        return;
+                    }
+
                     const startInput = timeEdit.querySelector('.start-input');
                     const endInput = timeEdit.querySelector('.end-input');
 
@@ -1342,6 +1847,11 @@
                     const endTime = parseFloat(endInput.value);
 
                     // Validation
+                    if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
+                        alert('시간 형식이 올바르지 않습니다.');
+                        return;
+                    }
+
                     if (startTime >= endTime) {
                         alert('시작 시간은 종료 시간보다 작아야 합니다.');
                         return;
@@ -1353,8 +1863,9 @@
                     }
 
                     // Save to server
-                    e.target.disabled = true;
-                    e.target.textContent = '저장중...';
+                    btn.disabled = true;
+                    const originalText = btn.textContent;
+                    btn.textContent = '저장 중...';
 
                     try {
                         const response = await fetch(`/api/translator/projects/${currentProject.id}/segments/time`, {
@@ -1369,16 +1880,29 @@
 
                         if (response.ok) {
                             // Update display
-                            timeDisplay.textContent = `${startTime.toFixed(2)} - ${endTime.toFixed(2)}`;
+                            const startLabel = timeDisplay.querySelector('.start-time');
+                            const endLabel = timeDisplay.querySelector('.end-time');
+                            const durationLabel = timeDisplay.querySelector('.time-duration');
+
+                            if (startLabel) {
+                                startLabel.textContent = formatTimestamp(startTime);
+                            }
+                            if (endLabel) {
+                                endLabel.textContent = formatTimestamp(endTime);
+                            }
+                            if (durationLabel) {
+                                durationLabel.textContent = `(${Math.max(endTime - startTime, 0).toFixed(1)}초)`;
+                            }
+
                             timeEdit.style.display = 'none';
-                            timeDisplay.style.display = 'inline';
+                            timeDisplay.style.display = 'flex';
 
                             // Success feedback
-                            e.target.textContent = '✓';
-                            e.target.style.background = '#28a745';
+                            btn.textContent = '✓';
+                            btn.style.background = '#28a745';
                             setTimeout(() => {
-                                e.target.textContent = '저장';
-                                e.target.style.background = '';
+                                btn.textContent = originalText || '저장';
+                                btn.style.background = '';
                             }, 1500);
                         } else {
                             throw new Error('서버 저장 실패');
@@ -1387,8 +1911,10 @@
                         console.error('Time save error:', error);
                         alert('시간 저장에 실패했습니다.');
                     } finally {
-                        e.target.disabled = false;
-                        e.target.textContent = '저장';
+                        btn.disabled = false;
+                        if (btn.textContent === '저장 중...') {
+                            btn.textContent = originalText || '저장';
+                        }
                     }
                 });
             });
@@ -1410,10 +1936,45 @@
 
                     // Hide edit, show display
                     timeEdit.style.display = 'none';
-                    timeDisplay.style.display = 'inline';
+                    timeDisplay.style.display = 'flex';
                 });
             });
         }
+
+        if (openSourceSelectorBtn) {
+            openSourceSelectorBtn.addEventListener('click', openSourceSelectorModal);
+        }
+        if (sourceSelectorCloseBtn) {
+            sourceSelectorCloseBtn.addEventListener('click', closeSourceSelectorModal);
+        }
+        if (sourceSelectorCancelBtn) {
+            sourceSelectorCancelBtn.addEventListener('click', closeSourceSelectorModal);
+        }
+        if (sourceSelectorApplyBtn) {
+            sourceSelectorApplyBtn.addEventListener('click', applySourceSelection);
+        }
+        if (sourceSelectorModal) {
+            sourceSelectorModal.addEventListener('click', (event) => {
+                if (event.target === sourceSelectorModal) {
+                    closeSourceSelectorModal();
+                }
+            });
+        }
+        if (sourceSelectorTabs) {
+            sourceSelectorTabs.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const mode = tab.dataset.mode;
+                    if (mode) {
+                        switchSourceSelectorMode(mode);
+                    }
+                });
+            });
+        }
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && sourceSelectorModal && !sourceSelectorModal.classList.contains('hidden')) {
+                closeSourceSelectorModal();
+            }
+        });
 
         // Add event listeners for AI commentary buttons
         document.getElementById('generate-commentary-btn').addEventListener('click', generateAICommentary);

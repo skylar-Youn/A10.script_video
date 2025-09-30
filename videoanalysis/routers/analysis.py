@@ -21,6 +21,11 @@ from ..services.speaker_recognition import SpeakerRecognition
 from ..services.audio_speaker_recognition import AudioSpeakerRecognition
 from ..services.simple_audio_speaker_recognition import SimpleAudioSpeakerRecognition
 from ..services.ai_reinterpretation import reinterpret_subtitles as ai_reinterpret_subtitles
+from ai_shorts_maker.translator import (
+    list_projects as translator_list_projects,
+    create_project as translator_create_project,
+    TranslatorProjectCreate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -716,6 +721,68 @@ async def reinterpret_subtitles(request: dict = Body(...)):
         logger.exception("재해석 처리 실패: %s", exc)
         detail_message = str(exc).strip() or "재해석 중 오류가 발생했습니다"
         raise HTTPException(status_code=500, detail=detail_message)
+
+
+@router.get("/analysis/translator-projects")
+def list_translator_projects():
+    """번역 프로젝트 목록을 반환"""
+    try:
+        projects = translator_list_projects()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("번역 프로젝트 목록 조회 실패: %s", exc)
+        raise HTTPException(status_code=500, detail="번역 프로젝트 목록을 불러오지 못했습니다") from exc
+
+    payload = []
+    for project in projects:
+        try:
+            payload.append({
+                "id": project.id,
+                "base_name": project.base_name,
+                "source_video": project.source_video,
+                "source_subtitle": project.source_subtitle,
+                "status": project.status,
+                "target_lang": project.target_lang,
+                "translation_mode": project.translation_mode,
+                "tone_hint": project.tone_hint,
+                "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+            })
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("번역 프로젝트 직렬화 실패 (%s): %s", getattr(project, 'id', 'unknown'), exc)
+
+    return {"projects": payload}
+
+
+@router.post("/analysis/translator-projects", status_code=201)
+def create_translator_project(payload: dict = Body(...)):
+    """선택한 영상/자막으로 번역 프로젝트 생성"""
+    source_video = payload.get("source_video")
+    source_subtitle = payload.get("source_subtitle")
+    target_lang = payload.get("target_lang") or "ja"
+    translation_mode = payload.get("translation_mode") or "reinterpret"
+    tone_hint = payload.get("tone_hint")
+
+    if not source_video:
+        raise HTTPException(status_code=400, detail="source_video 값이 필요합니다")
+
+    try:
+        request_model = TranslatorProjectCreate(
+            source_video=source_video,
+            source_subtitle=source_subtitle,
+            target_lang=target_lang,
+            translation_mode=translation_mode,
+            tone_hint=tone_hint,
+        )
+
+        project = translator_create_project(request_model)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("번역 프로젝트 생성 실패: %s", exc)
+        raise HTTPException(status_code=500, detail="번역 프로젝트를 생성하지 못했습니다") from exc
+
+    return {"project": project.model_dump(mode='json', exclude_none=False)}
 
 
 @router.get("/analysis/saved-results")

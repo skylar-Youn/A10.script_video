@@ -75,8 +75,11 @@ from ai_shorts_maker.translator import (
     render_translated_project,
     list_translation_versions,
     load_translation_version,
+    apply_saved_result_to_project,
+    delete_project_segment,
     UPLOADS_DIR,
 )
+from videoanalysis.config import SAVED_RESULTS_DIR
 from youtube.ytdl import download_with_options, parse_sub_langs
 
 
@@ -549,6 +552,76 @@ async def api_reorder_segments(project_id: str, payload: Dict[str, Any] = Body(.
     except Exception as exc:
         logger.exception("Failed to reorder segments for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/apply-saved-result", response_model=TranslatorProject)
+async def api_apply_saved_result(project_id: str, payload: Dict[str, Any] = Body(...)) -> TranslatorProject:
+    saved_result = payload.get("saved_result")
+    if not isinstance(saved_result, dict):
+        raise HTTPException(status_code=400, detail="saved_result 데이터가 필요합니다")
+
+    try:
+        project = await run_in_threadpool(apply_saved_result_to_project, project_id, saved_result)
+        return project
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to apply saved result to project %s", project_id)
+        raise HTTPException(status_code=500, detail="재해석 결과를 적용하지 못했습니다") from exc
+
+
+@translator_router.delete("/projects/{project_id}/segments/{segment_id}", response_model=TranslatorProject)
+async def api_delete_segment(project_id: str, segment_id: str) -> TranslatorProject:
+    try:
+        project = await run_in_threadpool(delete_project_segment, project_id, segment_id)
+        return project
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to delete segment %s for project %s", segment_id, project_id)
+        raise HTTPException(status_code=500, detail="세그먼트를 삭제하지 못했습니다") from exc
+
+
+@translator_router.get("/saved-results")
+def api_list_saved_results() -> Dict[str, Any]:
+    entries: List[Dict[str, Any]] = []
+    for path in sorted(SAVED_RESULTS_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Failed to read saved result %s: %s", path, exc)
+            continue
+
+        entries.append({
+            "id": path.stem,
+            "name": data.get("name"),
+            "saved_at": data.get("saved_at"),
+        })
+
+    return {"results": entries}
+
+
+@translator_router.get("/saved-results/{result_id}")
+def api_get_saved_result(result_id: str) -> Dict[str, Any]:
+    safe_id = ''.join(ch for ch in result_id if ch.isalnum() or ch in {'-', '_'})
+    if not safe_id:
+        raise HTTPException(status_code=400, detail="잘못된 저장본 ID 입니다")
+
+    path = SAVED_RESULTS_DIR / f"{safe_id}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="저장본을 찾을 수 없습니다")
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to load saved result %s", path)
+        raise HTTPException(status_code=500, detail="저장본을 불러오지 못했습니다") from exc
+
+    return {"result": data}
 
 
 @translator_router.post("/projects/{project_id}/reset-to-translated")
