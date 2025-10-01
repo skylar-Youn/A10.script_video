@@ -1554,13 +1554,15 @@ def translate_selected_segments(
 
     # 각 세그먼트 번역
     for idx, segment in enumerate(segments_to_translate):
-        if not segment.source_text:
+        # 번역할 텍스트: 재해석 자막 우선, 없으면 원본 자막
+        text_to_translate = segment.commentary_korean or segment.source_text
+        if not text_to_translate:
             continue
 
         try:
             # 번역 실행
             translated = translate_text(
-                segment.source_text,
+                text_to_translate,
                 target_lang=target_lang,
                 translation_mode=translation_mode,
                 tone_hint=tone_hint
