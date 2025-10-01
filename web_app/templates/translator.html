@@ -1748,7 +1748,7 @@
         }
 
         const urlParams = new URLSearchParams(window.location.search);
-        const projectId = urlParams.get('id');
+        const projectId = urlParams.get('id') || urlParams.get('project');
         const viewModeParam = urlParams.get('view') || urlParams.get('mode');
         if (viewModeParam) {
             const normalized = viewModeParam.toLowerCase();
