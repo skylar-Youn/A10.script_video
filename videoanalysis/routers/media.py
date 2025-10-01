@@ -90,3 +90,163 @@ async def extract_audio_from_video_api(request: dict = Body(...)):
     except Exception as e:
         logger.exception(f"배치 음성 추출 에러: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cut-audio-ranges")
+async def cut_audio_ranges_api(request: dict = Body(...)):
+    """음성 파일에서 특정 시간 구간들을 무음으로 대체 (원본 길이 유지)"""
+    try:
+        audio_path = request.get("audio_path")
+        time_ranges = request.get("time_ranges", [])
+
+        if not audio_path:
+            raise HTTPException(status_code=400, detail="audio_path is required")
+
+        if not time_ranges:
+            raise HTTPException(status_code=400, detail="time_ranges is required")
+
+        if not os.path.exists(audio_path):
+            raise HTTPException(status_code=404, detail=f"Audio file not found: {audio_path}")
+
+        # 출력 파일 경로 생성 (_muted 접미사 추가)
+        audio_path_obj = Path(audio_path)
+        output_path = str(audio_path_obj.parent / f"{audio_path_obj.stem}_muted{audio_path_obj.suffix}")
+
+        # FFmpeg 명령어 생성
+        import subprocess
+        import tempfile
+
+        # 시간 구간을 정렬
+        sorted_ranges = sorted(time_ranges, key=lambda x: x['start'])
+
+        logger.info(f"Muting {len(sorted_ranges)} ranges from audio")
+        logger.info(f"Time ranges to mute: {sorted_ranges}")
+
+        # 원본 파일 길이 확인
+        probe_input_cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            audio_path
+        ]
+
+        input_duration_result = subprocess.run(probe_input_cmd, capture_output=True, text=True)
+        input_duration = float(input_duration_result.stdout.strip()) if input_duration_result.stdout.strip() else 0
+
+        logger.info(f"Original audio duration: {input_duration}s")
+
+        # volume 필터를 사용하되, 원본 전체를 처리하도록 명시
+        # 각 구간마다 volume을 0으로 설정
+        filter_parts = []
+        for i, time_range in enumerate(sorted_ranges):
+            start = time_range['start']
+            end = time_range['end']
+            # between 함수로 정확한 구간 지정 (시간 범위 내에서만 volume=0)
+            filter_parts.append(f"volume=enable='between(t,{start},{end})':volume=0")
+
+        # 필터를 순서대로 적용
+        filter_complex = ','.join(filter_parts)
+
+        logger.info(f"Filter chain: {filter_complex}")
+
+        # 원본 파일 포맷 확인
+        probe_format_cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'stream=codec_name',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            audio_path
+        ]
+
+        format_result = subprocess.run(probe_format_cmd, capture_output=True, text=True)
+        original_codec = format_result.stdout.strip()
+
+        logger.info(f"Original codec: {original_codec}")
+
+        # 원본이 WAV(PCM)이면 WAV로, 아니면 AAC로 인코딩
+        if 'pcm' in original_codec.lower() or audio_path.lower().endswith('.wav'):
+            # WAV 출력
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', audio_path,
+                '-af', filter_complex,
+                '-t', str(input_duration),  # 원본 길이 유지
+                '-c:a', 'pcm_s16le',  # WAV 포맷
+                '-ar', '48000',
+                output_path
+            ]
+        else:
+            # AAC 출력
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', audio_path,
+                '-af', filter_complex,
+                '-t', str(input_duration),  # 원본 길이 유지
+                '-c:a', 'aac',
+                '-b:a', '256k',
+                '-ar', '48000',
+                '-ac', '2',
+                output_path
+            ]
+
+        logger.info(f"Running FFmpeg command: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5분 타임아웃
+        )
+
+        if result.returncode != 0:
+            logger.error(f"FFmpeg error: {result.stderr}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"FFmpeg failed: {result.stderr[:500]}"
+            )
+
+        # 출력 파일 확인
+        if not os.path.exists(output_path):
+            raise HTTPException(
+                status_code=500,
+                detail="Output file was not created"
+            )
+
+        # 원본과 결과 파일의 길이 확인
+        probe_duration_cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            output_path
+        ]
+
+        duration_result = subprocess.run(probe_duration_cmd, capture_output=True, text=True)
+        output_duration = float(duration_result.stdout.strip()) if duration_result.stdout.strip() else 0
+
+        # 원본 파일 길이도 확인
+        probe_input_cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            audio_path
+        ]
+
+        input_duration_result = subprocess.run(probe_input_cmd, capture_output=True, text=True)
+        input_duration = float(input_duration_result.stdout.strip()) if input_duration_result.stdout.strip() else 0
+
+        logger.info(f"Original duration: {input_duration}s, Output duration: {output_duration}s")
+
+        return {
+            "status": "success",
+            "input_path": audio_path,
+            "output_path": output_path,
+            "ranges_cut": len(time_ranges),
+            "input_duration": input_duration,
+            "output_duration": output_duration
+        }
+
+    except subprocess.TimeoutExpired:
+        logger.error("FFmpeg timeout")
+        raise HTTPException(status_code=500, detail="Processing timeout")
+    except Exception as e:
+        logger.exception(f"Audio cutting error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

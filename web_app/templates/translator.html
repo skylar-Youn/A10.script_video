@@ -171,6 +171,8 @@
         let bulkTargetLangSelect = null;
         let bulkTranslateBtn = null;
         let bulkReverseBtn = null;
+        let voiceSelectElem = null;
+        let audioFormatSelectElem = null;
 
         if (openSourceSelectorBtn) {
             openSourceSelectorBtn.style.display = 'none';
@@ -208,6 +210,14 @@
                 .replace(/'/g, '&#39;');
         }
 
+        function getSelectedVoice() {
+            return voiceSelectElem && voiceSelectElem.value ? voiceSelectElem.value : 'nova';
+        }
+
+        function getSelectedAudioFormat() {
+            return audioFormatSelectElem && audioFormatSelectElem.value ? audioFormatSelectElem.value : 'wav';
+        }
+
         function updateSegmentCache(segmentId, textType, value) {
             if (!currentProject) {
                 return;
@@ -240,6 +250,28 @@
                             <button class="btn-delete-text" data-type="${type}" data-segment-id="${segmentId}" title="${label} 삭제">삭제</button>
                         </div>
                         <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function buildAudioRow({ segmentId, audioPath, showLabel = true }) {
+            const labelAttr = showLabel ? '' : ' class="hidden-label"';
+            const extraRowClass = showLabel ? '' : ' no-label';
+            const hasAudio = audioPath && audioPath.trim() !== '';
+            const audioFileName = hasAudio ? extractFileName(audioPath) : '음성 파일 없음';
+
+            return `
+                <div class="text-row audio-row${extraRowClass}">
+                    <label${labelAttr}>일본어 음성 파일</label>
+                    <div class="audio-content" data-segment-id="${segmentId}">
+                        <span class="audio-display">${escapeHtml(audioFileName)}</span>
+                        <div class="audio-buttons">
+                            ${hasAudio ? `
+                                <button class="btn-play-audio" data-segment-id="${segmentId}" data-audio-path="${escapeHtml(audioPath)}" title="음성 듣기">▶️ 듣기</button>
+                            ` : ''}
+                            <button class="btn-generate-audio" data-segment-id="${segmentId}" title="음성 생성">🔊 생성</button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -331,6 +363,11 @@
                         extraButtons: `<button class="btn-translate-reverse" data-segment-id="${seg.id}" title="일본어→한국어 역번역">역번역</button>`,
                         showLabel: true
                     });
+                    const audioRow = buildAudioRow({
+                        segmentId: seg.id,
+                        audioPath: seg.audio_path || '',
+                        showLabel: true
+                    });
                     const reverseRow = buildTextRow({
                         segmentId: seg.id,
                         label: TEXT_TYPE_LABELS.reverse_translated,
@@ -362,6 +399,7 @@
                             ${sourceRow}
                             ${reinterpretRow}
                             ${japaneseRow}
+                            ${audioRow}
                             ${reverseRow}
                         </div>
                     </div>
@@ -740,12 +778,70 @@
                     <button type="button" class="btn-success btn-sm" id="save-selected-btn">체크 다른이름 저장</button>
                     <button type="button" class="btn-danger btn-sm" id="delete-unselected-btn">미선택 화자 전체 삭제</button>
                 </div>
+                <div class="audio-actions" style="margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                    <label for="voice-select" style="margin: 0; font-weight: bold;">음성:</label>
+                    <select id="voice-select" class="form-control form-control-sm" style="width: auto; min-width: 90px;">
+                        <option value="nova">nova</option>
+                        <option value="alloy">alloy</option>
+                        <option value="echo">echo</option>
+                        <option value="fable">fable</option>
+                        <option value="onyx">onyx</option>
+                        <option value="shimmer">shimmer</option>
+                    </select>
+                    <label for="audio-format-select" style="margin: 0; font-weight: bold;">포맷:</label>
+                    <select id="audio-format-select" class="form-control form-control-sm" style="width: auto; min-width: 75px;">
+                        <option value="wav" selected>WAV</option>
+                        <option value="mp3">MP3</option>
+                    </select>
+                    <button type="button" class="btn-primary btn-sm" id="generate-selected-audio-btn">🔊 선택 자막 음성 생성</button>
+                    <button type="button" class="btn-primary btn-sm" id="generate-all-audio-btn">🔊 전체 음성 생성</button>
+                    <button type="button" class="btn-sm" id="play-all-audio-btn" style="background-color: #e0e0e0; color: #000; border: 1px solid #ccc;">▶️ 전체 듣기</button>
+                    <button type="button" class="btn-success btn-sm" id="save-all-audio-btn">💾 전체 음성 저장</button>
+                </div>
             `;
 
             selectionCountElem = container.querySelector('#selected-count');
             bulkTargetLangSelect = container.querySelector('#bulk-target-lang');
             bulkTranslateBtn = container.querySelector('#bulk-translate-btn');
             bulkReverseBtn = container.querySelector('#bulk-reverse-btn');
+            voiceSelectElem = container.querySelector('#voice-select');
+            audioFormatSelectElem = container.querySelector('#audio-format-select');
+
+            if (voiceSelectElem) {
+                try {
+                    const savedVoice = localStorage.getItem('translatorVoiceChoice');
+                    if (savedVoice && Array.from(voiceSelectElem.options).some(opt => opt.value === savedVoice)) {
+                        voiceSelectElem.value = savedVoice;
+                    }
+                } catch (error) {
+                    console.warn('음성 선택 저장을 위한 localStorage 접근 실패:', error);
+                }
+                voiceSelectElem.addEventListener('change', () => {
+                    try {
+                        localStorage.setItem('translatorVoiceChoice', voiceSelectElem.value);
+                    } catch (error) {
+                        console.warn('음성 선택 저장 실패:', error);
+                    }
+                });
+            }
+
+            if (audioFormatSelectElem) {
+                try {
+                    const savedFormat = localStorage.getItem('translatorAudioFormat');
+                    if (savedFormat && Array.from(audioFormatSelectElem.options).some(opt => opt.value === savedFormat)) {
+                        audioFormatSelectElem.value = savedFormat;
+                    }
+                } catch (error) {
+                    console.warn('오디오 포맷 선택 저장을 위한 localStorage 접근 실패:', error);
+                }
+                audioFormatSelectElem.addEventListener('change', () => {
+                    try {
+                        localStorage.setItem('translatorAudioFormat', audioFormatSelectElem.value);
+                    } catch (error) {
+                        console.warn('오디오 포맷 선택 저장 실패:', error);
+                    }
+                });
+            }
 
             const selectAllBtn = container.querySelector('#select-all-btn');
             const clearSelectionBtn = container.querySelector('#clear-selection-btn');
@@ -763,6 +859,10 @@
 
             const saveSelectedBtn = container.querySelector('#save-selected-btn');
             const deleteUnselectedBtn = container.querySelector('#delete-unselected-btn');
+            const generateSelectedAudioBtn = container.querySelector('#generate-selected-audio-btn');
+            const generateAllAudioBtn = container.querySelector('#generate-all-audio-btn');
+            const playAllAudioBtn = container.querySelector('#play-all-audio-btn');
+            const saveAllAudioBtn = container.querySelector('#save-all-audio-btn');
 
             if (bulkTranslateBtn) {
                 bulkTranslateBtn.addEventListener('click', bulkTranslateSelectedSegments);
@@ -775,6 +875,18 @@
             }
             if (deleteUnselectedBtn) {
                 deleteUnselectedBtn.addEventListener('click', deleteUnselectedSegments);
+            }
+            if (generateSelectedAudioBtn) {
+                generateSelectedAudioBtn.addEventListener('click', generateSelectedAudio);
+            }
+            if (generateAllAudioBtn) {
+                generateAllAudioBtn.addEventListener('click', generateAllAudio);
+            }
+            if (playAllAudioBtn) {
+                playAllAudioBtn.addEventListener('click', playAllAudio);
+            }
+            if (saveAllAudioBtn) {
+                saveAllAudioBtn.addEventListener('click', saveAllAudio);
             }
 
             return container;
@@ -963,6 +1075,125 @@
                         bulkReverseBtn.textContent = bulkReverseBtn.dataset.originalText || '선택 역번역 (한국어)';
                     }
                 });
+        }
+
+        async function generateSelectedAudio() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const segmentIds = selectedSegmentIds.size
+                ? Array.from(selectedSegmentIds)
+                : [];
+
+            if (!segmentIds.length) {
+                alert('선택된 세그먼트가 없습니다. 세그먼트를 선택해주세요.');
+                return;
+            }
+
+            const voice = getSelectedVoice();
+            const audioFormat = getSelectedAudioFormat();
+
+            if (!confirm(`선택된 ${segmentIds.length}개 세그먼트를 ${voice} / ${audioFormat.toUpperCase()}로 생성하시겠습니까? (자막 시간에 맞춰 무음이 포함됩니다)`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/generate-selected-audio`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        segment_ids: segmentIds,
+                        voice: voice,
+                        audio_format: audioFormat
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                alert(`선택된 자막 음성 생성 완료!\n파일 경로: ${result.audio_path}`);
+            } catch (err) {
+                console.error('Failed to generate selected audio:', err);
+                alert('선택된 자막 음성 생성에 실패했습니다: ' + err.message);
+            }
+        }
+
+        async function generateAllAudio() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const voice = getSelectedVoice();
+            const audioFormat = getSelectedAudioFormat();
+
+            if (!confirm(`모든 세그먼트를 ${voice} / ${audioFormat.toUpperCase()}로 생성하시겠습니까?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/generate-all-audio`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        voice: voice,
+                        audio_format: audioFormat
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const project = await response.json();
+                currentProject = project;
+                renderProject(project);
+                alert('전체 음성 생성 완료!');
+            } catch (err) {
+                console.error('Failed to generate all audio:', err);
+                alert('전체 음성 생성에 실패했습니다: ' + err.message);
+            }
+        }
+
+        function playAllAudio() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const audioSegments = currentProject.segments.filter(seg => seg.audio_path);
+            if (audioSegments.length === 0) {
+                alert('생성된 음성 파일이 없습니다.');
+                return;
+            }
+
+            // 모든 음성 파일을 순차적으로 재생
+            let currentIndex = 0;
+            const audio = new Audio();
+
+            audio.onended = () => {
+                currentIndex++;
+                if (currentIndex < audioSegments.length) {
+                    audio.src = audioSegments[currentIndex].audio_path;
+                    audio.play();
+                }
+            };
+
+            audio.src = audioSegments[currentIndex].audio_path;
+            audio.play();
+        }
+
+        function saveAllAudio() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            alert('전체 음성 저장 기능은 백엔드에서 구현되어야 합니다. 현재는 개별 세그먼트 음성 파일이 이미 저장되어 있습니다.');
         }
 
         function syncSelectionWithProject() {
@@ -2054,6 +2285,66 @@
                 btn.addEventListener('click', (e) => {
                     const segmentId = e.target.dataset.segmentId;
                     moveSegment(segmentId, 'down');
+                });
+            });
+
+            // Play audio buttons
+            document.querySelectorAll('.btn-play-audio').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const audioPath = e.target.dataset.audioPath;
+                    if (!audioPath) {
+                        alert('음성 파일 경로가 없습니다.');
+                        return;
+                    }
+                    const audio = new Audio(audioPath);
+                    audio.play().catch(err => {
+                        console.error('Failed to play audio:', err);
+                        alert('음성 재생에 실패했습니다: ' + err.message);
+                    });
+                });
+            });
+
+            // Generate audio buttons
+            document.querySelectorAll('.btn-generate-audio').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    if (!segmentId) {
+                        return;
+                    }
+
+                    const voice = getSelectedVoice();
+                    const audioFormat = getSelectedAudioFormat();
+
+                    e.target.disabled = true;
+                    const originalText = e.target.textContent;
+                    e.target.textContent = '생성 중...';
+
+                    try {
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/generate-audio`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                segment_id: segmentId,
+                                voice: voice,
+                                audio_format: audioFormat
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+
+                        const project = await response.json();
+                        currentProject = project;
+                        renderProject(project);
+                        alert('음성 생성 완료!');
+                    } catch (err) {
+                        console.error('Failed to generate audio:', err);
+                        alert('음성 생성에 실패했습니다: ' + err.message);
+                    } finally {
+                        e.target.disabled = false;
+                        e.target.textContent = originalText;
+                    }
                 });
             });
         }

@@ -37,6 +37,7 @@ class TranslatorSegment(BaseModel):
     commentary_japanese: Optional[str] = None  # 해설 일본어
     commentary_reverse_korean: Optional[str] = None  # 해설 역번역 한국어
     speaker_name: Optional[str] = None  # 화자 표시
+    audio_path: Optional[str] = None  # 일본어 음성 파일 경로
 
 
 class TranslatorProject(BaseModel):
@@ -1554,50 +1555,72 @@ def translate_selected_segments(
 
     # 각 세그먼트 번역
     for idx, segment in enumerate(segments_to_translate):
-        # 번역할 텍스트: 재해석 자막 우선, 없으면 원본 자막
-        text_to_translate = segment.commentary_korean or segment.source_text
-        if not text_to_translate:
-            continue
+        # 역번역 모드 (일본어 → 한국어)
+        if target_lang == "ko":
+            # 역번역: translated_text (일본어)를 읽어서 reverse_translated_text (한국어)에 저장
+            text_to_translate = segment.translated_text
+            if not text_to_translate:
+                continue
 
-        try:
-            # 번역 실행
-            translated = translate_text(
-                text_to_translate,
-                target_lang=target_lang,
-                translation_mode=translation_mode,
-                tone_hint=tone_hint
-            )
-            segment.translated_text = translated
-
-            # 역번역 실행 (일본어인 경우)
-            if target_lang == "ja" and translated:
+            try:
+                # 역번역 실행
                 reverse_translated = translate_text(
-                    translated,
+                    text_to_translate,
                     target_lang="ko",
-                    translation_mode="literal",
-                    tone_hint=None
+                    translation_mode=translation_mode,
+                    tone_hint=tone_hint
                 )
                 segment.reverse_translated_text = reverse_translated
 
-            completed_count += 1
+                completed_count += 1
+            except Exception as e:
+                logger.error("Failed to reverse translate segment %s: %s", segment.id, e)
+                continue
+        else:
+            # 정방향 번역 (한국어 → 일본어 등)
+            # 번역할 텍스트: 재해석 자막 우선, 없으면 원본 자막
+            text_to_translate = segment.commentary_korean or segment.source_text
+            if not text_to_translate:
+                continue
 
-            # 진행률 업데이트
-            progress = int((completed_count / total_count) * 100)
-            project.extra["translation_progress"] = {
-                "total": total_count,
-                "completed": completed_count,
-                "percentage": progress,
-                "status": "translating"
-            }
-            save_project(project)
+            try:
+                # 번역 실행
+                translated = translate_text(
+                    text_to_translate,
+                    target_lang=target_lang,
+                    translation_mode=translation_mode,
+                    tone_hint=tone_hint
+                )
+                segment.translated_text = translated
 
-            # 진행률 콜백 호출
-            if progress_callback:
-                progress_callback(progress, completed_count, total_count)
+                # 자동 역번역 실행 (일본어인 경우)
+                if target_lang == "ja" and translated:
+                    reverse_translated = translate_text(
+                        translated,
+                        target_lang="ko",
+                        translation_mode="literal",
+                        tone_hint=None
+                    )
+                    segment.reverse_translated_text = reverse_translated
 
-        except Exception as e:
-            logger.error("Failed to translate segment %s: %s", segment.id, e)
-            continue
+                completed_count += 1
+            except Exception as e:
+                logger.error("Failed to translate segment %s: %s", segment.id, e)
+                continue
+
+        # 진행률 업데이트
+        progress = int((completed_count / total_count) * 100)
+        project.extra["translation_progress"] = {
+            "total": total_count,
+            "completed": completed_count,
+            "percentage": progress,
+            "status": "translating"
+        }
+        save_project(project)
+
+        # 진행률 콜백 호출
+        if progress_callback:
+            progress_callback(progress, completed_count, total_count)
 
     # 번역 완료 상태로 변경
     project.extra["translation_progress"] = {
@@ -1755,6 +1778,219 @@ def clone_translator_project(project_id: str) -> TranslatorProject:
     return save_project(cloned_project)
 
 
+SUPPORTED_TTS_AUDIO_FORMATS = {"mp3", "wav"}
+
+
+def _normalize_audio_format(audio_format: str) -> str:
+    normalized = (audio_format or "wav").lower()
+    if normalized not in SUPPORTED_TTS_AUDIO_FORMATS:
+        raise ValueError(f"지원하지 않는 오디오 포맷입니다: {audio_format}")
+    return normalized
+
+
+def generate_segment_audio(
+    project_id: str,
+    segment_id: str,
+    voice: str = "nova",
+    audio_format: str = "wav",
+) -> TranslatorProject:
+    """개별 세그먼트에 대해 일본어 음성 파일을 생성합니다."""
+    project = load_project(project_id)
+
+    # Find the segment
+    segment = None
+    for seg in project.segments:
+        if seg.id == segment_id:
+            segment = seg
+            break
+
+    if not segment:
+        raise ValueError(f"Segment {segment_id} not found in project {project_id}")
+
+    if not segment.translated_text:
+        raise ValueError(f"Segment {segment_id} has no translated text")
+
+    try:
+        from .openai_client import OpenAIShortsClient
+
+        client = OpenAIShortsClient()
+
+        # Create audio directory
+        audio_dir = TRANSLATOR_DIR / project_id / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        normalized_format = _normalize_audio_format(audio_format)
+
+        # Generate audio filename
+        audio_filename = f"segment_{segment.clip_index}_{segment_id[:8]}.{normalized_format}"
+        audio_path = audio_dir / audio_filename
+
+        # Generate TTS audio
+        client.synthesize_voice(
+            text=segment.translated_text,
+            voice=voice,
+            output_path=audio_path,
+            audio_format=normalized_format,
+        )
+
+        # Update segment with audio path
+        segment.audio_path = str(audio_path)
+
+        logger.info(f"Generated audio for segment {segment_id}: {audio_path}")
+        return save_project(project)
+
+    except Exception as e:
+        logger.exception(f"Failed to generate audio for segment {segment_id}")
+        raise e
+
+
+def generate_selected_audio_with_silence(
+    project_id: str,
+    segment_ids: List[str],
+    voice: str = "nova",
+    audio_format: str = "wav",
+) -> str:
+    """선택된 세그먼트들의 음성을 생성하고, 자막 시간에 맞춰 무음을 포함한 음성 파일을 생성합니다.
+
+    Returns:
+        생성된 음성 파일의 경로
+    """
+    import subprocess
+    from pydub import AudioSegment
+    from pydub.generators import Sine
+
+    project = load_project(project_id)
+
+    # 선택된 세그먼트만 필터링
+    selected_segments = [seg for seg in project.segments if seg.id in segment_ids]
+    if not selected_segments:
+        raise ValueError("선택된 세그먼트가 없습니다.")
+
+    # 시간순으로 정렬
+    selected_segments.sort(key=lambda seg: seg.start)
+
+    try:
+        from .openai_client import OpenAIShortsClient
+
+        client = OpenAIShortsClient()
+
+        # Create audio directory
+        audio_dir = TRANSLATOR_DIR / project_id / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        normalized_format = _normalize_audio_format(audio_format)
+
+        # 전체 오디오 트랙 생성
+        combined_audio = AudioSegment.silent(duration=0)
+        current_time = 0.0
+
+        for segment in selected_segments:
+            if not segment.translated_text:
+                logger.warning(f"Segment {segment.id} has no translated text, skipping")
+                continue
+
+            # 세그먼트 시작 시간까지 무음 추가
+            if segment.start > current_time:
+                silence_duration = int((segment.start - current_time) * 1000)  # ms
+                combined_audio += AudioSegment.silent(duration=silence_duration)
+                current_time = segment.start
+
+            # TTS 음성 생성
+            temp_audio_path = audio_dir / f"temp_{segment.id[:8]}.{normalized_format}"
+            client.synthesize_voice(
+                text=segment.translated_text,
+                voice=voice,
+                output_path=temp_audio_path,
+                audio_format=normalized_format,
+            )
+
+            # 생성된 음성 로드
+            audio_segment = AudioSegment.from_file(
+                str(temp_audio_path),
+                format=normalized_format,
+            )
+
+            # 자막 기간에 맞춰 조정
+            subtitle_duration = int((segment.end - segment.start) * 1000)  # ms
+            audio_duration = len(audio_segment)
+
+            if audio_duration < subtitle_duration:
+                # 음성이 자막보다 짧으면 뒤에 무음 추가
+                padding = AudioSegment.silent(duration=subtitle_duration - audio_duration)
+                audio_segment = audio_segment + padding
+            elif audio_duration > subtitle_duration:
+                # 음성이 자막보다 길면 잘라냄
+                audio_segment = audio_segment[:subtitle_duration]
+
+            combined_audio += audio_segment
+            current_time = segment.end
+
+            # 임시 파일 삭제
+            temp_audio_path.unlink()
+
+            logger.info(f"Added audio for segment {segment.id}: {segment.start:.2f}s - {segment.end:.2f}s")
+
+        # 최종 음성 파일 저장
+        output_filename = f"selected_audio_{len(segment_ids)}_segments.{normalized_format}"
+        output_path = audio_dir / output_filename
+        combined_audio.export(str(output_path), format=normalized_format)
+
+        logger.info(f"Generated combined audio with silence: {output_path}")
+        return str(output_path)
+
+    except Exception as e:
+        logger.exception("Failed to generate combined audio with silence")
+        raise e
+
+
+def generate_all_audio(
+    project_id: str,
+    voice: str = "nova",
+    audio_format: str = "wav",
+) -> TranslatorProject:
+    """모든 세그먼트에 대해 일본어 음성 파일을 생성합니다."""
+    project = load_project(project_id)
+
+    try:
+        from .openai_client import OpenAIShortsClient
+
+        client = OpenAIShortsClient()
+
+        # Create audio directory
+        audio_dir = TRANSLATOR_DIR / project_id / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        normalized_format = _normalize_audio_format(audio_format)
+
+        for segment in project.segments:
+            if not segment.translated_text:
+                logger.warning(f"Segment {segment.id} has no translated text, skipping")
+                continue
+
+            # Generate audio filename
+            audio_filename = f"segment_{segment.clip_index}_{segment.id[:8]}.{normalized_format}"
+            audio_path = audio_dir / audio_filename
+
+            # Generate TTS audio
+            client.synthesize_voice(
+                text=segment.translated_text,
+                voice=voice,
+                output_path=audio_path,
+                audio_format=normalized_format,
+            )
+
+            # Update segment with audio path
+            segment.audio_path = str(audio_path)
+
+            logger.info(f"Generated audio for segment {segment.id}: {audio_path}")
+
+        return save_project(project)
+
+    except Exception as e:
+        logger.exception(f"Failed to generate audio for all segments")
+        raise e
+
+
 __all__ = [
     "TranslatorSegment",
     "TranslatorProject",
@@ -1778,6 +2014,9 @@ __all__ = [
     "convert_vtt_to_srt",
     "fix_malformed_srt",
     "clean_html_entities_from_srt",
+    "generate_segment_audio",
+    "generate_selected_audio_with_silence",
+    "generate_all_audio",
     "UPLOADS_DIR",
     "ensure_directories",
 ]

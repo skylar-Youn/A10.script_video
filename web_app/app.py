@@ -22,6 +22,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -194,6 +195,16 @@ ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="AI Shorts Maker")
+
+# CORS 설정 추가
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 모든 origin 허용 (개발용)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/outputs", StaticFiles(directory=OUTPUT_DIR), name="outputs")
 
@@ -521,21 +532,58 @@ async def api_reverse_translate(project_id: str, payload: Dict[str, Any] = Body(
             raise HTTPException(status_code=400, detail="Japanese text is required")
 
         # Use the existing translate_project_segments function with reverse parameters
-        from ai_shorts_maker.translator import translate_text
+        from ai_shorts_maker.translator import translate_text, update_segment_text
 
         korean_text = await run_in_threadpool(
             translate_text,
             japanese_text,
             target_lang="ko",  # Japanese to Korean
-            translation_mode="reinterpret",
+            translation_mode="literal",
             tone_hint=None
         )
+
+        # Update segment with reverse translated text
+        if segment_id:
+            await run_in_threadpool(
+                update_segment_text,
+                project_id,
+                segment_id,
+                "reverse_translated",
+                korean_text
+            )
 
         return {"korean_text": korean_text}
 
     except Exception as exc:
         logger.exception("Failed to reverse translate text for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/reverse-translate-segments", response_model=TranslatorProject)
+async def api_reverse_translate_segments(project_id: str, payload: Dict[str, Any] = Body(...)) -> TranslatorProject:
+    """선택된 세그먼트를 일본어에서 한국어로 역번역합니다."""
+    try:
+        from ai_shorts_maker.translator import translate_selected_segments
+
+        segment_ids = payload.get("segment_ids", [])
+
+        updated_project = await run_in_threadpool(
+            translate_selected_segments,
+            project_id=project_id,
+            segment_ids=segment_ids,
+            target_lang="ko",
+            translation_mode="literal",
+            tone_hint=None
+        )
+
+        return updated_project
+
+    except FileNotFoundError as exc:
+        logger.exception("Project %s not found", project_id)
+        raise HTTPException(status_code=404, detail=f"Translator project '{project_id}' not found.") from exc
+    except Exception as exc:
+        logger.exception("Failed to reverse translate segments for project %s", project_id)
+        raise HTTPException(status_code=500, detail=f"Failed to reverse translate segments: {str(exc)}") from exc
 
 
 @translator_router.patch("/projects/{project_id}/segments")

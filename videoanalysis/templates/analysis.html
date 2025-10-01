@@ -468,6 +468,17 @@
                             </video>
                         </div>
 
+                        <!-- 오디오 플레이어 (음성만 로드 시 사용) -->
+                        <div class="audio-player-container" style="display: none;">
+                            <h4>🎵 음성 플레이어</h4>
+                            <audio id="audio-player" controls style="width: 100%; max-width: 800px;" crossorigin="anonymous">
+                                <source src="" type="audio/wav">
+                                <source src="" type="audio/mp3">
+                                <source src="" type="audio/mpeg">
+                                오디오를 불러올 수 없습니다.
+                            </audio>
+                        </div>
+
                         <!-- 타임라인 편집기 -->
                         <div class="timeline-editor">
                             <div class="timeline-controls">
@@ -578,6 +589,8 @@
                             <button class="sync-btn" id="load-video-file">📹 영상 파일 로드</button>
                             <button class="sync-btn" id="load-audio-file">🎵 음성 파일 로드</button>
                             <button class="sync-btn" id="load-subtitle-file">📝 자막 파일 로드</button>
+                            <button class="sync-btn" id="load-translator-subtitles" style="background-color: #2196F3;">🌐 유튜브제작기 번역결과 로드</button>
+                            <button class="sync-btn" id="cut-translation-audio" style="background-color: #FF5722;">🔇 설명자막 음성 묵음처리</button>
                             <button class="sync-btn primary" id="simultaneous-play">🎥 영상+음성 동시 재생</button>
                             <button class="sync-btn secondary" id="bundle-audio">🎵 음성 묶음 편집</button>
                             <button class="sync-btn debug" id="debug-waveform" style="background-color: #ff6b4a;">🔧 파형 디버그</button>
@@ -832,6 +845,18 @@
     </div>
 </div>
 
-<script src="/static/analysis.js?v=8"></script>
+<!-- 번역기 프로젝트 선택 모달 -->
+<div id="translator-project-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center;">
+    <div style="background: #2a2a2a; padding: 30px; border-radius: 10px; max-width: 600px; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+        <h3 style="color: #fff; margin-bottom: 20px;">🌐 번역기 프로젝트 선택</h3>
+        <div id="translator-project-list" style="margin-bottom: 20px;"></div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button id="translator-modal-file-btn" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">📁 파일 선택</button>
+            <button id="translator-modal-cancel-btn" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">취소</button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/analysis.js?v=22"></script>
 </body>
 </html>

@@ -446,7 +446,10 @@ class VideoAnalysisApp {
                         <input type="checkbox" class="file-checkbox" value="${file.path}" ${isSelected ? 'checked' : ''}>
                         <span class="file-icon">${typeIcon}</span>
                     </div>
-                    <span class="file-type-badge ${typeClass}">${file.extension.toUpperCase()}</span>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span class="file-type-badge ${typeClass}">${file.extension.toUpperCase()}</span>
+                        <button class="delete-file-btn" onclick="window.app.deleteFile('${file.path.replace(/'/g, "\\'")}'); event.stopPropagation();" title="파일 삭제" style="background: #f44336; color: white; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 12px;">🗑️</button>
+                    </div>
                 </div>
 
                 <h4 class="file-title" title="${file.name}">${this.truncateText(file.name, 30)}</h4>
@@ -4431,6 +4434,22 @@ class VideoAnalysisApp {
             });
         }
 
+        // 번역기 자막 로드 버튼
+        const loadTranslatorBtn = document.getElementById('load-translator-subtitles');
+        if (loadTranslatorBtn) {
+            loadTranslatorBtn.addEventListener('click', async () => {
+                await this.loadTranslatorSubtitles();
+            });
+        }
+
+        // 설명자막 음성 자르기 버튼
+        const cutTranslationAudioBtn = document.getElementById('cut-translation-audio');
+        if (cutTranslationAudioBtn) {
+            cutTranslationAudioBtn.addEventListener('click', async () => {
+                await this.cutTranslationAudio();
+            });
+        }
+
         // 자막 번호 테스트 버튼
         const testSubtitleBtn = document.getElementById('test-subtitle-numbers');
         if (testSubtitleBtn) {
@@ -4501,6 +4520,31 @@ class VideoAnalysisApp {
                 this.updatePlayPauseButton();
             });
         }
+
+        // 오디오 플레이어와 타임라인 동기화
+        const audioPlayer = document.getElementById('audio-player');
+        if (audioPlayer) {
+            audioPlayer.addEventListener('timeupdate', () => {
+                this.updateTimelinePosition();
+                this.updateCurrentSubtitle();
+            });
+
+            audioPlayer.addEventListener('loadedmetadata', () => {
+                this.timeline.duration = audioPlayer.duration;
+                this.updateTimelineRuler();
+                this.updateTimeDisplay();
+            });
+
+            audioPlayer.addEventListener('play', () => {
+                this.timeline.isPlaying = true;
+                this.updatePlayPauseButton();
+            });
+
+            audioPlayer.addEventListener('pause', () => {
+                this.timeline.isPlaying = false;
+                this.updatePlayPauseButton();
+            });
+        }
     }
 
     // 재생 컨트롤 함수들
@@ -4516,25 +4560,66 @@ class VideoAnalysisApp {
         console.log('현재 재생 상태:', this.timeline.isPlaying);
         console.log('현재 비디오 시간:', videoPlayer.currentTime);
 
+        const audioPlayer = document.getElementById('audio-player');
+
         if (this.timeline.isPlaying) {
+            // 일시정지
             videoPlayer.pause();
+            if (audioPlayer) audioPlayer.pause();
+
             // 실시간 동기화 중지
             this.stopRealtimeWaveformSync();
-            console.log('비디오 일시정지 - 현재 위치:', videoPlayer.currentTime);
+            console.log('재생 일시정지 - 현재 위치:', videoPlayer.currentTime);
         } else {
-            // 현재 타임라인 위치로 비디오 시간 설정
-            if (this.timeline.currentTime !== undefined && this.timeline.currentTime !== videoPlayer.currentTime) {
-                videoPlayer.currentTime = this.timeline.currentTime;
-                console.log('비디오 시간을 타임라인 위치로 설정:', this.timeline.currentTime);
+            // 재생
+            // 비디오가 로드되어 있는지 확인
+            const hasVideo = videoPlayer.src && videoPlayer.readyState >= 2;
+            const hasAudio = audioPlayer && audioPlayer.src && audioPlayer.readyState >= 2;
+
+            console.log('재생 모드:', { hasVideo, hasAudio });
+
+            if (!hasVideo && !hasAudio) {
+                this.showError('재생할 비디오 또는 음성 파일이 없습니다.');
+                return;
             }
 
-            videoPlayer.play().then(() => {
-                console.log('비디오 재생 시작 - 위치:', videoPlayer.currentTime);
+            // 현재 타임라인 위치로 시간 설정
+            if (this.timeline.currentTime !== undefined) {
+                if (hasVideo) {
+                    videoPlayer.currentTime = this.timeline.currentTime;
+                }
+                if (hasAudio) {
+                    audioPlayer.currentTime = this.timeline.currentTime;
+                }
+                console.log('재생 시간 설정:', this.timeline.currentTime);
+            }
+
+            // 재생 시작
+            const playPromises = [];
+
+            if (hasVideo) {
+                playPromises.push(
+                    videoPlayer.play().then(() => {
+                        console.log('✅ 비디오 재생 시작');
+                    }).catch(error => {
+                        console.error('비디오 재생 실패:', error);
+                    })
+                );
+            }
+
+            if (hasAudio) {
+                playPromises.push(
+                    audioPlayer.play().then(() => {
+                        console.log('✅ 오디오 재생 시작');
+                    }).catch(error => {
+                        console.error('오디오 재생 실패:', error);
+                    })
+                );
+            }
+
+            Promise.all(playPromises).finally(() => {
                 // 실시간 파형-자막 동기화 시작
                 this.startRealtimeWaveformSync();
-            }).catch(error => {
-                console.error('비디오 재생 실패:', error);
-                this.showError('비디오 재생에 실패했습니다: ' + error.message);
             });
         }
     }
@@ -4819,11 +4904,25 @@ class VideoAnalysisApp {
 
     updateTimelinePosition() {
         const videoPlayer = document.getElementById('video-player');
+        const audioPlayer = document.getElementById('audio-player');
         const playhead = document.getElementById('playhead');
 
-        if (!videoPlayer || !playhead) return;
+        if (!playhead) return;
 
-        this.timeline.currentTime = videoPlayer.currentTime;
+        // 비디오 또는 오디오 중 재생 중인 것의 시간 사용
+        let currentTime = 0;
+
+        if (videoPlayer && videoPlayer.src && !videoPlayer.paused) {
+            currentTime = videoPlayer.currentTime;
+        } else if (audioPlayer && audioPlayer.src && !audioPlayer.paused) {
+            currentTime = audioPlayer.currentTime;
+        } else if (videoPlayer && videoPlayer.src) {
+            currentTime = videoPlayer.currentTime;
+        } else if (audioPlayer && audioPlayer.src) {
+            currentTime = audioPlayer.currentTime;
+        }
+
+        this.timeline.currentTime = currentTime;
         const timelineContent = document.getElementById('timeline-content');
         const width = parseFloat(timelineContent.style.minWidth) || 1000;
 
@@ -4972,8 +5071,53 @@ class VideoAnalysisApp {
 
         const audioPath = audioFiles[0];
         this.timeline.audioData = { path: audioPath };
+        this.audioFilePath = audioPath; // 음성 파일 경로 저장
 
         console.log('🎵 음성 파일 로드 시작:', audioPath);
+
+        // 오디오 플레이어에 로드
+        const audioPlayer = document.getElementById('audio-player');
+        const audioPlayerContainer = document.querySelector('.audio-player-container');
+
+        if (audioPlayer && audioPlayerContainer) {
+            // 오디오 소스 설정
+            const audioUrl = `/api/file-content?path=${encodeURIComponent(audioPath)}`;
+            console.log('🎵 오디오 URL 설정:', audioUrl);
+
+            audioPlayer.src = audioUrl;
+
+            // 오디오 플레이어 표시
+            audioPlayerContainer.style.display = 'block';
+
+            // 오디오 이벤트 리스너 추가
+            audioPlayer.onloadedmetadata = () => {
+                console.log('✅ 오디오 메타데이터 로드 완료');
+                console.log('오디오 길이:', audioPlayer.duration, '초');
+            };
+
+            audioPlayer.onerror = (e) => {
+                console.error('❌ 오디오 로드 실패:', e);
+                console.error('오디오 에러 코드:', audioPlayer.error?.code);
+                console.error('오디오 에러 메시지:', audioPlayer.error?.message);
+                this.showError('오디오 파일을 로드할 수 없습니다: ' + audioPlayer.error?.message);
+            };
+
+            audioPlayer.oncanplay = () => {
+                console.log('✅ 오디오 재생 준비 완료');
+            };
+
+            // 오디오 로드
+            audioPlayer.load();
+
+            // 볼륨 확인 및 설정
+            audioPlayer.volume = 1.0; // 최대 볼륨
+            audioPlayer.muted = false; // 음소거 해제
+
+            console.log('✅ 오디오 플레이어에 로드 시작:', audioPath);
+            console.log('볼륨:', audioPlayer.volume, '음소거:', audioPlayer.muted);
+        } else {
+            console.error('❌ 오디오 플레이어 요소를 찾을 수 없음');
+        }
 
         // 실제 음성 파형 그리기만 시도 (즉시 파형은 제거)
         await this.drawAudioWaveform(audioPath);
@@ -10713,12 +10857,323 @@ class VideoAnalysisApp {
             });
         }
     }
+
+    // 번역기 자막 로드
+    async loadTranslatorSubtitles() {
+        try {
+            // 번역기 프로젝트 목록 가져오기
+            const response = await fetch('http://127.0.0.1:8001/api/translator/projects');
+            if (!response.ok) {
+                throw new Error('번역기 프로젝트를 불러올 수 없습니다.');
+            }
+
+            const projects = await response.json();
+
+            if (!projects || projects.length === 0) {
+                alert('번역기 프로젝트가 없습니다.');
+                return;
+            }
+
+            // 모달 표시
+            this.showTranslatorProjectModal(projects);
+
+        } catch (error) {
+            console.error('번역기 자막 로드 실패:', error);
+            alert(`번역기 자막 로드 실패: ${error.message}`);
+        }
+    }
+
+    // 번역기 프로젝트 선택 모달 표시
+    showTranslatorProjectModal(projects) {
+        const modal = document.getElementById('translator-project-modal');
+        const listContainer = document.getElementById('translator-project-list');
+        const cancelBtn = document.getElementById('translator-modal-cancel-btn');
+        const fileBtn = document.getElementById('translator-modal-file-btn');
+
+        // 프로젝트 목록 생성
+        listContainer.innerHTML = projects.map((p, idx) => `
+            <div style="padding: 15px; margin: 10px 0; background: #3a3a3a; border-radius: 5px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;"
+                 onmouseover="this.style.borderColor='#2196F3'; this.style.background='#404040';"
+                 onmouseout="this.style.borderColor='transparent'; this.style.background='#3a3a3a';"
+                 onclick="window.app.selectTranslatorProject('${p.id}')">
+                <div style="color: #2196F3; font-weight: bold; margin-bottom: 5px;">${idx + 1}. ${p.base_name || p.id}</div>
+                <div style="color: #999; font-size: 12px;">상태: ${p.status || '알 수 없음'} | 세그먼트: ${p.segments?.length || 0}개</div>
+            </div>
+        `).join('');
+
+        // 모달 표시
+        modal.style.display = 'flex';
+
+        // 취소 버튼
+        cancelBtn.onclick = () => {
+            modal.style.display = 'none';
+        };
+
+        // 파일 선택 버튼
+        fileBtn.onclick = () => {
+            modal.style.display = 'none';
+
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.style.display = 'none';
+
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                try {
+                    const text = await file.text();
+                    const project = JSON.parse(text);
+                    await this.loadTranslatorProject(project);
+                } catch (error) {
+                    console.error('파일 읽기 실패:', error);
+                    alert('파일을 읽을 수 없습니다: ' + error.message);
+                }
+            };
+
+            document.body.appendChild(input);
+            input.click();
+            document.body.removeChild(input);
+        };
+
+        // 모달 배경 클릭 시 닫기
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
+    }
+
+    // 번역기 프로젝트 선택 처리
+    async selectTranslatorProject(projectId) {
+        const modal = document.getElementById('translator-project-modal');
+        modal.style.display = 'none';
+
+        try {
+            // 선택한 프로젝트의 상세 정보 가져오기
+            const response = await fetch(
+                `http://127.0.0.1:8001/api/translator/projects/${projectId}`
+            );
+
+            if (!response.ok) {
+                throw new Error('프로젝트 상세 정보를 불러올 수 없습니다.');
+            }
+
+            const project = await response.json();
+            await this.loadTranslatorProject(project);
+
+        } catch (error) {
+            console.error('프로젝트 로드 실패:', error);
+            alert(`프로젝트 로드 실패: ${error.message}`);
+        }
+    }
+
+    // 파일 삭제
+    async deleteFile(filePath) {
+        try {
+            const fileName = filePath.split('/').pop();
+            const confirmed = confirm(`파일을 삭제하시겠습니까?\n\n${fileName}\n\n이 작업은 되돌릴 수 없습니다.`);
+
+            if (!confirmed) return;
+
+            const response = await fetch('/api/delete-file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_path: filePath })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '파일 삭제 실패');
+            }
+
+            const result = await response.json();
+
+            alert(`파일이 삭제되었습니다: ${fileName}`);
+
+            // 선택 목록에서도 제거
+            this.selectedFiles.delete(filePath);
+
+            // 파일 목록 새로고침
+            await this.loadFileList();
+
+        } catch (error) {
+            console.error('파일 삭제 실패:', error);
+            alert(`파일 삭제 실패: ${error.message}`);
+        }
+    }
+
+    // 설명자막 음성 묵음처리
+    async cutTranslationAudio() {
+        try {
+            // 설명자막(description/화자3) 구간 확인
+            if (!this.timeline || !this.timeline.speakerClassifiedSubtitles) {
+                alert('먼저 자막을 로드해주세요.');
+                return;
+            }
+
+            const descriptionSubtitles = this.timeline.speakerClassifiedSubtitles.description || [];
+
+            if (descriptionSubtitles.length === 0) {
+                alert('설명자막(화자3)이 없습니다.');
+                return;
+            }
+
+            // 음성 파일 확인
+            if (!this.audioFilePath) {
+                alert('먼저 음성 파일을 로드해주세요.');
+                return;
+            }
+
+            const confirmed = confirm(
+                `설명자막 ${descriptionSubtitles.length}개 구간의 음성을 묵음처리 하시겠습니까?\n\n` +
+                `음성 파일: ${this.audioFilePath}\n\n` +
+                `처리된 파일은 '_muted' 접미사가 붙어 저장됩니다.\n` +
+                `(원본 길이는 유지되며 해당 구간만 무음으로 대체됩니다)`
+            );
+
+            if (!confirmed) return;
+
+            // 시간 구간 추출
+            const timeRanges = descriptionSubtitles.map(sub => ({
+                start: sub.start_time,
+                end: sub.end_time
+            }));
+
+            console.log('묵음처리할 구간:', timeRanges);
+
+            // API 호출
+            const response = await fetch('/api/cut-audio-ranges', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    audio_path: this.audioFilePath,
+                    time_ranges: timeRanges
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '음성 묵음처리 실패');
+            }
+
+            const result = await response.json();
+
+            const message = `음성 묵음처리 완료!\n\n` +
+                `출력 파일: ${result.output_path}\n` +
+                `원본 길이: ${result.input_duration?.toFixed(2)}초\n` +
+                `결과 길이: ${result.output_duration?.toFixed(2)}초\n` +
+                `묵음처리된 구간: ${result.ranges_cut}개`;
+
+            alert(message);
+
+            // 파일 목록 새로고침
+            await this.loadFileList();
+
+        } catch (error) {
+            console.error('음성 묵음처리 실패:', error);
+            alert(`음성 묵음처리 실패: ${error.message}`);
+        }
+    }
+
+    // 번역기 프로젝트 데이터를 타임라인에 로드
+    async loadTranslatorProject(project) {
+        try {
+            if (!project.segments || project.segments.length === 0) {
+                alert('프로젝트에 자막이 없습니다.');
+                return;
+            }
+
+            // 자막 데이터 변환
+            const speaker1Subtitles = []; // 화자1(영상대화): 현재 자막 (한국어)
+            const speaker3Subtitles = []; // 화자3(해설자): 번역 일본어 자막
+
+            project.segments.forEach((seg, index) => {
+                // 화자1: 현재 자막 (한국어)
+                if (seg.source_text) {
+                    speaker1Subtitles.push({
+                        index: speaker1Subtitles.length,
+                        start_time: seg.start,
+                        end_time: seg.end,
+                        text: seg.source_text,
+                        speaker: '화자1'
+                    });
+                }
+
+                // 화자3: 번역 일본어 자막
+                if (seg.translated_text) {
+                    speaker3Subtitles.push({
+                        index: speaker3Subtitles.length,
+                        start_time: seg.start,
+                        end_time: seg.end,
+                        text: seg.translated_text,
+                        speaker: '화자3'
+                    });
+                }
+            });
+
+            // 타임라인 초기화 (필요한 경우)
+            if (!this.timeline) {
+                this.timeline = {
+                    speakerSubtitles: {},
+                    speakerClassifiedSubtitles: {},
+                    subtitleData: { subtitles: [] }
+                };
+            }
+
+            // 타임라인 속성 초기화
+            if (!this.timeline.speakerSubtitles) {
+                this.timeline.speakerSubtitles = {};
+            }
+            if (!this.timeline.subtitleData) {
+                this.timeline.subtitleData = { subtitles: [] };
+            }
+            if (!this.timeline.subtitleData.subtitles) {
+                this.timeline.subtitleData.subtitles = [];
+            }
+
+            // 기존 화자별 자막 데이터 업데이트
+            this.timeline.speakerSubtitles['화자1'] = speaker1Subtitles;
+            this.timeline.speakerSubtitles['화자3'] = speaker3Subtitles;
+
+            // 화자 목록 업데이트
+            const speakers = Object.keys(this.timeline.speakerSubtitles);
+            console.log('📋 업데이트된 화자 목록:', speakers);
+
+            // 화자별 자막 분류
+            // 화자1(한국어) = main, 화자3(일본어) = description(설명자막)
+            this.timeline.speakerClassifiedSubtitles = {
+                main: speaker1Subtitles,
+                translation: [],  // 번역 자막은 비움
+                description: speaker3Subtitles  // 화자3을 설명자막으로 매핑
+            };
+
+            // 전체 자막 데이터 업데이트
+            this.timeline.subtitleData.subtitles = [
+                ...speaker1Subtitles,
+                ...speaker3Subtitles
+            ].sort((a, b) => a.start_time - b.start_time);
+
+            // 타임라인 다시 렌더링
+            if (this.renderHybridSubtitleTracks) {
+                this.renderHybridSubtitleTracks();
+            }
+
+            alert(`번역기 자막을 불러왔습니다!\n화자1: ${speaker1Subtitles.length}개\n화자3: ${speaker3Subtitles.length}개`);
+
+        } catch (error) {
+            console.error('프로젝트 로드 실패:', error);
+            alert(`프로젝트 로드 실패: ${error.message}`);
+        }
+    }
 }
 
 // 앱 초기화
 let app;
 document.addEventListener('DOMContentLoaded', () => {
     app = new VideoAnalysisApp();
+    window.app = app; // 전역으로 노출
 });
 
 // 전역 함수 (HTML에서 호출)
@@ -10732,6 +11187,48 @@ function applyToTimeline(startTime, endTime) {
 
 function executeRecommendation(action) {
     app.executeRecommendation(action);
+}
+
+// 전역 디버깅 함수들
+window.debugSubtitleTrack = function() {
+    console.log('🔍 자막 트랙 디버깅 시작');
+    const subtitleTrack = document.getElementById('subtitle-track');
+    const trackContent = subtitleTrack ? subtitleTrack.querySelector('.track-content') : null;
+
+    console.log('자막 트랙 요소:', subtitleTrack);
+    console.log('트랙 콘텐츠:', trackContent);
+    console.log('전체 타임라인 트랙들:', document.querySelectorAll('.timeline-track'));
+
+    if (trackContent) {
+        const blocks = trackContent.querySelectorAll('.subtitle-block');
+        console.log(`생성된 블록 수: ${blocks.length}`);
+
+        blocks.forEach((block, index) => {
+            const numberEl = block.querySelector('.subtitle-number');
+            console.log(`블록 #${index + 1}:`, {
+                블록: block,
+                번호요소: numberEl,
+                번호텍스트: numberEl ? numberEl.textContent : 'null',
+                번호표시: numberEl ? getComputedStyle(numberEl).display : 'null',
+                번호가시성: numberEl ? getComputedStyle(numberEl).visibility : 'null',
+                번호스타일: numberEl ? numberEl.style.cssText : 'null'
+            });
+        });
+    }
+}
+
+window.forceRenderSubtitles = function() {
+    console.log('🔄 강제 자막 렌더링 실행');
+    if (window.app && window.app.timeline && window.app.timeline.subtitleData) {
+        window.app.renderHybridSubtitleTracks();
+    } else {
+        console.error('자막 데이터가 없습니다');
+        console.log('앱 상태:', {
+            app: window.app,
+            timeline: window.app ? window.app.timeline : null,
+            subtitleData: window.app && window.app.timeline ? window.app.timeline.subtitleData : null
+        });
+    }
 }
 
 // 전역 디버깅 함수들

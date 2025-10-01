@@ -2,12 +2,16 @@
 파일 관련 API 라우터
 """
 import mimetypes
+import os
+import logging
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Body
 from fastapi.responses import FileResponse
 
 from ..config import DOWNLOAD_DIR
 from ..services.file_service import get_files_list, build_folder_tree
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["files"])
 
@@ -80,4 +84,58 @@ async def get_file_content(path: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/delete-file")
+async def delete_file(request: dict = Body(...)):
+    """파일 삭제"""
+    try:
+        file_path_str = request.get("file_path")
+
+        if not file_path_str:
+            raise HTTPException(status_code=400, detail="file_path is required")
+
+        file_path = Path(file_path_str)
+
+        # 보안 체크: 절대 경로로 변환
+        if not file_path.is_absolute():
+            file_path = DOWNLOAD_DIR / file_path
+
+        # 경로 검증
+        try:
+            file_path = file_path.resolve()
+            download_dir_resolved = DOWNLOAD_DIR.resolve()
+
+            # 다운로드 디렉토리 하위인지 확인
+            if not str(file_path).startswith(str(download_dir_resolved)):
+                raise HTTPException(status_code=403, detail="접근 권한이 없습니다. 허용된 디렉토리 외부의 파일입니다.")
+        except Exception as e:
+            logger.error(f"Path validation error: {e}")
+            raise HTTPException(status_code=403, detail="잘못된 파일 경로입니다")
+
+        # 파일 존재 여부 확인
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
+
+        # 파일인지 확인 (디렉토리는 삭제 불가)
+        if not file_path.is_file():
+            raise HTTPException(status_code=400, detail="디렉토리는 삭제할 수 없습니다")
+
+        # 파일 삭제
+        file_name = file_path.name
+        os.remove(file_path)
+
+        logger.info(f"File deleted: {file_path}")
+
+        return {
+            "status": "success",
+            "message": f"파일이 삭제되었습니다: {file_name}",
+            "deleted_file": file_name
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"File deletion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
