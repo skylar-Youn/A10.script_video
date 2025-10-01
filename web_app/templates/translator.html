@@ -853,8 +853,26 @@
             const toneHintValue = document.getElementById('tone-hint')?.value || currentProject.tone_hint || null;
 
             if (bulkTranslateBtn) {
+                const originalText = bulkTranslateBtn.textContent;
                 bulkTranslateBtn.disabled = true;
+                bulkTranslateBtn.textContent = '번역 중... 0%';
+                bulkTranslateBtn.dataset.originalText = originalText;
             }
+
+            // 진행률 폴링 시작
+            let progressInterval = setInterval(() => {
+                fetch(`/api/translator/projects/${currentProject.id}`)
+                    .then(res => res.json())
+                    .then(project => {
+                        const progress = project.extra?.translation_progress;
+                        if (progress && bulkTranslateBtn) {
+                            bulkTranslateBtn.textContent = `번역 중... ${progress.percentage}% (${progress.completed}/${progress.total})`;
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Failed to fetch progress:', err);
+                    });
+            }, 1000); // 1초마다 진행률 확인
 
             fetch(`/api/translator/projects/${currentProject.id}/translate-segments`, {
                 method: 'POST',
@@ -868,15 +886,19 @@
             })
                 .then(res => res.ok ? res.json() : res.text().then(text => { throw new Error(text || `HTTP ${res.status}`); }))
                 .then(project => {
+                    clearInterval(progressInterval);
                     renderProject(project);
                 })
                 .catch(err => {
+                    clearInterval(progressInterval);
                     console.error('Failed to translate segments:', err);
                     alert('선택된 자막을 번역하지 못했습니다: ' + err.message);
                 })
                 .finally(() => {
+                    clearInterval(progressInterval);
                     if (bulkTranslateBtn) {
                         bulkTranslateBtn.disabled = false;
+                        bulkTranslateBtn.textContent = bulkTranslateBtn.dataset.originalText || '선택 자막 번역';
                     }
                 });
         }
@@ -896,8 +918,26 @@
             }
 
             if (bulkReverseBtn) {
+                const originalText = bulkReverseBtn.textContent;
                 bulkReverseBtn.disabled = true;
+                bulkReverseBtn.textContent = '역번역 중... 0%';
+                bulkReverseBtn.dataset.originalText = originalText;
             }
+
+            // 진행률 폴링 시작
+            let progressInterval = setInterval(() => {
+                fetch(`/api/translator/projects/${currentProject.id}`)
+                    .then(res => res.json())
+                    .then(project => {
+                        const progress = project.extra?.translation_progress;
+                        if (progress && bulkReverseBtn) {
+                            bulkReverseBtn.textContent = `역번역 중... ${progress.percentage}% (${progress.completed}/${progress.total})`;
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Failed to fetch progress:', err);
+                    });
+            }, 1000); // 1초마다 진행률 확인
 
             fetch(`/api/translator/projects/${currentProject.id}/reverse-translate-segments`, {
                 method: 'POST',
@@ -908,15 +948,19 @@
             })
                 .then(res => res.ok ? res.json() : res.text().then(text => { throw new Error(text || `HTTP ${res.status}`); }))
                 .then(project => {
+                    clearInterval(progressInterval);
                     renderProject(project);
                 })
                 .catch(err => {
+                    clearInterval(progressInterval);
                     console.error('Failed to reverse translate segments:', err);
                     alert('선택된 자막을 역번역하지 못했습니다: ' + err.message);
                 })
                 .finally(() => {
+                    clearInterval(progressInterval);
                     if (bulkReverseBtn) {
                         bulkReverseBtn.disabled = false;
+                        bulkReverseBtn.textContent = bulkReverseBtn.dataset.originalText || '선택 역번역 (한국어)';
                     }
                 });
         }

@@ -1517,7 +1517,8 @@ def translate_selected_segments(
     segment_ids: List[str],
     target_lang: str = "ja",
     translation_mode: str = "reinterpret",
-    tone_hint: Optional[str] = None
+    tone_hint: Optional[str] = None,
+    progress_callback: Optional[callable] = None
 ) -> TranslatorProject:
     """선택된 세그먼트만 번역합니다."""
     project = load_project(project_id)
@@ -1539,8 +1540,20 @@ def translate_selected_segments(
         target_lang
     )
 
+    total_count = len(segments_to_translate)
+    completed_count = 0
+
+    # 번역 진행 상태 초기화
+    project.extra["translation_progress"] = {
+        "total": total_count,
+        "completed": 0,
+        "percentage": 0,
+        "status": "translating"
+    }
+    save_project(project)
+
     # 각 세그먼트 번역
-    for segment in segments_to_translate:
+    for idx, segment in enumerate(segments_to_translate):
         if not segment.source_text:
             continue
 
@@ -1564,9 +1577,33 @@ def translate_selected_segments(
                 )
                 segment.reverse_translated_text = reverse_translated
 
+            completed_count += 1
+
+            # 진행률 업데이트
+            progress = int((completed_count / total_count) * 100)
+            project.extra["translation_progress"] = {
+                "total": total_count,
+                "completed": completed_count,
+                "percentage": progress,
+                "status": "translating"
+            }
+            save_project(project)
+
+            # 진행률 콜백 호출
+            if progress_callback:
+                progress_callback(progress, completed_count, total_count)
+
         except Exception as e:
             logger.error("Failed to translate segment %s: %s", segment.id, e)
             continue
+
+    # 번역 완료 상태로 변경
+    project.extra["translation_progress"] = {
+        "total": total_count,
+        "completed": completed_count,
+        "percentage": 100,
+        "status": "completed"
+    }
 
     # 프로젝트 저장
     return save_project(project)
