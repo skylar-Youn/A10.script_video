@@ -882,6 +882,95 @@
                 <button class="action-btn secondary" id="copy-reinterpretation">📋 복사</button>
             </div>
         </div>
+
+        <!-- 음성과 배경음악 분리 섹션 -->
+        <div class="vocal-separation-section" style="margin-top: 20px; padding: 20px; background: #1a2332; border-radius: 8px; border: 1px solid #2a3f5f;">
+            <h3>🎵 음성과 배경음악 분리</h3>
+
+            <div class="separation-controls" style="margin-top: 15px;">
+                <div class="control-group">
+                    <label for="separation-audio-select">
+                        음성 파일 선택
+                        <select id="separation-audio-select" style="width: 100%; padding: 8px; margin-top: 5px; background: #0d1520; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px;">
+                            <option value="">-- 음성 파일을 선택하세요 --</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="control-group" style="margin-top: 15px;">
+                    <label for="separation-model-select">
+                        분리 모델
+                        <select id="separation-model-select" style="width: 100%; padding: 8px; margin-top: 5px; background: #0d1520; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px;">
+                            <option value="htdemucs" selected>HTDemucs (기본, 균형잡힌 품질)</option>
+                            <option value="htdemucs_ft">HTDemucs FT (고품질, 느림)</option>
+                            <option value="mdx">MDX (빠른 처리)</option>
+                            <option value="mdx_extra">MDX Extra (최고 품질, 매우 느림)</option>
+                        </select>
+                    </label>
+                </div>
+
+                <button class="action-btn primary" id="start-separation" style="width: 100%; margin-top: 15px;">🎵 분리 시작</button>
+
+                <div class="separation-info" style="margin-top: 15px; padding: 10px; background: #0d1520; border-radius: 5px;">
+                    <p style="margin: 0 0 5px 0; color: #b0c4d0; font-size: 13px;"><strong>ℹ️ 안내:</strong></p>
+                    <ul style="margin: 0; padding-left: 20px; color: #b0c4d0; font-size: 12px;">
+                        <li>음성(vocals)과 배경음악(accompaniment)을 AI로 분리합니다</li>
+                        <li>처리 시간은 파일 길이와 모델에 따라 다릅니다 (보통 1-5분)</li>
+                        <li>결과는 원본 폴더의 "separated" 디렉토리에 저장됩니다</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 분리 진행률 -->
+            <div id="separation-progress" style="display: none; margin-top: 15px; padding: 15px; background: #0d1520; border-radius: 5px;">
+                <h4 style="margin: 0 0 10px 0; color: #f0f4f8;">⏳ 분리 진행 중...</h4>
+                <div class="progress-bar" style="background: #2a3f5f; height: 24px; border-radius: 12px; overflow: hidden;">
+                    <div id="separation-progress-fill" style="background: linear-gradient(90deg, #4CAF50, #8BC34A); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                </div>
+                <p id="separation-progress-text" style="margin: 10px 0 0 0; color: #b0c4d0; font-size: 12px;">AI 모델을 로드하는 중...</p>
+            </div>
+
+            <!-- 분리 결과 -->
+            <div id="separation-results" style="display: none; margin-top: 15px;">
+                <h4 style="color: #f0f4f8;">✅ 분리 완료</h4>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+                    <!-- 음성 결과 -->
+                    <div style="padding: 15px; background: #0d1520; border-radius: 5px;">
+                        <h5 style="margin: 0 0 10px 0; color: #4CAF50;">🎤 음성 (Vocals)</h5>
+                        <div style="font-size: 12px; color: #b0c4d0; margin-bottom: 10px;">
+                            <p style="margin: 3px 0;"><strong>파일명:</strong> <span id="vocals-filename">-</span></p>
+                            <p style="margin: 3px 0;"><strong>크기:</strong> <span id="vocals-size">-</span></p>
+                            <p style="margin: 3px 0;"><strong>길이:</strong> <span id="vocals-duration">-</span></p>
+                        </div>
+                        <audio id="vocals-player" controls style="width: 100%; margin-bottom: 10px;"></audio>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="action-btn small" id="load-vocals-file" style="flex: 1; padding: 6px; font-size: 12px;">🎵 음성 파일 로드</button>
+                            <button class="action-btn small" id="open-vocals-folder" style="flex: 1; padding: 6px; font-size: 12px;">📂 폴더 열기</button>
+                        </div>
+                    </div>
+
+                    <!-- 배경음악 결과 -->
+                    <div style="padding: 15px; background: #0d1520; border-radius: 5px;">
+                        <h5 style="margin: 0 0 10px 0; color: #2196F3;">🎹 배경음악 (Accompaniment)</h5>
+                        <div style="font-size: 12px; color: #b0c4d0; margin-bottom: 10px;">
+                            <p style="margin: 3px 0;"><strong>파일명:</strong> <span id="accompaniment-filename">-</span></p>
+                            <p style="margin: 3px 0;"><strong>크기:</strong> <span id="accompaniment-size">-</span></p>
+                            <p style="margin: 3px 0;"><strong>길이:</strong> <span id="accompaniment-duration">-</span></p>
+                        </div>
+                        <audio id="accompaniment-player" controls style="width: 100%; margin-bottom: 10px;"></audio>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="action-btn small" id="load-accompaniment-file" style="flex: 1; padding: 6px; font-size: 12px;">🎵 배경음악 로드</button>
+                            <button class="action-btn small" id="open-accompaniment-folder" style="flex: 1; padding: 6px; font-size: 12px;">📂 폴더 열기</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 10px; text-align: center;">
+                    <button class="action-btn secondary" id="separate-another">🔄 다른 파일 분리</button>
+                </div>
+            </div>
+        </div>
     </section>
 </div>
 
@@ -912,6 +1001,6 @@
     </div>
 </div>
 
-<script src="/static/analysis.js?v=22"></script>
+<script src="/static/analysis.js?v=38"></script>
 </body>
 </html>

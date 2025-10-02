@@ -250,3 +250,218 @@ async def cut_audio_ranges_api(request: dict = Body(...)):
     except Exception as e:
         logger.exception(f"Audio cutting error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/preview-audio-mix")
+async def preview_audio_mix_api(request: dict = Body(...)):
+    """오디오 믹싱 미리듣기 - 임시 파일 생성하여 반환"""
+    import subprocess
+    import tempfile
+    from fastapi.responses import FileResponse
+
+    try:
+        bgm_path = request.get("bgm_path")
+        voice_path = request.get("voice_path")
+        bgm_volume = request.get("bgm_volume", 0.3)
+        voice_volume = request.get("voice_volume", 1.2)
+
+        if not bgm_path or not voice_path:
+            raise HTTPException(status_code=400, detail="bgm_path and voice_path are required")
+
+        if not os.path.exists(bgm_path):
+            raise HTTPException(status_code=404, detail=f"Background music file not found: {bgm_path}")
+
+        if not os.path.exists(voice_path):
+            raise HTTPException(status_code=404, detail=f"Voice file not found: {voice_path}")
+
+        # 임시 출력 파일 생성
+        temp_output = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+        output_path = temp_output.name
+        temp_output.close()
+
+        logger.info(f"Creating audio preview: BGM={bgm_path}, Voice={voice_path}")
+        logger.info(f"Volumes: BGM={bgm_volume}, Voice={voice_volume}")
+
+        # FFmpeg 명령어 구성 (10초 미리보기)
+        cmd = [
+            'ffmpeg', '-y',
+            '-t', '10',  # 처음 10초만
+            '-i', bgm_path,
+            '-t', '10',
+            '-i', voice_path,
+            '-filter_complex',
+            f"[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={bgm_volume}[bg];"
+            f"[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={voice_volume}[voice];"
+            f"[bg][voice]amix=inputs=2:duration=shortest:dropout_transition=2[aout]",
+            '-map', '[aout]',
+            '-c:a', 'libmp3lame',
+            '-b:a', '192k',
+            output_path
+        ]
+
+        logger.info(f"Running FFmpeg preview command: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30  # 30초 타임아웃
+        )
+
+        if result.returncode != 0:
+            logger.error(f"FFmpeg preview error: {result.stderr}")
+            # 임시 파일 정리
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            raise HTTPException(
+                status_code=500,
+                detail=f"FFmpeg failed: {result.stderr[:500]}"
+            )
+
+        # 파일 존재 확인
+        if not os.path.exists(output_path):
+            raise HTTPException(
+                status_code=500,
+                detail="Preview file was not created"
+            )
+
+        logger.info(f"Preview created successfully: {output_path}")
+
+        # 파일 응답 (다운로드 후 자동 삭제를 위해 background_task 사용)
+        from fastapi import BackgroundTasks
+
+        def cleanup_file(file_path: str):
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Cleaned up preview file: {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to cleanup preview file: {e}")
+
+        return FileResponse(
+            path=output_path,
+            media_type='audio/mpeg',
+            filename='preview.mp3',
+            background=BackgroundTasks().add_task(cleanup_file, output_path)
+        )
+
+    except subprocess.TimeoutExpired:
+        logger.error("FFmpeg preview timeout")
+        raise HTTPException(status_code=500, detail="Preview generation timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Audio preview error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analyze-audio-volumes")
+async def analyze_audio_volumes_api(request: dict = Body(...)):
+    """오디오 파일들의 볼륨을 분석하여 최적의 믹싱 비율 계산"""
+    import subprocess
+    import json
+
+    try:
+        bgm_path = request.get("bgm_path")
+        voice_path = request.get("voice_path")
+
+        if not bgm_path or not voice_path:
+            raise HTTPException(status_code=400, detail="bgm_path and voice_path are required")
+
+        if not os.path.exists(bgm_path):
+            raise HTTPException(status_code=404, detail=f"Background music file not found: {bgm_path}")
+
+        if not os.path.exists(voice_path):
+            raise HTTPException(status_code=404, detail=f"Voice file not found: {voice_path}")
+
+        logger.info(f"Analyzing audio volumes: BGM={bgm_path}, Voice={voice_path}")
+
+        # FFmpeg volumedetect 필터로 평균/최대 볼륨 분석
+        def analyze_volume(file_path):
+            cmd = [
+                'ffmpeg',
+                '-i', file_path,
+                '-af', 'volumedetect',
+                '-f', 'null',
+                '-'
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+
+            # 출력에서 볼륨 정보 추출
+            output = result.stderr
+            mean_volume = None
+            max_volume = None
+
+            for line in output.split('\n'):
+                if 'mean_volume:' in line:
+                    try:
+                        mean_volume = float(line.split('mean_volume:')[1].split('dB')[0].strip())
+                    except:
+                        pass
+                if 'max_volume:' in line:
+                    try:
+                        max_volume = float(line.split('max_volume:')[1].split('dB')[0].strip())
+                    except:
+                        pass
+
+            return {
+                'mean_volume': mean_volume,
+                'max_volume': max_volume
+            }
+
+        # 각 파일 분석
+        bgm_analysis = analyze_volume(bgm_path)
+        voice_analysis = analyze_volume(voice_path)
+
+        logger.info(f"BGM analysis: {bgm_analysis}")
+        logger.info(f"Voice analysis: {voice_analysis}")
+
+        # 최적 볼륨 계산
+        # 목표: 배경음악은 -20dB ~ -15dB, 해설음성은 -6dB ~ -3dB
+        bgm_target = -18  # dB
+        voice_target = -5  # dB
+
+        bgm_optimal = 1.0
+        voice_optimal = 1.0
+
+        if bgm_analysis['mean_volume'] is not None:
+            # dB 차이를 볼륨 배율로 변환
+            db_diff = bgm_target - bgm_analysis['mean_volume']
+            bgm_optimal = 10 ** (db_diff / 20)
+            # 0.1 ~ 0.8 범위로 제한
+            bgm_optimal = max(0.1, min(0.8, bgm_optimal))
+
+        if voice_analysis['mean_volume'] is not None:
+            db_diff = voice_target - voice_analysis['mean_volume']
+            voice_optimal = 10 ** (db_diff / 20)
+            # 0.8 ~ 2.0 범위로 제한
+            voice_optimal = max(0.8, min(2.0, voice_optimal))
+
+        logger.info(f"Optimal volumes: BGM={bgm_optimal:.2f}, Voice={voice_optimal:.2f}")
+
+        return {
+            "status": "success",
+            "bgm_analysis": bgm_analysis,
+            "voice_analysis": voice_analysis,
+            "recommended_volumes": {
+                "bgm_volume": round(bgm_optimal, 2),
+                "voice_volume": round(voice_optimal, 2),
+                "bgm_percent": round(bgm_optimal * 100),
+                "voice_percent": round(voice_optimal * 100)
+            }
+        }
+
+    except subprocess.TimeoutExpired:
+        logger.error("Volume analysis timeout")
+        raise HTTPException(status_code=500, detail="Analysis timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Volume analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
