@@ -54,6 +54,55 @@ async def favicon():
     return Response(status_code=204)
 
 
+@app.get("/api/translator/projects")
+async def get_translator_projects():
+    """번역기 프로젝트 목록 반환"""
+    try:
+        # ai_shorts_maker.translator 모듈에서 프로젝트 목록 가져오기
+        import sys
+        from pathlib import Path
+
+        # ai_shorts_maker 모듈 경로 추가
+        ai_shorts_maker_path = Path.home() / "ws" / "youtubeanalysis" / "ai_shorts_maker"
+        if str(ai_shorts_maker_path.parent) not in sys.path:
+            sys.path.insert(0, str(ai_shorts_maker_path.parent))
+
+        from ai_shorts_maker.translator import list_projects, translator_summary
+
+        projects = list_projects()
+        return [translator_summary(project) for project in projects]
+    except Exception as e:
+        logger.error(f"번역기 프로젝트 목록 조회 실패: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/translator/projects/{project_id}")
+async def get_translator_project(project_id: str):
+    """번역기 프로젝트 상세 정보 반환"""
+    try:
+        import sys
+        from pathlib import Path
+
+        # ai_shorts_maker 모듈 경로 추가
+        ai_shorts_maker_path = Path.home() / "ws" / "youtubeanalysis" / "ai_shorts_maker"
+        if str(ai_shorts_maker_path.parent) not in sys.path:
+            sys.path.insert(0, str(ai_shorts_maker_path.parent))
+
+        from ai_shorts_maker.translator import load_project
+
+        project = load_project(project_id)
+        # Pydantic 모델을 dict로 변환
+        return project.model_dump()
+    except FileNotFoundError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"프로젝트를 찾을 수 없습니다: {project_id}")
+    except Exception as e:
+        logger.error(f"번역기 프로젝트 조회 실패: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/translator-audio-files")
 async def get_translator_audio_files(project_id: str):
     """번역기 프로젝트의 audio 폴더 파일 목록 반환"""

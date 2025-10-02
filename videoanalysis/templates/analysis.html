@@ -517,6 +517,7 @@
                                         <div class="track-header" style="display: flex; align-items: center; gap: 10px;">
                                             <input type="checkbox" id="track-video-enable" checked style="cursor: pointer; width: 18px; height: 18px;">
                                             <label for="track-video-enable" style="cursor: pointer;">📹 영상</label>
+                                            <button id="video-mute-btn" style="background: none; border: none; cursor: pointer; font-size: 20px; padding: 0; margin-left: auto;" title="영상 음소거/해제">🔊</button>
                                         </div>
                                         <div class="track-content" id="video-track">
                                             <!-- 영상 클립이 여기에 표시됩니다 -->
@@ -530,7 +531,7 @@
                                             <label for="track-audio-enable" style="cursor: pointer;">🎵 음성</label>
                                         </div>
                                         <div class="track-content" id="audio-track">
-                                            <canvas id="timeline-waveform" height="80"></canvas>
+                                            <canvas id="timeline-waveform" height="50"></canvas>
                                         </div>
                                     </div>
 
@@ -541,7 +542,7 @@
                                             <label for="track-commentary-enable" style="cursor: pointer;">🎙️ 해설 음성</label>
                                         </div>
                                         <div class="track-content" id="commentary-audio-track">
-                                            <canvas id="commentary-waveform" height="80"></canvas>
+                                            <canvas id="commentary-waveform" height="50"></canvas>
                                         </div>
                                     </div>
 
@@ -552,7 +553,7 @@
                                             <label for="track-bgm-enable" style="cursor: pointer;">🎵 배경 음악</label>
                                         </div>
                                         <div class="track-content" id="bgm-audio-track">
-                                            <canvas id="bgm-waveform" height="80"></canvas>
+                                            <canvas id="bgm-waveform" height="50"></canvas>
                                         </div>
                                     </div>
 
