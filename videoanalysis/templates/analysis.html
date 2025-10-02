@@ -647,6 +647,42 @@
                             <button class="sync-btn" id="cut-translation-audio" style="background-color: #FF5722;">🔇 설명자막 음성 묵음처리</button>
                             <button class="sync-btn primary" id="simultaneous-play">🎥 영상+음성 동시 재생</button>
                             <button class="sync-btn secondary" id="bundle-audio">🎵 음성 묶음 편집</button>
+                        </div>
+
+                        <!-- 오디오 믹싱 설정 -->
+                        <div style="margin-top: 15px; padding: 15px; background: #1a2332; border-radius: 8px; border: 1px solid #2a3f5f;">
+                            <h4 style="margin: 0 0 10px 0; color: #f0f4f8; font-size: 14px;">🎚️ 오디오 믹싱 설정</h4>
+
+                            <!-- 프리셋 버튼 -->
+                            <div style="display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap;">
+                                <button class="sync-btn" id="volume-preset-low" style="background-color: #4CAF50; font-size: 12px; padding: 6px 12px;">🔉 배경음악 작게 (20%)</button>
+                                <button class="sync-btn" id="volume-preset-medium" style="background-color: #2196F3; font-size: 12px; padding: 6px 12px;">🔊 배경음악 중간 (40%)</button>
+                                <button class="sync-btn" id="volume-preset-high" style="background-color: #FF9800; font-size: 12px; padding: 6px 12px;">🔊 배경음악 크게 (60%)</button>
+                                <button class="sync-btn" id="volume-auto-optimize" style="background-color: #9C27B0; font-size: 12px; padding: 6px 12px;">✨ 자동 최적화</button>
+                                <button class="sync-btn" id="audio-preview" style="background-color: #00BCD4; font-size: 12px; padding: 6px 12px;">🎧 미리듣기</button>
+                            </div>
+
+                            <!-- 볼륨 슬라이더 -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                <div>
+                                    <label style="color: #b0c4d0; font-size: 12px; display: block; margin-bottom: 5px;">
+                                        🎵 배경음악 볼륨: <span id="bgm-volume-value">30</span>%
+                                    </label>
+                                    <input type="range" id="bgm-volume-slider" min="0" max="100" value="30"
+                                           style="width: 100%; height: 6px; background: #2a3f5f; border-radius: 3px; outline: none;">
+                                </div>
+                                <div>
+                                    <label style="color: #b0c4d0; font-size: 12px; display: block; margin-bottom: 5px;">
+                                        🎤 해설음성 볼륨: <span id="voice-volume-value">120</span>%
+                                    </label>
+                                    <input type="range" id="voice-volume-slider" min="0" max="200" value="120"
+                                           style="width: 100%; height: 6px; background: #2a3f5f; border-radius: 3px; outline: none;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 영상 출력 버튼 -->
+                        <div class="sync-controls" style="margin-top: 15px;">
                             <button class="sync-btn" id="create-output-video" style="background-color: #FF6F00; color: white; font-weight: bold;">🎬 영상 출력 파일 만들기</button>
                         </div>
 
@@ -858,7 +894,10 @@
                             <p><strong>길이:</strong> <span id="vocals-duration">-</span></p>
                         </div>
                         <audio id="vocals-player" controls style="width: 100%; margin-top: 10px;"></audio>
-                        <button class="action-btn small" id="open-vocals-folder">📂 폴더 열기</button>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button class="action-btn small" id="load-vocals-file">🎵 음성 파일 로드</button>
+                            <button class="action-btn small" id="open-vocals-folder">📂 폴더 열기</button>
+                        </div>
                     </div>
                     <div class="result-file accompaniment-result">
                         <h4>🎹 배경음악 (Accompaniment)</h4>
@@ -868,7 +907,10 @@
                             <p><strong>길이:</strong> <span id="accompaniment-duration">-</span></p>
                         </div>
                         <audio id="accompaniment-player" controls style="width: 100%; margin-top: 10px;"></audio>
-                        <button class="action-btn small" id="open-accompaniment-folder">📂 폴더 열기</button>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button class="action-btn small" id="load-accompaniment-file">🎵 배경음악 로드</button>
+                            <button class="action-btn small" id="open-accompaniment-folder">📂 폴더 열기</button>
+                        </div>
                     </div>
                 </div>
                 <div class="result-actions">
@@ -906,6 +948,6 @@
     </div>
 </div>
 
-<script src="/static/analysis.js?v=32"></script>
+<script src="/static/analysis.js?v=36"></script>
 </body>
 </html>

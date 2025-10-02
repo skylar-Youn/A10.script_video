@@ -115,6 +115,10 @@ async def create_output_video(request: Request):
     audio_files = data.get("audio_files", [])
     subtitle_data = data.get("subtitle_data", [])
 
+    # 볼륨 설정 받기 (기본값: 배경음악 30%, 해설음성 120%)
+    bgm_volume = data.get("bgm_volume", 0.3)
+    voice_volume = data.get("voice_volume", 1.2)
+
     # 출력 파일 경로 생성
     output_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "videos"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -194,7 +198,13 @@ async def create_output_video(request: Request):
     # 오디오 믹싱
     if main_audio_input and commentary_audio_input:
         # 두 오디오를 믹싱하는 경우 filter_complex 사용
-        filter_complex_parts.append(f"{main_audio_input}{commentary_audio_input}amix=inputs=2:duration=longest[aout]")
+        # 오디오 덕킹: 해설 음성이 나올 때 배경음악 볼륨을 자동으로 줄임
+        logger.info(f"오디오 믹싱 볼륨 설정: 배경음악={bgm_volume}, 해설음성={voice_volume}")
+        filter_complex_parts.append(
+            f"{main_audio_input}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={bgm_volume}[bg];"  # 배경음악: 포맷 통일 + 사용자 설정 볼륨
+            f"{commentary_audio_input}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={voice_volume}[voice];"  # 해설음성: 포맷 통일 + 사용자 설정 볼륨
+            f"[bg][voice]amix=inputs=2:duration=longest:dropout_transition=2[aout]"  # 두 오디오 믹싱 (dropout_transition으로 부드럽게)
+        )
         audio_map = "[aout]"
     elif main_audio_input:
         # 단일 오디오는 filter 없이 직접 스트림 참조

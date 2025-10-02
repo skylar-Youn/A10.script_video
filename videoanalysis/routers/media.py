@@ -279,17 +279,23 @@ async def separate_vocals_api(request: dict = Body(...)):
             "demucs",
             "--two-stems", "vocals",  # vocals와 no_vocals(배경음악) 2개 트랙만 분리
             "-n", model,
+            "--device", "cpu",  # CPU 모드로 실행 (CUDA 에러 방지)
             "-o", str(output_base_dir),
             str(audio_path)
         ]
 
         logger.info(f"Demucs command: {' '.join(cmd)}")
 
+        # CPU 모드 강제 (CUDA 에러 방지)
+        env = os.environ.copy()
+        env['CUDA_VISIBLE_DEVICES'] = ''  # GPU 비활성화
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=600  # 10분 타임아웃
+            timeout=600,  # 10분 타임아웃
+            env=env
         )
 
         if result.returncode != 0:
