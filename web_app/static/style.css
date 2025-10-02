@@ -2,6 +2,17 @@
     color-scheme: dark light;
     font-family: 'Segoe UI', 'Pretendard', sans-serif;
 }
+
+::selection {
+    background-color: #0066cc !important;
+    color: #ffffff !important;
+}
+
+::-moz-selection {
+    background-color: #0066cc !important;
+    color: #ffffff !important;
+}
+
 body {
     margin: 0;
     padding: 0;

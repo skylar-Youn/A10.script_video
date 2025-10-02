@@ -23,6 +23,9 @@ TRANSLATOR_DIR = SHORTS_OUTPUT_DIR / "translator_projects"
 UPLOADS_DIR = SHORTS_OUTPUT_DIR / "uploads"
 DEFAULT_SEGMENT_MAX = 45.0
 
+# 음성 생성 진행률 추적을 위한 전역 딕셔너리
+_audio_generation_progress = {}
+
 
 class TranslatorSegment(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
@@ -1849,6 +1852,7 @@ def generate_selected_audio_with_silence(
     segment_ids: List[str],
     voice: str = "nova",
     audio_format: str = "wav",
+    task_id: Optional[str] = None,
 ) -> str:
     """선택된 세그먼트들의 음성을 생성하고, 자막 시간에 맞춰 무음을 포함한 음성 파일을 생성합니다.
 
@@ -1858,6 +1862,18 @@ def generate_selected_audio_with_silence(
     import subprocess
     from pydub import AudioSegment
     from pydub.generators import Sine
+
+    # task_id 생성
+    if not task_id:
+        task_id = f"{project_id}_selected_{len(segment_ids)}"
+
+    # 진행률 초기화
+    _audio_generation_progress[task_id] = {
+        "total": len(segment_ids),
+        "current": 0,
+        "status": "processing",
+        "message": "음성 생성 중..."
+    }
 
     project = load_project(project_id)
 
@@ -1884,7 +1900,10 @@ def generate_selected_audio_with_silence(
         combined_audio = AudioSegment.silent(duration=0)
         current_time = 0.0
 
-        for segment in selected_segments:
+        for idx, segment in enumerate(selected_segments):
+            # 진행률 업데이트
+            _audio_generation_progress[task_id]["current"] = idx
+            _audio_generation_progress[task_id]["message"] = f"세그먼트 {idx + 1}/{len(selected_segments)} 처리 중..."
             if not segment.translated_text:
                 logger.warning(f"Segment {segment.id} has no translated text, skipping")
                 continue
@@ -1931,14 +1950,23 @@ def generate_selected_audio_with_silence(
             logger.info(f"Added audio for segment {segment.id}: {segment.start:.2f}s - {segment.end:.2f}s")
 
         # 최종 음성 파일 저장
+        _audio_generation_progress[task_id]["message"] = "음성 파일 저장 중..."
         output_filename = f"selected_audio_{len(segment_ids)}_segments.{normalized_format}"
         output_path = audio_dir / output_filename
         combined_audio.export(str(output_path), format=normalized_format)
+
+        # 완료 상태 업데이트
+        _audio_generation_progress[task_id]["status"] = "completed"
+        _audio_generation_progress[task_id]["current"] = len(selected_segments)
+        _audio_generation_progress[task_id]["message"] = "완료"
 
         logger.info(f"Generated combined audio with silence: {output_path}")
         return str(output_path)
 
     except Exception as e:
+        # 에러 상태 업데이트
+        _audio_generation_progress[task_id]["status"] = "error"
+        _audio_generation_progress[task_id]["message"] = f"오류: {str(e)}"
         logger.exception("Failed to generate combined audio with silence")
         raise e
 
@@ -1947,9 +1975,22 @@ def generate_all_audio(
     project_id: str,
     voice: str = "nova",
     audio_format: str = "wav",
+    task_id: Optional[str] = None,
 ) -> TranslatorProject:
     """모든 세그먼트에 대해 일본어 음성 파일을 생성합니다."""
     project = load_project(project_id)
+
+    # task_id 생성
+    if not task_id:
+        task_id = f"{project_id}_all_{len(project.segments)}"
+
+    # 진행률 초기화
+    _audio_generation_progress[task_id] = {
+        "total": len(project.segments),
+        "current": 0,
+        "status": "processing",
+        "message": "음성 생성 중..."
+    }
 
     try:
         from .openai_client import OpenAIShortsClient
@@ -1962,7 +2003,10 @@ def generate_all_audio(
 
         normalized_format = _normalize_audio_format(audio_format)
 
-        for segment in project.segments:
+        for idx, segment in enumerate(project.segments):
+            # 진행률 업데이트
+            _audio_generation_progress[task_id]["current"] = idx
+            _audio_generation_progress[task_id]["message"] = f"세그먼트 {idx + 1}/{len(project.segments)} 처리 중..."
             if not segment.translated_text:
                 logger.warning(f"Segment {segment.id} has no translated text, skipping")
                 continue
@@ -1984,11 +2028,41 @@ def generate_all_audio(
 
             logger.info(f"Generated audio for segment {segment.id}: {audio_path}")
 
+        # 완료 상태 업데이트
+        _audio_generation_progress[task_id]["status"] = "completed"
+        _audio_generation_progress[task_id]["current"] = len(project.segments)
+        _audio_generation_progress[task_id]["message"] = "완료"
+
         return save_project(project)
 
     except Exception as e:
+        # 에러 상태 업데이트
+        _audio_generation_progress[task_id]["status"] = "error"
+        _audio_generation_progress[task_id]["message"] = f"오류: {str(e)}"
         logger.exception(f"Failed to generate audio for all segments")
         raise e
+
+
+def get_audio_generation_progress(task_id: str) -> Optional[Dict[str, Any]]:
+    """음성 생성 진행률을 조회합니다.
+
+    Args:
+        task_id: 작업 ID
+
+    Returns:
+        진행률 정보 딕셔너리 또는 None
+    """
+    return _audio_generation_progress.get(task_id)
+
+
+def clear_audio_generation_progress(task_id: str) -> None:
+    """음성 생성 진행률을 삭제합니다.
+
+    Args:
+        task_id: 작업 ID
+    """
+    if task_id in _audio_generation_progress:
+        del _audio_generation_progress[task_id]
 
 
 __all__ = [
@@ -2017,6 +2091,8 @@ __all__ = [
     "generate_segment_audio",
     "generate_selected_audio_with_silence",
     "generate_all_audio",
+    "get_audio_generation_progress",
+    "clear_audio_generation_progress",
     "UPLOADS_DIR",
     "ensure_directories",
 ]

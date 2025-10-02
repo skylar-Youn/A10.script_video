@@ -2271,9 +2271,8 @@ textarea:focus {
     font-weight: 600;
     margin-bottom: 4px;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100px;
+    overflow: visible;
+    max-width: 150px;
 }
 
 .track-controls {

@@ -4,7 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>쇼츠 번역 및 재해석기</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <style>
+        ::selection {
+            background-color: #0066cc !important;
+            color: #ffffff !important;
+        }
+        ::-moz-selection {
+            background-color: #0066cc !important;
+            color: #ffffff !important;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -794,9 +804,18 @@
                         <option value="mp3">MP3</option>
                     </select>
                     <button type="button" class="btn-primary btn-sm" id="generate-selected-audio-btn">🔊 선택 자막 음성 생성</button>
+                    <button type="button" class="btn-success btn-sm" id="save-selected-audio-btn">💾 선택 음성 저장</button>
                     <button type="button" class="btn-primary btn-sm" id="generate-all-audio-btn">🔊 전체 음성 생성</button>
                     <button type="button" class="btn-sm" id="play-all-audio-btn" style="background-color: #e0e0e0; color: #000; border: 1px solid #ccc;">▶️ 전체 듣기</button>
                     <button type="button" class="btn-success btn-sm" id="save-all-audio-btn">💾 전체 음성 저장</button>
+                </div>
+                <div id="audio-progress" style="display: none; margin-top: 12px; padding: 12px; background: #1a2332; border-radius: 8px; border: 1px solid #2a3f5f;">
+                    <div style="margin-bottom: 8px; color: #f0f4f8;" id="audio-progress-message">진행 중...</div>
+                    <div style="background: #0d1520; height: 24px; border-radius: 12px; overflow: hidden; position: relative;">
+                        <div id="audio-progress-bar" style="background: linear-gradient(90deg, #4bd4ff, #0084ff); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center;">
+                            <span id="audio-progress-percent" style="color: #fff; font-weight: bold; font-size: 12px;"></span>
+                        </div>
+                    </div>
                 </div>
             `;
 
@@ -860,6 +879,7 @@
             const saveSelectedBtn = container.querySelector('#save-selected-btn');
             const deleteUnselectedBtn = container.querySelector('#delete-unselected-btn');
             const generateSelectedAudioBtn = container.querySelector('#generate-selected-audio-btn');
+            const saveSelectedAudioBtn = container.querySelector('#save-selected-audio-btn');
             const generateAllAudioBtn = container.querySelector('#generate-all-audio-btn');
             const playAllAudioBtn = container.querySelector('#play-all-audio-btn');
             const saveAllAudioBtn = container.querySelector('#save-all-audio-btn');
@@ -878,6 +898,9 @@
             }
             if (generateSelectedAudioBtn) {
                 generateSelectedAudioBtn.addEventListener('click', generateSelectedAudio);
+            }
+            if (saveSelectedAudioBtn) {
+                saveSelectedAudioBtn.addEventListener('click', saveSelectedAudioAs);
             }
             if (generateAllAudioBtn) {
                 generateAllAudioBtn.addEventListener('click', generateAllAudio);
@@ -1077,6 +1100,82 @@
                 });
         }
 
+        // 진행률 표시 UI 요소
+        let progressIntervalId = null;
+
+        function showProgressBar() {
+            const progressDiv = document.getElementById('audio-progress');
+            if (progressDiv) {
+                progressDiv.style.display = 'block';
+            }
+        }
+
+        function hideProgressBar() {
+            const progressDiv = document.getElementById('audio-progress');
+            if (progressDiv) {
+                progressDiv.style.display = 'none';
+            }
+            if (progressIntervalId) {
+                clearInterval(progressIntervalId);
+                progressIntervalId = null;
+            }
+        }
+
+        function updateProgressUI(progress) {
+            const messageElem = document.getElementById('audio-progress-message');
+            const barElem = document.getElementById('audio-progress-bar');
+            const percentElem = document.getElementById('audio-progress-percent');
+
+            if (!messageElem || !barElem || !percentElem) return;
+
+            const percentage = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+            messageElem.textContent = progress.message;
+            barElem.style.width = percentage + '%';
+            percentElem.textContent = percentage + '%';
+        }
+
+        async function pollProgress(taskId) {
+            try {
+                const response = await fetch(`/api/translator/audio-progress/${taskId}`);
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        // Task not found, might be completed or not started yet
+                        return null;
+                    }
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return await response.json();
+            } catch (err) {
+                console.error('Failed to poll progress:', err);
+                return null;
+            }
+        }
+
+        async function startProgressPolling(taskId) {
+            showProgressBar();
+
+            return new Promise((resolve, reject) => {
+                progressIntervalId = setInterval(async () => {
+                    const progress = await pollProgress(taskId);
+
+                    if (!progress) {
+                        // Progress not found yet, keep polling
+                        return;
+                    }
+
+                    updateProgressUI(progress);
+
+                    if (progress.status === 'completed') {
+                        hideProgressBar();
+                        resolve(progress);
+                    } else if (progress.status === 'error') {
+                        hideProgressBar();
+                        reject(new Error(progress.message));
+                    }
+                }, 500); // 0.5초마다 폴링
+            });
+        }
+
         async function generateSelectedAudio() {
             if (!currentProject) {
                 alert('프로젝트가 로드되지 않았습니다.');
@@ -1099,16 +1198,26 @@
                 return;
             }
 
+            const taskId = `${currentProject.id}_selected_${segmentIds.length}`;
+
             try {
-                const response = await fetch(`/api/translator/projects/${currentProject.id}/generate-selected-audio`, {
+                // 비동기로 음성 생성 시작
+                const fetchPromise = fetch(`/api/translator/projects/${currentProject.id}/generate-selected-audio`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         segment_ids: segmentIds,
                         voice: voice,
-                        audio_format: audioFormat
+                        audio_format: audioFormat,
+                        task_id: taskId
                     })
                 });
+
+                // 진행률 폴링 시작
+                const progressPromise = startProgressPolling(taskId);
+
+                // 둘 다 완료될 때까지 대기
+                const [response] = await Promise.all([fetchPromise, progressPromise]);
 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
@@ -1117,6 +1226,7 @@
                 const result = await response.json();
                 alert(`선택된 자막 음성 생성 완료!\n파일 경로: ${result.audio_path}`);
             } catch (err) {
+                hideProgressBar();
                 console.error('Failed to generate selected audio:', err);
                 alert('선택된 자막 음성 생성에 실패했습니다: ' + err.message);
             }
@@ -1135,15 +1245,25 @@
                 return;
             }
 
+            const taskId = `${currentProject.id}_all_${currentProject.segments.length}`;
+
             try {
-                const response = await fetch(`/api/translator/projects/${currentProject.id}/generate-all-audio`, {
+                // 비동기로 음성 생성 시작
+                const fetchPromise = fetch(`/api/translator/projects/${currentProject.id}/generate-all-audio`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         voice: voice,
-                        audio_format: audioFormat
+                        audio_format: audioFormat,
+                        task_id: taskId
                     })
                 });
+
+                // 진행률 폴링 시작
+                const progressPromise = startProgressPolling(taskId);
+
+                // 둘 다 완료될 때까지 대기
+                const [response] = await Promise.all([fetchPromise, progressPromise]);
 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
@@ -1154,6 +1274,7 @@
                 renderProject(project);
                 alert('전체 음성 생성 완료!');
             } catch (err) {
+                hideProgressBar();
                 console.error('Failed to generate all audio:', err);
                 alert('전체 음성 생성에 실패했습니다: ' + err.message);
             }
@@ -1194,6 +1315,109 @@
             }
 
             alert('전체 음성 저장 기능은 백엔드에서 구현되어야 합니다. 현재는 개별 세그먼트 음성 파일이 이미 저장되어 있습니다.');
+        }
+
+        async function saveSelectedAudioAs() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            if (selectedSegmentIds.size === 0) {
+                alert('저장할 세그먼트를 선택해주세요.');
+                return;
+            }
+
+            // 선택된 세그먼트 중 음성이 생성된 것만 필터링
+            const selectedSegments = currentProject.segments.filter(seg =>
+                selectedSegmentIds.has(seg.id) && seg.audio_path
+            );
+
+            if (selectedSegments.length === 0) {
+                alert('선택된 세그먼트 중 음성이 생성된 항목이 없습니다. 먼저 음성을 생성해주세요.');
+                return;
+            }
+
+            const newName = prompt(
+                `${selectedSegments.length}개의 선택된 음성을 새 프로젝트로 저장합니다.\n새 프로젝트 이름을 입력하세요:`,
+                currentProject.base_name + '_선택음성'
+            );
+
+            if (!newName || newName.trim() === '') {
+                return;
+            }
+
+            const saveBtn = document.getElementById('save-selected-audio-btn');
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.textContent = '💾 저장 중...';
+            }
+
+            try {
+                const trimmedName = newName.trim();
+                console.log(`💾 Saving selected audio with name: "${trimmedName}"`);
+
+                // 먼저 프로젝트를 복제
+                const clonePayload = { new_name: trimmedName };
+                console.log('📤 Clone request payload:', clonePayload);
+
+                const cloneResponse = await fetch(`/api/translator/projects/${currentProject.id}/clone`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(clonePayload)
+                });
+
+                if (!cloneResponse.ok) {
+                    const errorText = await cloneResponse.text();
+                    console.error('❌ Clone failed:', errorText);
+                    throw new Error('프로젝트 복사 실패');
+                }
+
+                const newProject = await cloneResponse.json();
+                console.log('✅ Project cloned:', {
+                    id: newProject.id,
+                    base_name: newProject.base_name,
+                    expected_name: trimmedName
+                });
+
+                // 복제된 프로젝트에서 선택되지 않았거나 음성이 없는 세그먼트 삭제
+                const segmentsToDelete = newProject.segments.filter(seg =>
+                    !selectedSegmentIds.has(seg.id) || !seg.audio_path
+                );
+                console.log(`🗑️ Deleting ${segmentsToDelete.length} segments from cloned project...`);
+
+                let deletedCount = 0;
+                for (const segment of segmentsToDelete) {
+                    try {
+                        const deleteResponse = await fetch(`/api/translator/projects/${newProject.id}/segments/${segment.id}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (deleteResponse.ok) {
+                            deletedCount++;
+                        }
+                    } catch (error) {
+                        console.error(`Failed to delete segment ${segment.id}:`, error);
+                    }
+                }
+
+                console.log(`✅ Deleted ${deletedCount} segments from cloned project`);
+
+                alert(`✅ ${selectedSegments.length}개의 음성이 "${newName}"로 저장되었습니다.`);
+
+                // 새 프로젝트로 이동할지 물어보기
+                if (confirm('저장된 프로젝트로 이동하시겠습니까?')) {
+                    window.location.href = `/translator?id=${newProject.id}`;
+                }
+            } catch (error) {
+                console.error('Save selected audio error:', error);
+                alert('❌ 선택된 음성 저장에 실패했습니다: ' + error.message);
+            } finally {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = '💾 선택 음성 저장';
+                }
+            }
         }
 
         function syncSelectionWithProject() {
@@ -3054,7 +3278,7 @@
 
         #voice-synthesis-mode {
             padding: 6px 12px;
-            border: 1px solid #ddd;
+            border: 1px solid #252424;
             border-radius: 4px;
             background: white;
             color: #333;
@@ -3081,7 +3305,7 @@
 
         .source-info {
             background: #f8f9fa;
-            border: 1px solid #dee2e6;
+            border: 1px solid #636161;
             border-radius: 8px;
             padding: 15px;
             margin: 15px 0;
@@ -3198,35 +3422,41 @@
             color: #000000;
         }
 
-        .bulk-actions button.btn-primary {
+        .bulk-actions button.btn-primary,
+        .audio-actions button.btn-primary {
             background: #007bff;
             color: #ffffff;
             border: 1px solid #0056b3;
         }
 
-        .bulk-actions button.btn-primary:hover {
+        .bulk-actions button.btn-primary:hover,
+        .audio-actions button.btn-primary:hover {
             background: #0056b3;
             color: #ffffff;
         }
 
-        .bulk-actions button.btn-success {
+        .bulk-actions button.btn-success,
+        .audio-actions button.btn-success {
             background: #28a745;
             color: #ffffff;
             border: 1px solid #218838;
         }
 
-        .bulk-actions button.btn-success:hover {
+        .bulk-actions button.btn-success:hover,
+        .audio-actions button.btn-success:hover {
             background: #218838;
             color: #ffffff;
         }
 
-        .bulk-actions button.btn-danger {
+        .bulk-actions button.btn-danger,
+        .audio-actions button.btn-danger {
             background: #dc3545;
             color: #ffffff;
             border: 1px solid #bd2130;
         }
 
-        .bulk-actions button.btn-danger:hover {
+        .bulk-actions button.btn-danger:hover,
+        .audio-actions button.btn-danger:hover {
             background: #bd2130;
             color: #ffffff;
         }
@@ -3246,7 +3476,6 @@
 
         .segment-index {
             font-weight: bold;
-            color: #000000;
             min-width: 30px;
         }
 

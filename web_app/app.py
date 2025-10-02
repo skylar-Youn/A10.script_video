@@ -780,6 +780,92 @@ async def api_clone_translator_project(project_id: str, payload: Dict[str, Any] 
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@translator_router.post("/projects/{project_id}/generate-selected-audio")
+async def api_generate_selected_audio(project_id: str, payload: dict):
+    """선택된 세그먼트들의 음성을 생성하고, 자막 시간에 맞춰 무음을 포함한 음성 파일을 생성합니다."""
+    segment_ids = payload.get("segment_ids", [])
+    voice = payload.get("voice", "nova")
+    audio_format = payload.get("audio_format", "wav")
+    task_id = payload.get("task_id")  # 선택적 task_id
+
+    if not segment_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="segment_ids is required"
+        )
+
+    # task_id가 없으면 자동 생성
+    if not task_id:
+        task_id = f"{project_id}_selected_{len(segment_ids)}"
+
+    try:
+        from ai_shorts_maker.translator import generate_selected_audio_with_silence
+        audio_path = await run_in_threadpool(generate_selected_audio_with_silence, project_id, segment_ids, voice, audio_format, task_id)
+        return {"audio_path": audio_path, "task_id": task_id}
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Translator project '{project_id}' not found."
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.exception("Failed to generate selected audio for project %s", project_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate selected audio: {str(e)}"
+        )
+
+
+@translator_router.post("/projects/{project_id}/generate-all-audio", response_model=TranslatorProject)
+async def api_generate_all_audio(project_id: str, payload: dict) -> TranslatorProject:
+    """모든 세그먼트에 대해 음성 파일을 생성합니다."""
+    voice = payload.get("voice", "nova")
+    audio_format = payload.get("audio_format", "wav")
+    task_id = payload.get("task_id")  # 선택적 task_id
+
+    try:
+        from ai_shorts_maker.translator import generate_all_audio
+        updated_project = await run_in_threadpool(generate_all_audio, project_id, voice, audio_format, task_id)
+        return updated_project
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Translator project '{project_id}' not found."
+        )
+    except Exception as e:
+        logger.exception("Failed to generate all audio for project %s", project_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate all audio: {str(e)}"
+        )
+
+
+@translator_router.get("/audio-progress/{task_id}")
+async def api_get_audio_progress(task_id: str):
+    """음성 생성 진행률을 조회합니다."""
+    try:
+        from ai_shorts_maker.translator import get_audio_generation_progress
+        progress = get_audio_generation_progress(task_id)
+        if progress is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Task '{task_id}' not found."
+            )
+        return progress
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get audio progress for task %s", task_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get audio progress: {str(e)}"
+        )
+
+
 app.include_router(translator_router)
 
 

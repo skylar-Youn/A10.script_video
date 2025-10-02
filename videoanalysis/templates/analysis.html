@@ -514,7 +514,10 @@
 
                                     <!-- 영상 트랙 -->
                                     <div class="timeline-track video-track">
-                                        <div class="track-header">📹 영상</div>
+                                        <div class="track-header" style="display: flex; align-items: center; gap: 10px;">
+                                            <input type="checkbox" id="track-video-enable" checked style="cursor: pointer; width: 18px; height: 18px;">
+                                            <label for="track-video-enable" style="cursor: pointer;">📹 영상</label>
+                                        </div>
                                         <div class="track-content" id="video-track">
                                             <!-- 영상 클립이 여기에 표시됩니다 -->
                                         </div>
@@ -522,9 +525,34 @@
 
                                     <!-- 음성 파형 트랙 -->
                                     <div class="timeline-track audio-track">
-                                        <div class="track-header">🎵 음성</div>
+                                        <div class="track-header" style="display: flex; align-items: center; gap: 10px;">
+                                            <input type="checkbox" id="track-audio-enable" checked style="cursor: pointer; width: 18px; height: 18px;">
+                                            <label for="track-audio-enable" style="cursor: pointer;">🎵 음성</label>
+                                        </div>
                                         <div class="track-content" id="audio-track">
                                             <canvas id="timeline-waveform" height="80"></canvas>
+                                        </div>
+                                    </div>
+
+                                    <!-- 해설 음성 파형 트랙 -->
+                                    <div class="timeline-track audio-track">
+                                        <div class="track-header" style="display: flex; align-items: center; gap: 10px;">
+                                            <input type="checkbox" id="track-commentary-enable" checked style="cursor: pointer; width: 18px; height: 18px;">
+                                            <label for="track-commentary-enable" style="cursor: pointer;">🎙️ 해설 음성</label>
+                                        </div>
+                                        <div class="track-content" id="commentary-audio-track">
+                                            <canvas id="commentary-waveform" height="80"></canvas>
+                                        </div>
+                                    </div>
+
+                                    <!-- 배경 음악 파형 트랙 -->
+                                    <div class="timeline-track audio-track">
+                                        <div class="track-header" style="display: flex; align-items: center; gap: 10px;">
+                                            <input type="checkbox" id="track-bgm-enable" checked style="cursor: pointer; width: 18px; height: 18px;">
+                                            <label for="track-bgm-enable" style="cursor: pointer;">🎵 배경 음악</label>
+                                        </div>
+                                        <div class="track-content" id="bgm-audio-track">
+                                            <canvas id="bgm-waveform" height="80"></canvas>
                                         </div>
                                     </div>
 
@@ -532,7 +560,10 @@
                                     <!-- 메인 자막 트랙 (원어 대사) -->
                                     <div class="timeline-track subtitle-track main-subtitle-track" id="main-subtitle-track">
                                         <div class="track-header">
-                                            <div class="track-title">📝 메인 자막</div>
+                                            <div class="track-title" style="display: flex; align-items: center; gap: 8px;">
+                                                <input type="checkbox" id="track-main-subtitle-enable" checked style="cursor: pointer; width: 16px; height: 16px;">
+                                                <label for="track-main-subtitle-enable" style="cursor: pointer;">📝 메인 자막</label>
+                                            </div>
                                             <div class="track-controls">
                                                 <button class="track-toggle" data-track="main" title="표시/숨김">👁️</button>
                                                 <button class="track-lock" data-track="main" title="잠금/해제">🔓</button>
@@ -547,7 +578,10 @@
                                     <!-- 번역/더빙 자막 트랙 -->
                                     <div class="timeline-track subtitle-track translation-subtitle-track" id="translation-subtitle-track">
                                         <div class="track-header">
-                                            <div class="track-title">🌐 번역 자막</div>
+                                            <div class="track-title" style="display: flex; align-items: center; gap: 8px;">
+                                                <input type="checkbox" id="track-translation-subtitle-enable" checked style="cursor: pointer; width: 16px; height: 16px;">
+                                                <label for="track-translation-subtitle-enable" style="cursor: pointer;">🌐 번역 자막</label>
+                                            </div>
                                             <div class="track-controls">
                                                 <button class="track-toggle" data-track="translation" title="표시/숨김">👁️</button>
                                                 <button class="track-lock" data-track="translation" title="잠금/해제">🔓</button>
@@ -562,7 +596,10 @@
                                     <!-- 설명/효과음 자막 트랙 -->
                                     <div class="timeline-track subtitle-track description-subtitle-track" id="description-subtitle-track">
                                         <div class="track-header">
-                                            <div class="track-title">🔊 설명 자막</div>
+                                            <div class="track-title" style="display: flex; align-items: center; gap: 8px;">
+                                                <input type="checkbox" id="track-description-subtitle-enable" checked style="cursor: pointer; width: 16px; height: 16px;">
+                                                <label for="track-description-subtitle-enable" style="cursor: pointer;">🔊 설명 자막</label>
+                                            </div>
                                             <div class="track-controls">
                                                 <button class="track-toggle" data-track="description" title="표시/숨김">👁️</button>
                                                 <button class="track-lock" data-track="description" title="잠금/해제">🔓</button>
@@ -588,15 +625,33 @@
                         <div class="sync-controls">
                             <button class="sync-btn" id="load-video-file">📹 영상 파일 로드</button>
                             <button class="sync-btn" id="load-audio-file">🎵 음성 파일 로드</button>
+                            <button class="sync-btn" id="load-bgm-file">🎵 배경음악 로드</button>
                             <button class="sync-btn" id="load-subtitle-file">📝 자막 파일 로드</button>
-                            <button class="sync-btn" id="load-translator-subtitles" style="background-color: #2196F3;">🌐 유튜브제작기 번역결과 로드</button>
+                            <button class="sync-btn" id="load-translator-subtitles" style="background-color: #2196F3;">🌐 유튜브제작기 번역결과 자막 로드</button>
+                            <button class="sync-btn" id="load-translator-audio" style="background-color: #2196F3;">🎵 유튜브제작기 번역결과 음성 로드</button>
                             <button class="sync-btn" id="cut-translation-audio" style="background-color: #FF5722;">🔇 설명자막 음성 묵음처리</button>
                             <button class="sync-btn primary" id="simultaneous-play">🎥 영상+음성 동시 재생</button>
                             <button class="sync-btn secondary" id="bundle-audio">🎵 음성 묶음 편집</button>
+                            <button class="sync-btn" id="create-output-video" style="background-color: #FF6F00; color: white; font-weight: bold;">🎬 영상 출력 파일 만들기</button>
+                        </div>
+
+                        <!-- 영상 출력 진행률 표시 -->
+                        <div id="output-video-progress" style="display: none; margin-top: 15px; padding: 15px; background: #1a2332; border-radius: 8px; border: 1px solid #2a3f5f;">
+                            <div style="margin-bottom: 8px; color: #f0f4f8; font-weight: bold;" id="output-progress-message">영상 출력 준비 중...</div>
+                            <div style="background: #0d1520; height: 24px; border-radius: 12px; overflow: hidden; position: relative;">
+                                <div id="output-progress-bar" style="background: linear-gradient(90deg, #FF6F00, #FF8F00); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center;">
+                                    <span id="output-progress-percent" style="color: #fff; font-weight: bold; font-size: 12px;"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sync-controls" style="margin-top: 10px;">
                             <button class="sync-btn debug" id="debug-waveform" style="background-color: #ff6b4a;">🔧 파형 디버그</button>
                             <button class="sync-btn test" id="test-real-waveform" style="background-color: #4CAF50;">🎵 실제 파형 테스트</button>
                             <button class="sync-btn test" id="test-subtitle-numbers" style="background-color: #FF6B4A;">🧪 자막 번호 테스트</button>
                             <button class="sync-btn test" id="force-test-subtitles" style="background-color: #9C27B0;">🎯 강제 자막 표시</button>
+                            <button class="sync-btn test" id="clear-subtitles" style="background-color: #F44336;">🗑️ 자막 지우기</button>
+                            <button class="sync-btn test" id="clear-tracks" style="background-color: #E91E63;">🧹 트랙 지우기</button>
                         </div>
                     </div>
 
