@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>📊 유튜브 콘텐츠 분석 도구</title>
-    <link rel="stylesheet" href="/static/analysis.css?v=5">
+    <link rel="stylesheet" href="/static/analysis.css?v=7">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -633,6 +633,8 @@
                             <button class="sync-btn primary" id="simultaneous-play">🎥 영상+음성 동시 재생</button>
                             <button class="sync-btn secondary" id="bundle-audio">🎵 음성 묶음 편집</button>
                             <button class="sync-btn" id="create-output-video" style="background-color: #FF6F00; color: white; font-weight: bold;">🎬 영상 출력 파일 만들기</button>
+                            <button class="sync-btn" id="save-track-project" style="background-color: #00B894; color: white; font-weight: bold;">💾 트랙 프로젝트 저장하기</button>
+                            <button class="sync-btn" id="load-track-project" style="background-color: #0984E3; color: white; font-weight: bold;">📂 트랙 프로젝트 불러오기</button>
                         </div>
 
                         <!-- 영상 출력 진행률 표시 -->
@@ -889,12 +891,16 @@
 
             <div class="separation-controls" style="margin-top: 15px;">
                 <div class="control-group">
-                    <label for="separation-audio-select">
+                    <label style="color: #f0f4f8; font-weight: 500; margin-bottom: 5px; display: block;">
                         음성 파일 선택
-                        <select id="separation-audio-select" style="width: 100%; padding: 8px; margin-top: 5px; background: #0d1520; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px;">
-                            <option value="">-- 음성 파일을 선택하세요 --</option>
-                        </select>
                     </label>
+                    <button class="action-btn secondary" id="select-separation-audio" style="width: 100%; text-align: left; justify-content: flex-start; padding: 10px;">
+                        📁 음성 파일 선택하기
+                    </button>
+                    <div id="selected-separation-audio" style="margin-top: 8px; padding: 8px; background: #0d1520; border-radius: 5px; color: #4CAF50; font-size: 13px; display: none;">
+                        선택된 파일: <span id="separation-audio-name">없음</span>
+                    </div>
+                    <input type="hidden" id="separation-audio-path" value="">
                 </div>
 
                 <div class="control-group" style="margin-top: 15px;">
@@ -1001,6 +1007,6 @@
     </div>
 </div>
 
-<script src="/static/analysis.js?v=38"></script>
+<script src="/static/analysis.js?v=42"></script>
 </body>
 </html>

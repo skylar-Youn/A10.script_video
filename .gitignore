@@ -37,3 +37,4 @@ __pycache__/*
 *.xlsx
 archive/*
 youtube/saved_results/*
+트랙*.json

@@ -4427,8 +4427,8 @@ class VideoAnalysisApp {
 
         if (loadAudioBtn) {
             loadAudioBtn.addEventListener('click', async () => {
-                await this.loadFileList(); // 파일 목록 새로고침
-                this.loadSelectedAudio();
+                await this.loadFileList('audio'); // 파일 목록 새로고침
+                await this.promptAudioSelection('audio');
             });
         }
 
@@ -4436,8 +4436,8 @@ class VideoAnalysisApp {
         const loadBGMBtn = document.getElementById('load-bgm-file');
         if (loadBGMBtn) {
             loadBGMBtn.addEventListener('click', async () => {
-                await this.loadFileList(); // 파일 목록 새로고침
-                this.loadSelectedBGM();
+                await this.loadFileList('audio'); // 파일 목록 새로고침
+                await this.promptAudioSelection('bgm');
             });
         }
 
@@ -4514,6 +4514,20 @@ class VideoAnalysisApp {
         if (createOutputVideoBtn) {
             createOutputVideoBtn.addEventListener('click', async () => {
                 await this.createOutputVideo();
+            });
+        }
+
+        const saveTrackProjectBtn = document.getElementById('save-track-project');
+        if (saveTrackProjectBtn) {
+            saveTrackProjectBtn.addEventListener('click', async () => {
+                await this.saveTrackProject();
+            });
+        }
+
+        const loadTrackProjectBtn = document.getElementById('load-track-project');
+        if (loadTrackProjectBtn) {
+            loadTrackProjectBtn.addEventListener('click', async () => {
+                await this.loadTrackProject();
             });
         }
     }
@@ -5099,44 +5113,203 @@ class VideoAnalysisApp {
         }
     }
 
-    async loadSelectedAudio() {
-        let audioFiles = Array.from(this.selectedFiles).filter(path =>
-            this.getFileType(path) === 'audio');
+    async promptAudioSelection(mode = 'audio') {
+        try {
+            const response = await fetch('/api/files?filter_type=all');
+            if (!response.ok) {
+                throw new Error('파일 목록을 불러올 수 없습니다.');
+            }
 
-        // 선택된 파일이 없다면, API를 통해 사용 가능한 음성 파일 자동 검색
-        if (audioFiles.length === 0) {
-            try {
-                console.log('API에서 음성 파일 검색 중...');
-                // API에서 직접 파일 목록 가져오기
-                const response = await fetch('/api/files?filter_type=all');
-                const data = await response.json();
-                const availableAudios = [];
+            const data = await response.json();
+            const audioFiles = Array.isArray(data.files)
+                ? data.files.filter(file => file && (
+                    file.type === 'audio' || this.getFileType(file.path) === 'audio'
+                ))
+                : [];
 
-                if (data.files) {
-                    data.files.forEach(file => {
-                        if (file.path && this.getFileType(file.path) === 'audio') {
-                            availableAudios.push(file.path);
-                        }
-                    });
+            if (!audioFiles.length) {
+                this.showError('사용 가능한 오디오 파일이 없습니다. 먼저 음성 파일을 추가하세요.');
+                return;
+            }
+
+            const accentColor = mode === 'bgm' ? '#2196F3' : '#4CAF50';
+            const highlightIcon = mode === 'bgm' ? '🎹' : '🎵';
+            const title = mode === 'bgm' ? '배경음악 파일 선택' : '음성 파일 선택';
+            const description = mode === 'bgm'
+                ? '타임라인에 사용할 배경음악 파일을 선택하세요.'
+                : '주 음성 트랙으로 사용할 파일을 선택하세요.';
+
+            this.showFileSelectionModal({
+                modalId: mode === 'bgm' ? 'bgm-picker-modal' : 'audio-picker-modal',
+                title,
+                description,
+                accentColor,
+                highlightIcon,
+                files: audioFiles,
+                selectedPath: mode === 'bgm' ? this.bgmFilePath : this.audioFilePath,
+                emptyMessage: '사용 가능한 오디오 파일이 없습니다. 먼저 파일을 추가하세요.',
+                onSelect: async (file) => {
+                    if (mode === 'bgm') {
+                        await this.loadSelectedBGM(file.path);
+                    } else {
+                        await this.loadSelectedAudio(file.path);
+                    }
                 }
+            });
+        } catch (error) {
+            console.error('오디오 파일 선택 준비 실패:', error);
+            this.showError('오디오 파일 목록을 불러오지 못했습니다: ' + error.message);
+        }
+    }
 
-                console.log('API에서 찾은 음성 파일들:', availableAudios);
+    showFileSelectionModal(options) {
+        const {
+            modalId = 'file-picker-modal',
+            title = '파일 선택',
+            description = '',
+            accentColor = '#4CAF50',
+            highlightIcon = '📄',
+            files = [],
+            emptyMessage = '선택할 수 있는 파일이 없습니다.',
+            selectedPath = null,
+            onSelect = null
+        } = options || {};
 
-                if (availableAudios.length > 0) {
-                    audioFiles = [availableAudios[0]];
-                    this.showInfo(`음성 파일을 자동으로 선택했습니다: ${availableAudios[0].split('/').pop()}`);
-                } else {
-                    this.showError('음성 파일이 없습니다. .mp3, .wav 등의 음성 파일을 업로드하거나 선택하세요.');
+        if (typeof document === 'undefined') {
+            return;
+        }
+
+        const existingModal = document.getElementById(modalId);
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        const listHtml = files.length
+            ? files.map((file, index) => {
+                const displayName = file.name || (file.path ? file.path.split('/').pop() : '오디오 파일');
+                const isSelected = selectedPath && file.path === selectedPath;
+                const detailParts = [];
+                if (file.size_mb) {
+                    detailParts.push(`${file.size_mb}MB`);
+                }
+                if (file.modified_str) {
+                    detailParts.push(file.modified_str);
+                }
+                const detailText = detailParts.join(' · ');
+
+                return `
+                    <div class="modal-file-item" data-file-index="${index}" style="padding: 12px; margin: 8px 0; background: ${isSelected ? '#3f4b3f' : '#3a3a3a'}; border-radius: 6px; cursor: pointer; border: 2px solid ${isSelected ? accentColor : 'transparent'}; transition: all 0.2s;">
+                        <div style=\"color: ${accentColor}; font-weight: bold; margin-bottom: 4px;\">${highlightIcon} ${displayName}</div>
+                        <div style=\"color: #b0c4d0; font-size: 12px;\">${detailText}</div>
+                        <div style=\"color: #8899a6; font-size: 12px; word-break: break-all;\">${file.path || ''}</div>
+                    </div>
+                `;
+            }).join('')
+            : `<div style="padding: 16px; background: #3a3a3a; border-radius: 6px; text-align: center; color: #b0c4d0;">${emptyMessage}</div>`;
+
+        const modalHtml = `
+            <div id="${modalId}" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;">
+                <div style="background: #2a2a2a; padding: 28px; border-radius: 12px; width: min(90%, 560px); max-height: 80vh; overflow-y: auto; box-shadow: 0 12px 32px rgba(0,0,0,0.45);">
+                    <h3 style="margin: 0 0 10px 0; color: ${accentColor};">${title}</h3>
+                    ${description ? `<p style="margin: 0 0 16px 0; color: #cfd8dc; font-size: 14px; line-height: 1.5;">${description}</p>` : ''}
+                    <div style="margin-bottom: 20px;">${listHtml}</div>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                        <button data-action="cancel" style="padding: 10px 18px; background: #616161; color: white; border: none; border-radius: 6px; cursor: pointer;">취소</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        const modalElement = document.getElementById(modalId);
+        if (!modalElement) {
+            return;
+        }
+
+        const closeModal = () => {
+            modalElement.remove();
+        };
+
+        modalElement.addEventListener('click', (event) => {
+            if (event.target === modalElement) {
+                closeModal();
+            }
+        });
+
+        const cancelButton = modalElement.querySelector('[data-action="cancel"]');
+        if (cancelButton) {
+            cancelButton.addEventListener('click', closeModal);
+        }
+
+        modalElement.querySelectorAll('[data-file-index]').forEach((item) => {
+            item.addEventListener('click', async () => {
+                const index = Number(item.getAttribute('data-file-index'));
+                const file = files[index];
+                if (!file) {
                     return;
                 }
-            } catch (error) {
-                console.error('파일 목록 조회 오류:', error);
-                this.showError('음성 파일 검색 중 오류가 발생했습니다: ' + error.message);
-                return;
+
+                closeModal();
+
+                if (typeof onSelect === 'function') {
+                    try {
+                        await onSelect(file);
+                    } catch (error) {
+                        console.error('파일 선택 처리 실패:', error);
+                        this.showError('파일을 로드하는 중 오류가 발생했습니다: ' + error.message);
+                    }
+                }
+            });
+        });
+    }
+
+    async loadSelectedAudio(manualPath = null) {
+        let audioPath = manualPath;
+
+        if (!audioPath) {
+            const selectedAudios = Array.from(this.selectedFiles).filter(path =>
+                this.getFileType(path) === 'audio');
+
+            if (selectedAudios.length === 0) {
+                try {
+                    console.log('API에서 음성 파일 검색 중...');
+                    const response = await fetch('/api/files?filter_type=all');
+                    const data = await response.json();
+                    const availableAudios = [];
+
+                    if (data.files) {
+                        data.files.forEach(file => {
+                            if (file.path && this.getFileType(file.path) === 'audio') {
+                                availableAudios.push(file.path);
+                            }
+                        });
+                    }
+
+                    console.log('API에서 찾은 음성 파일들:', availableAudios);
+
+                    if (availableAudios.length > 0) {
+                        audioPath = availableAudios[0];
+                        this.showInfo(`음성 파일을 자동으로 선택했습니다: ${availableAudios[0].split('/').pop()}`);
+                    } else {
+                        this.showError('음성 파일이 없습니다. .mp3, .wav 등의 음성 파일을 업로드하거나 선택하세요.');
+                        return;
+                    }
+                } catch (error) {
+                    console.error('파일 목록 조회 오류:', error);
+                    this.showError('음성 파일 검색 중 오류가 발생했습니다: ' + error.message);
+                    return;
+                }
+            } else {
+                audioPath = selectedAudios[0];
             }
         }
 
-        const audioPath = audioFiles[0];
+        if (!audioPath) {
+            this.showError('로드할 음성 파일을 찾을 수 없습니다.');
+            return;
+        }
+
         this.timeline.audioData = { path: audioPath };
         this.audioFilePath = audioPath; // 음성 파일 경로 저장
         this.audioPath = audioPath; // audioPath도 저장
@@ -5196,47 +5369,56 @@ class VideoAnalysisApp {
             timelineAudioData: this.timeline.audioData
         });
 
-        this.showSuccess('음성 파일이 로드되었습니다');
+        const audioFileName = audioPath.split('/').pop();
+        this.showSuccess(`음성 파일이 로드되었습니다: ${audioFileName}`);
     }
 
-    async loadSelectedBGM() {
-        let bgmFiles = Array.from(this.selectedFiles).filter(path =>
-            this.getFileType(path) === 'audio');
+    async loadSelectedBGM(manualPath = null) {
+        let bgmPath = manualPath;
 
-        // 선택된 파일이 없다면, API를 통해 사용 가능한 배경음악 파일 자동 검색
-        if (bgmFiles.length === 0) {
-            try {
-                console.log('API에서 배경음악 파일 검색 중...');
-                // API에서 직접 파일 목록 가져오기
-                const response = await fetch('/api/files?filter_type=all');
-                const data = await response.json();
-                const availableBGMs = [];
+        if (!bgmPath) {
+            const selectedAudios = Array.from(this.selectedFiles).filter(path =>
+                this.getFileType(path) === 'audio');
 
-                if (data.files) {
-                    data.files.forEach(file => {
-                        if (file.path && this.getFileType(file.path) === 'audio') {
-                            availableBGMs.push(file.path);
-                        }
-                    });
-                }
+            if (selectedAudios.length === 0) {
+                try {
+                    console.log('API에서 배경음악 파일 검색 중...');
+                    const response = await fetch('/api/files?filter_type=all');
+                    const data = await response.json();
+                    const availableBGMs = [];
 
-                console.log('API에서 찾은 배경음악 파일들:', availableBGMs);
+                    if (data.files) {
+                        data.files.forEach(file => {
+                            if (file.path && this.getFileType(file.path) === 'audio') {
+                                availableBGMs.push(file.path);
+                            }
+                        });
+                    }
 
-                if (availableBGMs.length > 0) {
-                    bgmFiles = [availableBGMs[0]];
-                    this.showInfo(`배경음악 파일을 자동으로 선택했습니다: ${availableBGMs[0].split('/').pop()}`);
-                } else {
-                    this.showError('배경음악 파일이 없습니다. .mp3, .wav 등의 음성 파일을 업로드하거나 선택하세요.');
+                    console.log('API에서 찾은 배경음악 파일들:', availableBGMs);
+
+                    if (availableBGMs.length > 0) {
+                        bgmPath = availableBGMs[0];
+                        this.showInfo(`배경음악 파일을 자동으로 선택했습니다: ${availableBGMs[0].split('/').pop()}`);
+                    } else {
+                        this.showError('배경음악 파일이 없습니다. .mp3, .wav 등의 음성 파일을 업로드하거나 선택하세요.');
+                        return;
+                    }
+                } catch (error) {
+                    console.error('파일 목록 조회 오류:', error);
+                    this.showError('배경음악 파일 검색 중 오류가 발생했습니다: ' + error.message);
                     return;
                 }
-            } catch (error) {
-                console.error('파일 목록 조회 오류:', error);
-                this.showError('배경음악 파일 검색 중 오류가 발생했습니다: ' + error.message);
-                return;
+            } else {
+                bgmPath = selectedAudios[0];
             }
         }
 
-        const bgmPath = bgmFiles[0];
+        if (!bgmPath) {
+            this.showError('로드할 배경음악 파일을 찾을 수 없습니다.');
+            return;
+        }
+
         this.timeline.bgmData = { path: bgmPath };
         this.bgmFilePath = bgmPath; // 배경음악 파일 경로 저장
 
@@ -5244,7 +5426,9 @@ class VideoAnalysisApp {
 
         // 배경음악 파형 그리기
         await this.drawBGMWaveform(bgmPath);
-        this.showSuccess('배경음악 파일이 로드되었습니다');
+
+        const bgmFileName = bgmPath.split('/').pop();
+        this.showSuccess(`배경음악 파일이 로드되었습니다: ${bgmFileName}`);
     }
 
     async loadSelectedSubtitle() {
@@ -7346,6 +7530,260 @@ class VideoAnalysisApp {
     // 영상 출력 진행률 업데이트
     updateOutputProgress(percent, message) {
         this.showOutputProgress(percent, message);
+    }
+
+    async saveTrackProject() {
+        try {
+            const hasVideo = Boolean(this.videoPath || this.timeline?.videoData?.path);
+            const hasAudio = Boolean(this.audioPath || this.audioFilePath || this.timeline?.audioData?.path);
+            const hasBgm = Boolean(this.bgmFilePath || this.timeline?.bgmData?.path || this.timeline?.bgmAudioData?.path);
+            const hasSubtitles = Boolean(this.timeline?.subtitleData?.subtitles && this.timeline.subtitleData.subtitles.length);
+
+            if (!hasVideo && !hasAudio && !hasBgm && !hasSubtitles) {
+                this.showError('저장할 트랙 데이터가 없습니다. 먼저 영상/음성/자막을 로드해주세요.');
+                return;
+            }
+
+            const timestampLabel = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
+            const defaultName = `트랙프로젝트_${timestampLabel}`;
+            const nameInput = window.prompt('저장할 프로젝트 이름을 입력하세요.', defaultName);
+
+            if (!nameInput || !nameInput.trim()) {
+                this.showInfo('트랙 프로젝트 저장을 취소했습니다.');
+                return;
+            }
+
+            const trimmedName = nameInput.trim();
+
+            let commentaryPath = null;
+            if (this.commentaryAudio && this.commentaryAudio.src) {
+                const src = this.commentaryAudio.src;
+                if (src.startsWith('blob:') || src.startsWith('data:')) {
+                    const proceed = window.confirm('로컬에서 불러온 해설 음성은 다시 불러올 수 없습니다. 해당 음성 없이 저장할까요?');
+                    if (!proceed) {
+                        this.showInfo('트랙 프로젝트 저장을 취소했습니다.');
+                        return;
+                    }
+                } else {
+                    commentaryPath = src;
+                }
+            }
+
+            const timelineSnapshot = this.buildTimelineSnapshotForSave('track-project-save');
+
+            const payload = {
+                name: trimmedName,
+                created_at: new Date().toISOString(),
+                video_path: this.videoPath || this.timeline?.videoData?.path || null,
+                audio_path: this.audioPath || this.audioFilePath || this.timeline?.audioData?.path || null,
+                bgm_path: this.bgmFilePath || this.timeline?.bgmData?.path || this.timeline?.bgmAudioData?.path || null,
+                commentary_audio_path: commentaryPath,
+                translator_project_id: this.lastTranslatorProjectId || null,
+                translator_project_title: this.currentProject?.title || null,
+                selected_files: Array.from(this.selectedFiles || []),
+                track_states: this.trackStates ? JSON.parse(JSON.stringify(this.trackStates)) : {},
+                snapshot: timelineSnapshot ? JSON.parse(JSON.stringify(timelineSnapshot)) : null,
+                notes: {
+                    source: 'videoanalysis-track-editor',
+                    saved_by: 'analysis-ui',
+                    version: '2024-10-02'
+                }
+            };
+
+            if (timelineSnapshot && timelineSnapshot.subtitle_data && Array.isArray(timelineSnapshot.subtitle_data.subtitles)) {
+                payload.subtitle_count = timelineSnapshot.subtitle_data.subtitles.length;
+            }
+
+            this.showStatus('💾 트랙 프로젝트 저장 중...');
+
+            const response = await fetch('/api/track-projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                let errorDetail = '트랙 프로젝트를 저장하지 못했습니다.';
+                try {
+                    const errorPayload = await response.json();
+                    if (errorPayload && errorPayload.detail) {
+                        errorDetail = errorPayload.detail;
+                    }
+                } catch (parseError) {
+                    console.error('에러 응답 파싱 실패:', parseError);
+                }
+                throw new Error(errorDetail);
+            }
+
+            const result = await response.json();
+
+            this.showSuccess(`트랙 프로젝트가 저장되었습니다: ${result.base_name || trimmedName}`);
+            this.showStatus('✅ 트랙 프로젝트 저장 완료');
+
+        } catch (error) {
+            console.error('트랙 프로젝트 저장 실패:', error);
+            this.showError(error.message || '트랙 프로젝트 저장 중 오류가 발생했습니다.');
+            this.showStatus('⚠️ 트랙 프로젝트 저장 실패');
+        }
+    }
+
+    async loadTrackProject() {
+        try {
+            this.showStatus('📂 트랙 프로젝트 목록을 불러오는 중...');
+            const listResponse = await fetch('/api/track-projects');
+            if (!listResponse.ok) {
+                throw new Error('저장된 트랙 프로젝트 목록을 불러오지 못했습니다.');
+            }
+
+            const entries = await listResponse.json();
+
+            if (!Array.isArray(entries) || entries.length === 0) {
+                this.showInfo('불러올 트랙 프로젝트가 없습니다. 먼저 저장해주세요.');
+                this.showStatus('ℹ️ 저장된 트랙 프로젝트가 없습니다');
+                return;
+            }
+
+            const modalId = 'track-project-loader';
+            const existingModal = document.getElementById(modalId);
+            if (existingModal) {
+                existingModal.remove();
+            }
+
+            const listHtml = entries.map((entry, index) => {
+                const baseName = entry.base_name || `project_${index + 1}`;
+                const createdAt = entry.created_at || entry.saved_at || '알 수 없음';
+                const videoLabel = entry.video_path ? entry.video_path.split('/').pop() : '영상 없음';
+                const audioLabel = entry.audio_path ? entry.audio_path.split('/').pop() : '음성 없음';
+                const subtitleCount = entry.subtitle_count ?? (entry.snapshot?.subtitle_data?.subtitles?.length ?? 0);
+
+                return `
+                    <div class="track-project-item" data-project-name="${baseName}">
+                        <div class="track-project-title">${entry.name || baseName}</div>
+                        <div class="track-project-meta">저장일: ${createdAt}</div>
+                        <div class="track-project-files">📹 ${videoLabel} | 🎵 ${audioLabel} | 📝 ${subtitleCount} 자막</div>
+                    </div>
+                `;
+            }).join('');
+
+            const modalHtml = `
+                <div id="${modalId}" class="track-project-modal">
+                    <div class="track-project-dialog">
+                        <div class="track-project-header">
+                            <h3>📂 저장된 트랙 프로젝트</h3>
+                            <button class="track-project-close" data-action="close">×</button>
+                        </div>
+                        <div class="track-project-list">
+                            ${listHtml}
+                        </div>
+                        <div class="track-project-footer">
+                            <button class="track-project-cancel" data-action="close">취소</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const modalElement = document.getElementById(modalId);
+            if (!modalElement) {
+                return;
+            }
+
+            const closeModal = () => {
+                modalElement.remove();
+                this.showStatus('준비 완료');
+            };
+
+            modalElement.addEventListener('click', (event) => {
+                if (event.target.dataset?.action === 'close' || event.target === modalElement) {
+                    closeModal();
+                }
+            });
+
+            this.showStatus('📂 불러올 트랙 프로젝트를 선택하세요.');
+
+            modalElement.querySelectorAll('.track-project-item').forEach(item => {
+                item.addEventListener('click', async () => {
+                    const baseName = item.getAttribute('data-project-name');
+                    const selectedEntry = entries.find(entry => entry.base_name === baseName);
+                    if (!selectedEntry) {
+                        this.showError('선택한 프로젝트를 찾을 수 없습니다.');
+                        return;
+                    }
+
+                    closeModal();
+                    this.showStatus('📥 트랙 프로젝트 적용 중...');
+                    await this.applyTrackProject(selectedEntry);
+                });
+            });
+
+        } catch (error) {
+            console.error('트랙 프로젝트 목록 로드 실패:', error);
+            this.showError(error.message || '트랙 프로젝트를 불러오는 중 오류가 발생했습니다.');
+            this.showStatus('⚠️ 트랙 프로젝트 불러오기 실패');
+        }
+    }
+
+    async applyTrackProject(entry) {
+        try {
+            const snapshot = entry.snapshot;
+
+            if (snapshot) {
+                this.restoreTimelineSnapshot(snapshot, { preserveExistingSubtitles: false });
+            }
+
+            if (entry.video_path) {
+                await this.loadFileToTrack(entry.video_path, 'video');
+                this.videoPath = entry.video_path;
+                if (this.timeline) {
+                    this.timeline.videoData = { path: entry.video_path };
+                }
+            }
+
+            if (entry.audio_path) {
+                await this.loadFileToTrack(entry.audio_path, 'audio');
+                this.audioPath = entry.audio_path;
+                if (this.timeline) {
+                    this.timeline.audioData = { path: entry.audio_path };
+                }
+            }
+
+            if (entry.commentary_audio_path) {
+                await this.loadCommentaryAudioFromUrl(entry.commentary_audio_path, entry.commentary_audio_path.split('/').pop());
+            }
+
+            if (entry.bgm_path) {
+                this.bgmFilePath = entry.bgm_path;
+                if (this.timeline) {
+                    this.timeline.bgmData = { path: entry.bgm_path };
+                }
+                await this.drawBGMWaveform(entry.bgm_path);
+            }
+
+            if (Array.isArray(entry.selected_files)) {
+                this.selectedFiles = new Set(entry.selected_files);
+            }
+
+            if (entry.track_states) {
+                this.trackStates = JSON.parse(JSON.stringify(entry.track_states));
+            }
+
+            this.lastTranslatorProjectId = entry.translator_project_id || this.lastTranslatorProjectId;
+
+            this.updateUI();
+            try {
+                this.renderHybridSubtitleTracks();
+            } catch (renderError) {
+                console.error('트랙 자막 렌더링 실패:', renderError);
+            }
+
+            this.showSuccess(`트랙 프로젝트를 불러왔습니다: ${entry.name || entry.base_name}`);
+            this.showStatus('✅ 트랙 프로젝트 불러오기 완료');
+
+        } catch (error) {
+            console.error('트랙 프로젝트 적용 실패:', error);
+            this.showError(error.message || '트랙 프로젝트를 불러오는 중 오류가 발생했습니다.');
+        }
     }
 
     // 영상 출력 진행률 숨기기
@@ -12147,11 +12585,19 @@ class VideoAnalysisApp {
     }
 
     setupVocalSeparation() {
+        // 음성 분리용 파일 선택 버튼
+        const selectSeparationAudioBtn = document.getElementById('select-separation-audio');
+        if (selectSeparationAudioBtn) {
+            selectSeparationAudioBtn.addEventListener('click', async () => {
+                await this.showAudioFileSelectorForSeparation();
+            });
+        }
+
         // 음성 파일 로드 버튼
         const loadVocalsBtn = document.getElementById('load-vocals-file');
         if (loadVocalsBtn) {
             loadVocalsBtn.addEventListener('click', async () => {
-                await this.showAudioFileSelectorForTrack('vocals');
+                await this.showAudioFileSelectorForVocals();
             });
         }
 
@@ -12159,7 +12605,7 @@ class VideoAnalysisApp {
         const loadAccompanimentBtn = document.getElementById('load-accompaniment-file');
         if (loadAccompanimentBtn) {
             loadAccompanimentBtn.addEventListener('click', async () => {
-                await this.showAudioFileSelectorForTrack('accompaniment');
+                await this.showAudioFileSelectorForAccompaniment();
             });
         }
 
@@ -12294,6 +12740,243 @@ class VideoAnalysisApp {
         }
     }
 
+    async showAudioFileSelectorForSeparation() {
+        try {
+            const response = await fetch('/api/files?filter_type=all');
+            if (!response.ok) {
+                throw new Error('파일 목록을 불러올 수 없습니다');
+            }
+
+            const data = await response.json();
+            const audioFiles = data.files.filter(file => {
+                const ext = file.name.toLowerCase();
+                return ext.endsWith('.wav') || ext.endsWith('.mp3') ||
+                       ext.endsWith('.m4a') || ext.endsWith('.ogg');
+            });
+
+            if (audioFiles.length === 0) {
+                this.showError('음성 파일이 없습니다');
+                return;
+            }
+
+            this.showSeparationFileListModal(audioFiles);
+        } catch (error) {
+            console.error('파일 목록 로드 실패:', error);
+            this.showError(`파일 목록 로드 실패: ${error.message}`);
+        }
+    }
+
+    showSeparationFileListModal(audioFiles) {
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center; overflow: auto;';
+
+        modal.innerHTML = `
+            <div style="background: #2a2a2a; padding: 30px; border-radius: 10px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+                <h3 style="color: #fff; margin-bottom: 20px;">🎵 음성 분리할 파일 선택</h3>
+                <p style="color: #b0c4d0; margin-bottom: 20px; font-size: 14px;">분리할 음성 파일을 선택하세요</p>
+
+                <div style="margin-bottom: 15px;">
+                    <input type="text" id="separation-file-search" placeholder="🔍 파일명 검색..."
+                           style="width: 100%; padding: 10px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 5px;">
+                </div>
+
+                <div id="separation-file-list" style="max-height: 400px; overflow-y: auto;">
+                    ${audioFiles.map((file, idx) => `
+                        <div class="separation-file-item" data-file-path="${file.path}"
+                             style="padding: 12px; margin: 8px 0; background: #3a3a3a; border-radius: 5px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
+                            <div style="color: #4CAF50; font-weight: bold; margin-bottom: 3px;">${file.name}</div>
+                            <div style="color: #999; font-size: 11px;">
+                                크기: ${file.size} | 경로: ${file.path.substring(0, 50)}${file.path.length > 50 ? '...' : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button class="cancel-btn" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">취소</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // 검색 기능
+        const searchInput = modal.querySelector('#separation-file-search');
+        const fileItems = modal.querySelectorAll('.separation-file-item');
+
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            fileItems.forEach(item => {
+                const fileName = item.querySelector('div').textContent.toLowerCase();
+                item.style.display = fileName.includes(searchTerm) ? 'block' : 'none';
+            });
+        });
+
+        // 파일 항목 hover 효과 및 클릭 이벤트
+        fileItems.forEach(item => {
+            item.addEventListener('mouseover', () => {
+                item.style.borderColor = '#4CAF50';
+                item.style.background = '#404040';
+            });
+            item.addEventListener('mouseout', () => {
+                item.style.borderColor = 'transparent';
+                item.style.background = '#3a3a3a';
+            });
+            item.addEventListener('click', () => {
+                const filePath = item.getAttribute('data-file-path');
+                const fileName = filePath.split('/').pop();
+
+                // 선택된 파일 정보 저장 및 표시
+                document.getElementById('separation-audio-path').value = filePath;
+                document.getElementById('separation-audio-name').textContent = fileName;
+                document.getElementById('selected-separation-audio').style.display = 'block';
+
+                modal.remove();
+                this.showSuccess(`${fileName} 파일이 선택되었습니다`);
+            });
+        });
+
+        // 취소 버튼
+        modal.querySelector('.cancel-btn').addEventListener('click', () => {
+            modal.remove();
+        });
+
+        // 배경 클릭 시 닫기
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
+    }
+
+    async showAudioFileSelectorForVocals() {
+        try {
+            const response = await fetch('/api/files?filter_type=all');
+            if (!response.ok) {
+                throw new Error('파일 목록을 불러올 수 없습니다');
+            }
+
+            const data = await response.json();
+            const audioFiles = data.files.filter(file => {
+                const ext = file.name.toLowerCase();
+                return ext.endsWith('.wav') || ext.endsWith('.mp3') ||
+                       ext.endsWith('.m4a') || ext.endsWith('.ogg');
+            });
+
+            if (audioFiles.length === 0) {
+                this.showError('음성 파일이 없습니다');
+                return;
+            }
+
+            this.showFileListModal(audioFiles, '🎤 음성 파일 선택', 'commentary');
+        } catch (error) {
+            console.error('파일 목록 로드 실패:', error);
+            this.showError(`파일 목록 로드 실패: ${error.message}`);
+        }
+    }
+
+    async showAudioFileSelectorForAccompaniment() {
+        try {
+            const response = await fetch('/api/files?filter_type=all');
+            if (!response.ok) {
+                throw new Error('파일 목록을 불러올 수 없습니다');
+            }
+
+            const data = await response.json();
+            const audioFiles = data.files.filter(file => {
+                const ext = file.name.toLowerCase();
+                return ext.endsWith('.wav') || ext.endsWith('.mp3') ||
+                       ext.endsWith('.m4a') || ext.endsWith('.ogg');
+            });
+
+            if (audioFiles.length === 0) {
+                this.showError('음성 파일이 없습니다');
+                return;
+            }
+
+            this.showFileListModal(audioFiles, '🎹 배경음악 파일 선택', 'bgm');
+        } catch (error) {
+            console.error('파일 목록 로드 실패:', error);
+            this.showError(`파일 목록 로드 실패: ${error.message}`);
+        }
+    }
+
+    showFileListModal(audioFiles, title, targetTrack) {
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center; overflow: auto;';
+
+        modal.innerHTML = `
+            <div style="background: #2a2a2a; padding: 30px; border-radius: 10px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+                <h3 style="color: #fff; margin-bottom: 20px;">${title}</h3>
+                <p style="color: #b0c4d0; margin-bottom: 20px; font-size: 14px;">로드할 음성 파일을 선택하세요</p>
+
+                <div style="margin-bottom: 15px;">
+                    <input type="text" id="audio-file-search" placeholder="🔍 파일명 검색..."
+                           style="width: 100%; padding: 10px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 5px;">
+                </div>
+
+                <div id="audio-file-list" style="max-height: 400px; overflow-y: auto;">
+                    ${audioFiles.map((file, idx) => `
+                        <div class="audio-file-item" data-file-path="${file.path}"
+                             style="padding: 12px; margin: 8px 0; background: #3a3a3a; border-radius: 5px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
+                            <div style="color: #4CAF50; font-weight: bold; margin-bottom: 3px;">${file.name}</div>
+                            <div style="color: #999; font-size: 11px;">
+                                크기: ${file.size} | 경로: ${file.path.substring(0, 50)}${file.path.length > 50 ? '...' : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button class="cancel-btn" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">취소</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // 검색 기능
+        const searchInput = modal.querySelector('#audio-file-search');
+        const fileItems = modal.querySelectorAll('.audio-file-item');
+
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            fileItems.forEach(item => {
+                const fileName = item.querySelector('div').textContent.toLowerCase();
+                item.style.display = fileName.includes(searchTerm) ? 'block' : 'none';
+            });
+        });
+
+        // 파일 항목 hover 효과 및 클릭 이벤트
+        fileItems.forEach(item => {
+            item.addEventListener('mouseover', () => {
+                item.style.borderColor = '#4CAF50';
+                item.style.background = '#404040';
+            });
+            item.addEventListener('mouseout', () => {
+                item.style.borderColor = 'transparent';
+                item.style.background = '#3a3a3a';
+            });
+            item.addEventListener('click', () => {
+                const filePath = item.getAttribute('data-file-path');
+                modal.remove();
+                this.loadFileToTrack(filePath, targetTrack);
+            });
+        });
+
+        // 취소 버튼
+        modal.querySelector('.cancel-btn').addEventListener('click', () => {
+            modal.remove();
+        });
+
+        // 배경 클릭 시 닫기
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
+    }
+
     showTrackSelector(filePath, fileType) {
         // 트랙 선택 모달 생성
         const modal = document.createElement('div');
@@ -12349,20 +13032,33 @@ class VideoAnalysisApp {
         });
     }
 
-    async loadFileToTrack(filePath, trackType) {
+    async loadFileToTrack(filePath, trackType, options = {}) {
+        const { skipWaveformAnalysis = false } = options;
+
         try {
-            // 파형 데이터 분석
-            const response = await fetch('/api/analyze-waveform', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ file_path: filePath })
-            });
+            let waveformData = null;
 
-            if (!response.ok) {
-                throw new Error('파형 분석 실패');
+            // 파형 데이터 분석 (스킵 옵션이 없을 때만)
+            if (!skipWaveformAnalysis) {
+                try {
+                    const response = await fetch('/api/analyze-waveform', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ file_path: filePath })
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.warn(`파형 분석 실패 (${filePath}):`, errorText);
+                        // 파형 분석 실패해도 계속 진행
+                    } else {
+                        waveformData = await response.json();
+                    }
+                } catch (waveformError) {
+                    console.warn(`파형 분석 중 오류 (${filePath}):`, waveformError);
+                    // 파형 분석 실패해도 계속 진행
+                }
             }
-
-            const waveformData = await response.json();
 
             // 트랙에 로드
             if (trackType === 'video') {

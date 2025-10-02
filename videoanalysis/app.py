@@ -95,6 +95,95 @@ async def get_translator_audio_file(project_id: str, filename: str):
     return FileResponse(audio_file)
 
 
+@app.post("/api/track-projects")
+async def save_track_project(request: Request):
+    """현재 트랙 구성을 프로젝트로 저장"""
+    from pathlib import Path
+    from datetime import datetime
+    from fastapi import HTTPException
+    import json
+    import re
+
+    data = await request.json()
+
+    name = str(data.get("name", "")).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="프로젝트 이름을 입력하세요.")
+
+    created_at = data.get("created_at") or datetime.utcnow().isoformat()
+
+    # 저장 경로 설정
+    base_output_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "track_projects"
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 파일명 안전하게 변환
+    safe_token = re.sub(r"[^0-9A-Za-z가-힣-_]+", "_", name)
+    safe_token = safe_token.strip("_") or "track_project"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = f"{safe_token}_{timestamp}"
+
+    project_payload = {
+        "name": name,
+        "base_name": base_name,
+        "created_at": created_at,
+        "video_path": data.get("video_path"),
+        "audio_path": data.get("audio_path"),
+        "bgm_path": data.get("bgm_path"),
+        "commentary_audio_path": data.get("commentary_audio_path"),
+        "translator_project_id": data.get("translator_project_id"),
+        "translator_project_title": data.get("translator_project_title"),
+        "selected_files": data.get("selected_files", []),
+        "track_states": data.get("track_states", {}),
+        "snapshot": data.get("snapshot"),
+        "subtitle_count": data.get("subtitle_count"),
+        "notes": data.get("notes", {}),
+        "saved_at": datetime.utcnow().isoformat()
+    }
+
+    output_path = base_output_dir / f"{base_name}.json"
+
+    with output_path.open("w", encoding="utf-8") as file:
+        json.dump(project_payload, file, ensure_ascii=False, indent=2)
+
+    logger.info("트랙 프로젝트 저장 완료: %s", output_path)
+
+    return {
+        "detail": "트랙 프로젝트 저장 완료",
+        "base_name": base_name,
+        "file": str(output_path)
+    }
+
+
+@app.get("/api/track-projects")
+async def list_track_projects():
+    """저장된 트랙 프로젝트 목록 반환"""
+    from pathlib import Path
+    from datetime import datetime
+    import json
+
+    base_output_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "track_projects"
+
+    if not base_output_dir.exists():
+        return []
+
+    entries = []
+
+    for json_file in sorted(base_output_dir.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with json_file.open('r', encoding='utf-8') as file:
+                data = json.load(file)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("저장된 트랙 프로젝트 로드 실패: %s (%s)", json_file, exc)
+            continue
+
+        data.setdefault('base_name', json_file.stem)
+        data.setdefault('file', str(json_file))
+        data.setdefault('saved_at', datetime.fromtimestamp(json_file.stat().st_mtime).isoformat())
+        entries.append(data)
+
+    return entries
+
+
 @app.post("/api/create-output-video")
 async def create_output_video(request: Request):
     """체크된 트랙을 합성하여 영상 파일 생성"""
@@ -102,6 +191,8 @@ async def create_output_video(request: Request):
     from pathlib import Path
     from datetime import datetime
     from fastapi import HTTPException
+
+    from urllib.parse import unquote
 
     data = await request.json()
 
@@ -164,8 +255,8 @@ async def create_output_video(request: Request):
                     # translator-audio 다음 2개 부분이 project_id와 filename
                     try:
                         translator_index = parts.index("translator-audio")
-                        project_id = parts[translator_index + 1]
-                        filename = parts[translator_index + 2]
+                        project_id = unquote(parts[translator_index + 1])
+                        filename = unquote(parts[translator_index + 2])
                         audio_path = str(Path.home() / "ws" / "youtubeanalysis" / "ai_shorts_maker" / "outputs" / "translator_projects" / project_id / "audio" / filename)
                     except (ValueError, IndexError) as e:
                         logger.error(f"Failed to parse translator audio path: {audio_path}, error: {e}")
@@ -199,11 +290,9 @@ async def create_output_video(request: Request):
         ffmpeg_cmd.extend(["-map", audio_map])
 
     # 코덱 설정
-    ffmpeg_cmd.extend([
-        "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "23"
-    ])
+    # AV1 코덱을 디코딩할 수 없는 경우를 위해 비디오는 복사 모드 사용
+    if video_enabled and video_files:
+        ffmpeg_cmd.extend(["-c:v", "copy"])
 
     if audio_map:
         ffmpeg_cmd.extend(["-c:a", "aac", "-b:a", "192k"])

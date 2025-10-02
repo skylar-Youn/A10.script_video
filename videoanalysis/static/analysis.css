@@ -231,26 +231,29 @@ body {
 
 /* 파일 그리드 */
 .file-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
 }
 
 .file-card {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border-color);
     border-radius: var(--radius);
-    padding: 1rem;
+    padding: 0.6rem 0.8rem;
     transition: var(--transition);
     cursor: pointer;
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
 }
 
 .file-card:hover {
     background: rgba(255, 255, 255, 0.08);
     border-color: var(--primary-color);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px var(--shadow);
+    transform: translateX(3px);
+    box-shadow: 0 2px 8px var(--shadow);
 }
 
 .file-card.selected {
@@ -260,50 +263,59 @@ body {
 
 .file-header {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 0.75rem;
+    align-items: center;
+    gap: 0.8rem;
+    flex: 1;
+    min-width: 0;
 }
 
 .file-title {
-    font-size: 1rem;
+    font-size: 0.9rem;
     font-weight: 500;
     color: var(--text-primary);
     margin: 0;
-    word-break: break-word;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
 }
 
 .file-type-badge {
     background: var(--primary-color);
     color: white;
-    font-size: 0.7rem;
-    padding: 0.25rem 0.5rem;
+    font-size: 0.65rem;
+    padding: 0.2rem 0.4rem;
     border-radius: 3px;
     font-weight: bold;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .file-details {
     display: flex;
-    gap: 1rem;
-    margin: 0.5rem 0;
-    font-size: 0.8rem;
+    gap: 0.8rem;
+    font-size: 0.75rem;
     color: var(--text-muted);
-    flex-wrap: wrap;
+    align-items: center;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .file-tags {
     display: flex;
-    gap: 0.5rem;
-    margin-top: 0.75rem;
-    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    flex-shrink: 0;
 }
 
 .tag {
     display: inline-block;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.65rem;
     font-weight: 500;
+    white-space: nowrap;
 }
 
 .tag.video { background: rgba(255, 100, 100, 0.2); color: #ff6464; }
@@ -676,6 +688,140 @@ canvas {
     font-size: 0.9rem;
 }
 
+#save-track-project {
+    background-color: #00b894 !important;
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+#save-track-project:hover {
+    background-color: #00a183 !important;
+}
+
+#load-track-project {
+    background-color: #0984e3 !important;
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+#load-track-project:hover {
+    background-color: #0774c8 !important;
+}
+
+.track-project-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 11000;
+    backdrop-filter: blur(4px);
+}
+
+.track-project-dialog {
+    background: #242837;
+    border-radius: 12px;
+    width: min(600px, 90%);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.track-project-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 22px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.track-project-header h3 {
+    margin: 0;
+    color: #ffffff;
+}
+
+.track-project-close {
+    background: transparent;
+    border: none;
+    color: #b0c4de;
+    font-size: 1.5rem;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.track-project-close:hover {
+    color: #ffffff;
+}
+
+.track-project-list {
+    padding: 18px 22px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.track-project-item {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.track-project-item:hover {
+    background: rgba(9, 132, 227, 0.15);
+    border-color: #0984e3;
+    transform: translateY(-1px);
+}
+
+.track-project-title {
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 6px;
+}
+
+.track-project-meta {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 4px;
+}
+
+.track-project-files {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.track-project-footer {
+    padding: 16px 22px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    justify-content: flex-end;
+}
+
+.track-project-cancel {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    color: #ffffff;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.track-project-cancel:hover {
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+}
+
 /* 결과 레이아웃 */
 .results-layout {
     display: grid;
@@ -950,7 +1096,7 @@ canvas {
     }
 
     .file-grid {
-        grid-template-columns: 1fr;
+        gap: 0.4rem;
     }
 
     .file-controls {
