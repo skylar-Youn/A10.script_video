@@ -53,6 +53,82 @@
         </div>
     </section>
 
+    <!-- 트랙 관리 패널 (드래그 앤 드롭 용이성을 위해 상단 배치) -->
+    <section class="panel track-management-panel">
+        <h2>🎬 트랙 관리</h2>
+        <div class="track-layout">
+            <div class="track-info">
+                <p style="margin: 0 0 15px 0; color: #b0c4d0; font-size: 14px;">
+                    📂 파일 탐색기에서 파일을 끌어다 놓거나 버튼을 클릭하여 트랙에 로드하세요
+                </p>
+                <div class="track-actions" style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <button class="sync-btn" id="load-video-file-top">📹 영상 파일 로드</button>
+                    <button class="sync-btn" id="load-audio-file-top">🎵 음성 파일 로드</button>
+                    <button class="sync-btn" id="load-bgm-file-top">🎵 배경음악 로드</button>
+                    <button class="sync-btn" id="load-subtitle-file-top">📝 자막 파일 로드</button>
+                </div>
+            </div>
+
+            <!-- 트랙 미리보기 컨테이너 -->
+            <div class="tracks-preview" style="background: #1a2332; border-radius: 8px; padding: 15px; border: 2px dashed #2a3f5f;">
+                <!-- 영상 트랙 -->
+                <div class="track-item" id="video-track-preview" data-track-type="video" style="padding: 12px; margin-bottom: 10px; background: #0d1520; border-radius: 5px; border-left: 4px solid #4CAF50;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="track-video-enable-top" checked style="cursor: pointer; width: 18px; height: 18px;">
+                            <label for="track-video-enable-top" style="cursor: pointer; color: #f0f4f8; font-weight: bold;">📹 영상 트랙</label>
+                        </div>
+                        <div id="video-track-status" style="color: #999; font-size: 12px;">비어있음</div>
+                    </div>
+                </div>
+
+                <!-- 메인 음성 트랙 -->
+                <div class="track-item" id="audio-track-preview" data-track-type="audio" style="padding: 12px; margin-bottom: 10px; background: #0d1520; border-radius: 5px; border-left: 4px solid #2196F3;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="track-audio-enable-top" checked style="cursor: pointer; width: 18px; height: 18px;">
+                            <label for="track-audio-enable-top" style="cursor: pointer; color: #f0f4f8; font-weight: bold;">🎵 메인 음성 트랙</label>
+                        </div>
+                        <div id="audio-track-status" style="color: #999; font-size: 12px;">비어있음</div>
+                    </div>
+                </div>
+
+                <!-- 해설 음성 트랙 -->
+                <div class="track-item" id="commentary-track-preview" data-track-type="commentary" style="padding: 12px; margin-bottom: 10px; background: #0d1520; border-radius: 5px; border-left: 4px solid #FF9800;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="track-commentary-enable-top" checked style="cursor: pointer; width: 18px; height: 18px;">
+                            <label for="track-commentary-enable-top" style="cursor: pointer; color: #f0f4f8; font-weight: bold;">🎙️ 해설 음성 트랙</label>
+                        </div>
+                        <div id="commentary-track-status" style="color: #999; font-size: 12px;">비어있음</div>
+                    </div>
+                </div>
+
+                <!-- 배경음악 트랙 -->
+                <div class="track-item" id="bgm-track-preview" data-track-type="bgm" style="padding: 12px; margin-bottom: 10px; background: #0d1520; border-radius: 5px; border-left: 4px solid #9C27B0;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="track-bgm-enable-top" checked style="cursor: pointer; width: 18px; height: 18px;">
+                            <label for="track-bgm-enable-top" style="cursor: pointer; color: #f0f4f8; font-weight: bold;">🎵 배경음악 트랙</label>
+                        </div>
+                        <div id="bgm-track-status" style="color: #999; font-size: 12px;">비어있음</div>
+                    </div>
+                </div>
+
+                <!-- 자막 트랙 -->
+                <div class="track-item" id="subtitle-track-preview" data-track-type="subtitle" style="padding: 12px; background: #0d1520; border-radius: 5px; border-left: 4px solid #00BCD4;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="track-subtitle-enable-top" checked style="cursor: pointer; width: 18px; height: 18px;">
+                            <label for="track-subtitle-enable-top" style="cursor: pointer; color: #f0f4f8; font-weight: bold;">📝 자막 트랙</label>
+                        </div>
+                        <div id="subtitle-track-status" style="color: #999; font-size: 12px;">비어있음</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- 선택된 파일 & 배치 옵션 -->
     <section class="panel selection-panel">
         <h2>🎯 분석 대상</h2>
@@ -1001,6 +1077,6 @@
     </div>
 </div>
 
-<script src="/static/analysis.js?v=38"></script>
+<script src="/static/analysis.js?v=39"></script>
 </body>
 </html>

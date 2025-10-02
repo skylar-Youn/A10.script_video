@@ -285,6 +285,9 @@ class VideoAnalysisApp {
 
         // 음성 분리 기능 설정
         this.setupVocalSeparation();
+
+        // 상단 트랙 관리 패널 설정
+        this.setupTopTrackPanel();
     }
 
     setupTimelineEditor() {
@@ -12364,6 +12367,9 @@ class VideoAnalysisApp {
 
             const waveformData = await response.json();
 
+            // 파일명 추출
+            const fileName = filePath.split('/').pop();
+
             // 트랙에 로드
             if (trackType === 'video') {
                 this.loadedVideoPath = filePath;
@@ -12371,17 +12377,30 @@ class VideoAnalysisApp {
                 if (videoElement) {
                     videoElement.src = `/api/file-content?path=${encodeURIComponent(filePath)}`;
                 }
-                this.showSuccess(`${filePath.split('/').pop()} 파일이 영상 트랙에 로드되었습니다`);
+                this.updateTrackStatus('video', fileName);
+                this.showSuccess(`${fileName} 파일이 영상 트랙에 로드되었습니다`);
             } else if (trackType === 'audio') {
                 this.loadedAudioPath = filePath;
                 this.audioWaveformData = waveformData.waveform;
                 this.renderWaveform('audio-waveform', waveformData.waveform);
-                this.showSuccess(`${filePath.split('/').pop()} 파일이 음성 트랙에 로드되었습니다`);
+                this.updateTrackStatus('audio', fileName);
+                this.showSuccess(`${fileName} 파일이 음성 트랙에 로드되었습니다`);
             } else if (trackType === 'commentary') {
                 this.loadedCommentaryPath = filePath;
                 this.commentaryWaveformData = waveformData.waveform;
                 this.renderWaveform('commentary-waveform', waveformData.waveform);
-                this.showSuccess(`${filePath.split('/').pop()} 파일이 해설 음성 트랙에 로드되었습니다`);
+                this.updateTrackStatus('commentary', fileName);
+                this.showSuccess(`${fileName} 파일이 해설 음성 트랙에 로드되었습니다`);
+            } else if (trackType === 'bgm') {
+                this.loadedBgmPath = filePath;
+                this.bgmWaveformData = waveformData.waveform;
+                this.renderWaveform('bgm-waveform', waveformData.waveform);
+                this.updateTrackStatus('bgm', fileName);
+                this.showSuccess(`${fileName} 파일이 배경음악 트랙에 로드되었습니다`);
+            } else if (trackType === 'subtitle') {
+                // 자막 파일 로드 처리
+                this.updateTrackStatus('subtitle', fileName);
+                this.showSuccess(`${fileName} 파일이 자막 트랙에 로드되었습니다`);
             }
 
             // 타임라인 업데이트
@@ -12393,6 +12412,121 @@ class VideoAnalysisApp {
         } catch (error) {
             console.error('파일 로드 실패:', error);
             this.showError(`파일 로드 실패: ${error.message}`);
+        }
+    }
+
+    setupTopTrackPanel() {
+        // 상단 트랙 로드 버튼들
+        const loadVideoTopBtn = document.getElementById('load-video-file-top');
+        if (loadVideoTopBtn) {
+            loadVideoTopBtn.addEventListener('click', async () => {
+                await this.loadFileList();
+                this.loadSelectedVideo();
+            });
+        }
+
+        const loadAudioTopBtn = document.getElementById('load-audio-file-top');
+        if (loadAudioTopBtn) {
+            loadAudioTopBtn.addEventListener('click', async () => {
+                await this.loadFileList();
+                this.loadSelectedAudio();
+            });
+        }
+
+        const loadBgmTopBtn = document.getElementById('load-bgm-file-top');
+        if (loadBgmTopBtn) {
+            loadBgmTopBtn.addEventListener('click', async () => {
+                await this.loadFileList();
+                this.loadSelectedBGM();
+            });
+        }
+
+        const loadSubtitleTopBtn = document.getElementById('load-subtitle-file-top');
+        if (loadSubtitleTopBtn) {
+            loadSubtitleTopBtn.addEventListener('click', async () => {
+                await this.loadFileList();
+                this.loadSelectedSubtitle();
+            });
+        }
+
+        // 트랙 아이템에 드래그 앤 드롭 기능 추가
+        this.setupTrackDragAndDrop();
+    }
+
+    setupTrackDragAndDrop() {
+        // 모든 트랙 아이템에 드롭 이벤트 설정
+        const trackItems = document.querySelectorAll('.track-item');
+
+        trackItems.forEach(trackItem => {
+            trackItem.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                trackItem.style.background = '#1a2a3a';
+                trackItem.style.borderColor = '#4CAF50';
+            });
+
+            trackItem.addEventListener('dragleave', (e) => {
+                trackItem.style.background = '#0d1520';
+                trackItem.style.borderColor = '';
+            });
+
+            trackItem.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                trackItem.style.background = '#0d1520';
+                trackItem.style.borderColor = '';
+
+                const filePath = e.dataTransfer.getData('text/plain');
+                const trackType = trackItem.getAttribute('data-track-type');
+
+                if (filePath && trackType) {
+                    await this.loadFileToTrack(filePath, trackType);
+                }
+            });
+        });
+
+        // 파일 카드에 드래그 이벤트 설정
+        this.updateFileCardsDraggable();
+    }
+
+    updateFileCardsDraggable() {
+        const fileCards = document.querySelectorAll('.file-card');
+
+        fileCards.forEach(card => {
+            card.setAttribute('draggable', 'true');
+
+            card.addEventListener('dragstart', (e) => {
+                const filePath = card.getAttribute('data-file-path');
+                e.dataTransfer.setData('text/plain', filePath);
+                card.style.opacity = '0.5';
+            });
+
+            card.addEventListener('dragend', (e) => {
+                card.style.opacity = '1';
+            });
+        });
+    }
+
+    updateTrackStatus(trackType, fileName) {
+        const statusMap = {
+            'video': 'video-track-status',
+            'audio': 'audio-track-status',
+            'commentary': 'commentary-track-status',
+            'bgm': 'bgm-track-status',
+            'subtitle': 'subtitle-track-status'
+        };
+
+        const statusId = statusMap[trackType];
+        const statusElement = document.getElementById(statusId);
+
+        if (statusElement) {
+            if (fileName) {
+                // 파일명이 너무 길면 축약
+                const displayName = fileName.length > 30 ? fileName.substring(0, 27) + '...' : fileName;
+                statusElement.textContent = `✓ ${displayName}`;
+                statusElement.style.color = '#4CAF50';
+            } else {
+                statusElement.textContent = '비어있음';
+                statusElement.style.color = '#999';
+            }
         }
     }
 }
