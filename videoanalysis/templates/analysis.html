@@ -246,6 +246,63 @@
                             </div>
                         </div>
 
+                        <!-- 재해석 실행 섹션 -->
+                        <div class="reinterpretation-section" style="margin-top: 20px; padding: 20px; background: #1a2332; border-radius: 8px; border: 1px solid #2a3f5f;">
+                            <h5>🚀 결과 활용</h5>
+
+                            <!-- 재해석 실행 모드 -->
+                            <div class="control-group">
+                                <label>재해석 실행 모드</label>
+                                <select id="reinterpretation-mode" style="width: 100%; padding: 8px; background: #0d1520; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px;">
+                                    <option value="api" selected>API 모드 (서버에서 직접 처리)</option>
+                                    <option value="chatgpt">ChatGPT 창 모드</option>
+                                </select>
+                                <small style="color: #b0c4d0; font-size: 11px; display: block; margin-top: 5px;">
+                                    ※ ChatGPT 창 모드는 Devtools/GPT와 직접 대화하여 결과를 붙여넣는 방식입니다.
+                                </small>
+                            </div>
+
+                            <!-- 재해석 톤 -->
+                            <div class="control-group" style="margin-top: 15px;">
+                                <label>재해석 톤</label>
+                                <select id="reinterpretation-tone" style="width: 100%; padding: 8px; background: #0d1520; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px;">
+                                    <option value="neutral" selected>표준</option>
+                                    <option value="casual">캐주얼</option>
+                                    <option value="formal">격식있게</option>
+                                    <option value="humorous">유머러스</option>
+                                    <option value="dramatic">드라마틱</option>
+                                </select>
+                            </div>
+
+                            <!-- 재해석 버튼 -->
+                            <div style="margin-top: 15px;">
+                                <button class="analyze-btn primary" id="execute-reinterpretation" style="width: 100%;">🔄 재해석</button>
+                            </div>
+
+                            <!-- 저장 및 관리 -->
+                            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #2a3f5f;">
+                                <div class="control-group">
+                                    <label>저장할 이름을 입력하세요</label>
+                                    <input type="text" id="save-result-name" placeholder="예: 재해석_v1" style="width: 100%; padding: 8px; background: #0d1520; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px;">
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                                    <button class="action-btn secondary" id="save-result">💾 결과 저장</button>
+                                    <button class="action-btn secondary" id="load-saved-result">📚 저장 결과 불러오기</button>
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                                    <button class="action-btn secondary" id="export-result">📁 결과 내보내기</button>
+                                    <button class="action-btn secondary" id="clear-result">🗑️ 결과 지우기</button>
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                                    <button class="action-btn primary" id="timeline-translate-edit">🈯 타임라인 번역 편집</button>
+                                    <button class="action-btn primary" id="timeline-editor">🎬 타임라인 편집기</button>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- 재해석 비교 편집 패널 -->
                         <div class="reinterpretation-compare" id="reinterpretation-compare" style="display: none;">
                             <h5>📝 재해석 비교 편집</h5>
@@ -948,6 +1005,6 @@
     </div>
 </div>
 
-<script src="/static/analysis.js?v=36"></script>
+<script src="/static/analysis.js?v=37"></script>
 </body>
 </html>
