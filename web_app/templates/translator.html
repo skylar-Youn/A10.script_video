@@ -1224,7 +1224,23 @@
                 }
 
                 const result = await response.json();
-                alert(`선택된 자막 음성 생성 완료!\n파일 경로: ${result.audio_path}`);
+
+                // 번역 결과와 함께 표시
+                let resultMessage = `🎵 선택된 자막 음성 생성 완료!\n\n`;
+                resultMessage += `📂 파일 경로: ${result.audio_path}\n\n`;
+                resultMessage += `✅ 생성된 세그먼트: ${segmentIds.length}개\n\n`;
+                resultMessage += `📝 번역 결과:\n`;
+                resultMessage += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+                currentProject.segments.forEach((seg, idx) => {
+                    if (segmentIds.includes(seg.id)) {
+                        const speaker = seg.speaker || '화자 미정';
+                        const text = seg.translated_text || seg.text || '';
+                        resultMessage += `${idx + 1}. [${speaker}] ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}\n`;
+                    }
+                });
+
+                alert(resultMessage);
             } catch (err) {
                 hideProgressBar();
                 console.error('Failed to generate selected audio:', err);
@@ -1272,7 +1288,25 @@
                 const project = await response.json();
                 currentProject = project;
                 renderProject(project);
-                alert('전체 음성 생성 완료!');
+
+                // 생성된 음성 파일 개수 및 번역 결과 표시
+                const generatedCount = project.segments.filter(seg => seg.audio_path).length;
+                const totalCount = project.segments.length;
+
+                let resultMessage = `🎵 전체 음성 생성 완료!\n\n`;
+                resultMessage += `✅ 생성된 음성: ${generatedCount}/${totalCount}개\n\n`;
+                resultMessage += `📝 번역 결과:\n`;
+                resultMessage += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+                project.segments.forEach((seg, idx) => {
+                    if (seg.audio_path) {
+                        const speaker = seg.speaker || '화자 미정';
+                        const text = seg.translated_text || seg.text || '';
+                        resultMessage += `${idx + 1}. [${speaker}] ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}\n`;
+                    }
+                });
+
+                alert(resultMessage);
             } catch (err) {
                 hideProgressBar();
                 console.error('Failed to generate all audio:', err);
@@ -1292,20 +1326,48 @@
                 return;
             }
 
+            console.log(`🔊 전체 듣기: ${audioSegments.length}개 세그먼트 재생 시작`);
+
             // 모든 음성 파일을 순차적으로 재생
             let currentIndex = 0;
             const audio = new Audio();
 
-            audio.onended = () => {
+            // 에러 핸들링
+            audio.onerror = (e) => {
+                console.error(`음성 재생 오류 [${currentIndex + 1}/${audioSegments.length}]:`, audioSegments[currentIndex].audio_path, e);
+                // 다음 세그먼트로 넘어가기
                 currentIndex++;
                 if (currentIndex < audioSegments.length) {
-                    audio.src = audioSegments[currentIndex].audio_path;
-                    audio.play();
+                    playNextSegment();
+                } else {
+                    alert('모든 음성 재생이 완료되었습니다.');
                 }
             };
 
-            audio.src = audioSegments[currentIndex].audio_path;
-            audio.play();
+            audio.onended = () => {
+                console.log(`✅ 세그먼트 ${currentIndex + 1}/${audioSegments.length} 재생 완료`);
+                currentIndex++;
+                if (currentIndex < audioSegments.length) {
+                    playNextSegment();
+                } else {
+                    alert('모든 음성 재생이 완료되었습니다.');
+                }
+            };
+
+            function playNextSegment() {
+                const segment = audioSegments[currentIndex];
+                // 로컬 파일 경로를 HTTP URL로 변환
+                const audioUrl = `/api/file-content?path=${encodeURIComponent(segment.audio_path)}`;
+                console.log(`▶️ 재생 중 [${currentIndex + 1}/${audioSegments.length}]: ${segment.audio_path}`);
+                audio.src = audioUrl;
+                audio.play().catch(err => {
+                    console.error('재생 실패:', err);
+                    audio.onerror(err);
+                });
+            }
+
+            // 첫 번째 세그먼트 재생
+            playNextSegment();
         }
 
         function saveAllAudio() {
@@ -2520,7 +2582,10 @@
                         alert('음성 파일 경로가 없습니다.');
                         return;
                     }
-                    const audio = new Audio(audioPath);
+                    // 로컬 파일 경로를 HTTP URL로 변환
+                    const audioUrl = `/api/file-content?path=${encodeURIComponent(audioPath)}`;
+                    console.log(`▶️ 음성 재생: ${audioPath}`);
+                    const audio = new Audio(audioUrl);
                     audio.play().catch(err => {
                         console.error('Failed to play audio:', err);
                         alert('음성 재생에 실패했습니다: ' + err.message);

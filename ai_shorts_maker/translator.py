@@ -498,7 +498,47 @@ def load_project(project_id: str) -> TranslatorProject:
         project = TranslatorProject.model_validate(data)
     except ValidationError as exc:  # pragma: no cover
         raise ValueError(f"Invalid translator project data: {exc}") from exc
+
+    # Validate and fix audio paths
+    _validate_and_fix_audio_paths(project, project_id)
+
     return project
+
+
+def _validate_and_fix_audio_paths(project: TranslatorProject, project_id: str) -> None:
+    """
+    프로젝트의 audio_path를 검증하고 필요시 자동으로 찾습니다.
+    중복 파일이 있을 경우 우선순위: wav > mp3 > m4a
+    """
+    audio_dir = TRANSLATOR_DIR / project_id / "audio"
+    if not audio_dir.exists():
+        return
+
+    audio_format_priority = ["wav", "mp3", "m4a"]
+
+    for segment in project.segments:
+        # audio_path가 있고 파일이 존재하면 그대로 유지
+        if segment.audio_path and Path(segment.audio_path).exists():
+            continue
+
+        # audio_path가 없거나 파일이 존재하지 않으면 자동으로 찾기
+        segment_prefix = f"segment_{segment.clip_index}_{segment.id[:8]}"
+
+        # 우선순위에 따라 파일 찾기
+        found_path = None
+        for fmt in audio_format_priority:
+            candidate = audio_dir / f"{segment_prefix}.{fmt}"
+            if candidate.exists():
+                found_path = str(candidate)
+                break
+
+        if found_path:
+            segment.audio_path = found_path
+            logger.debug(f"Auto-detected audio path for segment {segment.id}: {found_path}")
+        elif segment.audio_path:
+            # 파일이 없으면 audio_path를 None으로 설정
+            logger.warning(f"Audio file not found for segment {segment.id}: {segment.audio_path}")
+            segment.audio_path = None
 
 
 def list_projects() -> List[TranslatorProject]:

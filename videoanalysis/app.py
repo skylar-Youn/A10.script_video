@@ -131,13 +131,18 @@ async def create_output_video(request: Request):
 
     # 영상 입력
     if video_enabled and video_files:
-        ffmpeg_cmd.extend(["-i", video_files[0]])
+        from urllib.parse import unquote
+        video_path = unquote(video_files[0])
+        logger.info(f"Video path (decoded): {video_path}")
+        ffmpeg_cmd.extend(["-i", video_path])
         video_input = f"[0:v]"
         input_count += 1
 
     # 메인 음성 입력
     main_audio_input = None
+    main_audio_index = None
     if audio_enabled and audio_files:
+        from urllib.parse import unquote
         for audio_file in audio_files:
             if audio_file.get("type") == "main":
                 # URL에서 실제 파일 경로 추출
@@ -145,13 +150,20 @@ async def create_output_video(request: Request):
                 if audio_path.startswith("/api/"):
                     # API 경로에서 실제 파일 경로 추출
                     continue
+
+                # URL 인코딩된 경로 디코딩
+                audio_path = unquote(audio_path)
+                logger.info(f"Main audio path (decoded): {audio_path}")
+
                 ffmpeg_cmd.extend(["-i", audio_path])
+                main_audio_index = input_count
                 main_audio_input = f"[{input_count}:a]"
                 input_count += 1
                 break
 
     # 해설 음성 입력
     commentary_audio_input = None
+    commentary_audio_index = None
     if commentary_enabled and audio_files:
         for audio_file in audio_files:
             if audio_file.get("type") == "commentary":
@@ -160,30 +172,36 @@ async def create_output_video(request: Request):
                 # HTTP URL을 로컬 파일 경로로 변환
                 if "api/translator-audio/" in audio_path:
                     # HTTP URL 또는 상대 경로 모두 처리
+                    from urllib.parse import unquote
                     parts = audio_path.split("/")
                     # translator-audio 다음 2개 부분이 project_id와 filename
                     try:
                         translator_index = parts.index("translator-audio")
-                        project_id = parts[translator_index + 1]
-                        filename = parts[translator_index + 2]
+                        project_id = unquote(parts[translator_index + 1])  # URL 디코딩
+                        filename = unquote(parts[translator_index + 2])    # URL 디코딩
                         audio_path = str(Path.home() / "ws" / "youtubeanalysis" / "ai_shorts_maker" / "outputs" / "translator_projects" / project_id / "audio" / filename)
+                        logger.info(f"Decoded audio path: {audio_path}")
                     except (ValueError, IndexError) as e:
                         logger.error(f"Failed to parse translator audio path: {audio_path}, error: {e}")
                         continue
 
                 ffmpeg_cmd.extend(["-i", audio_path])
+                commentary_audio_index = input_count
                 commentary_audio_input = f"[{input_count}:a]"
                 input_count += 1
                 break
 
     # 오디오 믹싱
     if main_audio_input and commentary_audio_input:
+        # 두 오디오를 믹싱하는 경우 filter_complex 사용
         filter_complex_parts.append(f"{main_audio_input}{commentary_audio_input}amix=inputs=2:duration=longest[aout]")
         audio_map = "[aout]"
     elif main_audio_input:
-        audio_map = main_audio_input
+        # 단일 오디오는 filter 없이 직접 스트림 참조
+        audio_map = f"{main_audio_index}:a"
     elif commentary_audio_input:
-        audio_map = commentary_audio_input
+        # 단일 오디오는 filter 없이 직접 스트림 참조
+        audio_map = f"{commentary_audio_index}:a"
     else:
         audio_map = None
 
@@ -199,11 +217,15 @@ async def create_output_video(request: Request):
         ffmpeg_cmd.extend(["-map", audio_map])
 
     # 코덱 설정
-    ffmpeg_cmd.extend([
-        "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "23"
-    ])
+    # AV1 비디오는 재인코딩 없이 복사 (FFmpeg 4.2.2는 AV1 디코더 미지원)
+    if video_enabled and video_files:
+        ffmpeg_cmd.extend(["-c:v", "copy"])  # 비디오 스트림 복사
+    else:
+        ffmpeg_cmd.extend([
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23"
+        ])
 
     if audio_map:
         ffmpeg_cmd.extend(["-c:a", "aac", "-b:a", "192k"])

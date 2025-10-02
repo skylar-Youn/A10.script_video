@@ -3,6 +3,8 @@
 """
 import os
 import logging
+import subprocess
+import tempfile
 from fastapi import APIRouter, HTTPException, Body
 from pathlib import Path
 
@@ -249,4 +251,108 @@ async def cut_audio_ranges_api(request: dict = Body(...)):
         raise HTTPException(status_code=500, detail="Processing timeout")
     except Exception as e:
         logger.exception(f"Audio cutting error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/separate-vocals")
+async def separate_vocals_api(request: dict = Body(...)):
+    """음성과 배경음악을 분리 (Demucs 사용)"""
+    try:
+        audio_path = request.get("audio_path")
+        model = request.get("model", "htdemucs")  # htdemucs (기본), htdemucs_ft, mdx, mdx_extra
+
+        if not audio_path:
+            raise HTTPException(status_code=400, detail="audio_path is required")
+
+        if not os.path.exists(audio_path):
+            raise HTTPException(status_code=404, detail=f"Audio file not found: {audio_path}")
+
+        # 출력 디렉토리 생성
+        audio_path_obj = Path(audio_path)
+        output_base_dir = audio_path_obj.parent / "separated"
+        output_base_dir.mkdir(exist_ok=True)
+
+        # Demucs 실행
+        logger.info(f"Running Demucs on {audio_path} with model {model}")
+
+        cmd = [
+            "demucs",
+            "--two-stems", "vocals",  # vocals와 no_vocals(배경음악) 2개 트랙만 분리
+            "-n", model,
+            "-o", str(output_base_dir),
+            str(audio_path)
+        ]
+
+        logger.info(f"Demucs command: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600  # 10분 타임아웃
+        )
+
+        if result.returncode != 0:
+            logger.error(f"Demucs error: {result.stderr}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Demucs failed: {result.stderr[:500]}"
+            )
+
+        # 출력 파일 경로 확인
+        # Demucs는 output_dir/model_name/audio_filename/vocals.wav 형태로 저장
+        audio_filename_stem = audio_path_obj.stem
+        separated_dir = output_base_dir / model / audio_filename_stem
+
+        vocals_path = separated_dir / "vocals.wav"
+        accompaniment_path = separated_dir / "no_vocals.wav"
+
+        if not vocals_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"Vocals file not found at {vocals_path}"
+            )
+
+        if not accompaniment_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"Accompaniment file not found at {accompaniment_path}"
+            )
+
+        # 파일 정보
+        vocals_size = vocals_path.stat().st_size
+        accompaniment_size = accompaniment_path.stat().st_size
+
+        vocals_duration = get_media_duration(vocals_path)
+        accompaniment_duration = get_media_duration(accompaniment_path)
+
+        logger.info(f"Separation complete: vocals={vocals_path}, accompaniment={accompaniment_path}")
+
+        return {
+            "status": "success",
+            "input_path": audio_path,
+            "vocals": {
+                "path": str(vocals_path),
+                "filename": vocals_path.name,
+                "size_bytes": vocals_size,
+                "size_mb": round(vocals_size / (1024 * 1024), 2),
+                "duration": vocals_duration,
+                "duration_str": format_duration_str(vocals_duration) if vocals_duration else "알 수 없음"
+            },
+            "accompaniment": {
+                "path": str(accompaniment_path),
+                "filename": accompaniment_path.name,
+                "size_bytes": accompaniment_size,
+                "size_mb": round(accompaniment_size / (1024 * 1024), 2),
+                "duration": accompaniment_duration,
+                "duration_str": format_duration_str(accompaniment_duration) if accompaniment_duration else "알 수 없음"
+            },
+            "model_used": model
+        }
+
+    except subprocess.TimeoutExpired:
+        logger.error("Demucs timeout")
+        raise HTTPException(status_code=500, detail="Processing timeout (10 minutes)")
+    except Exception as e:
+        logger.exception(f"Vocal separation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
