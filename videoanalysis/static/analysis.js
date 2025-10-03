@@ -12310,11 +12310,23 @@ class VideoAnalysisApp {
     // 프로젝트 audio 폴더의 파일 목록 가져오기
     async getProjectAudioFiles(projectId) {
         // 서버 API 호출하여 파일 목록 가져오기
-        const response = await fetch(`/api/translator-audio-files?project_id=${projectId}`);
+        const response = await fetch(`/api/translator/projects/${projectId}/load-generated-tracks`);
         if (!response.ok) {
             throw new Error('음성 파일 목록을 불러올 수 없습니다.');
         }
-        return await response.json();
+        const data = await response.json();
+
+        // tracks 배열을 파일 목록 형식으로 변환
+        if (data && Array.isArray(data.tracks)) {
+            return data.tracks.map(track => ({
+                name: track.filename,
+                path: track.path,
+                size: track.segment_count ? `${track.segment_count}개 세그먼트` : '알 수 없음',
+                type: track.type
+            }));
+        }
+
+        return [];
     }
 
     // 음성 파일 선택 모달 표시

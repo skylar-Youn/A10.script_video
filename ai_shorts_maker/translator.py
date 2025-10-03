@@ -2019,8 +2019,13 @@ def generate_selected_audio_with_silence(
         if has_overlaps:
             logger.info(f"Total {len(overlapping_segments)} overlapping segment pairs detected")
 
-        # 전체 타임라인 길이 계산 (가장 늦게 끝나는 세그먼트 기준)
-        max_end_time = max(seg.end for seg in selected_segments)
+        # 전체 타임라인 길이 계산 (원본 비디오 길이 기준, 없으면 가장 늦게 끝나는 세그먼트 기준)
+        if project.duration:
+            max_end_time = project.duration
+            logger.info(f"Using project duration: {max_end_time}s")
+        else:
+            max_end_time = max(seg.end for seg in selected_segments)
+            logger.info(f"Using max segment end time: {max_end_time}s")
         total_duration_ms = int(max_end_time * 1000)
 
         # 전체 타임라인에 해당하는 빈 오디오 트랙 생성

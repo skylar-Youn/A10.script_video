@@ -7,7 +7,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
-DOWNLOAD_DIR = Path("/home/sk/ws/youtubeanalysis/youtube/download")
+# 상위 디렉토리를 기본으로 설정하여 모든 출력 디렉토리에 접근 가능하도록 함
+DOWNLOAD_DIR = Path("/home/sk/ws/youtubeanalysis")
 SAVED_RESULTS_DIR = Path("/home/sk/ws/youtubeanalysis/youtube/saved_results")
 
 # 분석 기본값

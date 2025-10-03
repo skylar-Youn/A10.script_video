@@ -1037,6 +1037,9 @@ async def api_delete_track(project_id: str, file_path: str = Body(..., embed=Tru
 
 app.include_router(translator_router)
 
+# Import and include additional translator routes
+from web_app.routers import translator as additional_translator_router
+app.include_router(additional_translator_router.router)
 
 # Video Editor Router
 video_editor_router = APIRouter(prefix="/api/video-editor", tags=["video-editor"])

@@ -466,3 +466,323 @@ async def api_load_generated_tracks(project_id: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to load generated tracks: {str(e)}"
         )
+
+
+@router.post("/projects/{project_id}/separate-vocal")
+async def api_separate_vocal(project_id: str):
+    """원본 음성에서 vocal과 배경음악을 분리합니다."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    def _separate():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+        
+        # 원본 비디오 경로 확인
+        if not project.source_video:
+            raise ValueError("원본 비디오 파일이 없습니다.")
+        
+        from pathlib import Path
+        import subprocess
+        
+        video_path = Path(project.source_video)
+        if not video_path.exists():
+            raise FileNotFoundError(f"비디오 파일을 찾을 수 없습니다: {video_path}")
+        
+        # 출력 디렉토리
+        project_dir = TRANSLATOR_DIR / project_id
+        separated_dir = project_dir / "separated"
+        separated_dir.mkdir(parents=True, exist_ok=True)
+        
+        # demucs로 분리 (vocal, accompaniment)
+        vocals_path = separated_dir / "vocals.wav"
+        bgm_path = separated_dir / "bgm.wav"
+        
+        # ffmpeg로 음성 추출
+        audio_temp = separated_dir / "temp_audio.wav"
+        subprocess.run([
+            "ffmpeg", "-y", "-i", str(video_path),
+            "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+            str(audio_temp)
+        ], check=True, capture_output=True)
+        
+        # demucs로 분리
+        subprocess.run([
+            "demucs", "--two-stems=vocals",
+            "-o", str(separated_dir),
+            str(audio_temp)
+        ], check=True, capture_output=True)
+        
+        # 분리된 파일 이동 (demucs는 htdemucs/temp_audio/ 형식으로 저장)
+        demucs_output = separated_dir / "htdemucs" / "temp_audio"
+        if demucs_output.exists():
+            import shutil
+            shutil.move(str(demucs_output / "vocals.wav"), str(vocals_path))
+            shutil.move(str(demucs_output / "no_vocals.wav"), str(bgm_path))
+            shutil.rmtree(separated_dir / "htdemucs")
+        
+        audio_temp.unlink()
+        
+        # 경로를 웹 URL로 변환
+        output_dir = TRANSLATOR_DIR.parent
+        vocals_url = f"/outputs/{vocals_path.relative_to(output_dir).as_posix()}"
+        bgm_url = f"/outputs/{bgm_path.relative_to(output_dir).as_posix()}"
+        
+        return {
+            "vocals_path": vocals_url,
+            "bgm_path": bgm_url,
+            "message": "Vocal과 배경음악 분리 완료"
+        }
+    
+    try:
+        result = await run_in_threadpool(_separate)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Vocal separation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Vocal 분리 실패: {str(e)}"
+        )
+
+
+@router.post("/projects/{project_id}/extract-dialogue")
+async def api_extract_dialogue(project_id: str):
+    """번역 음성 구간을 mute하여 원본 대사만 추출합니다."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    def _extract():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+        
+        if not project.source_video:
+            raise ValueError("원본 비디오 파일이 없습니다.")
+        
+        from pathlib import Path
+        from pydub import AudioSegment
+        import subprocess
+        
+        video_path = Path(project.source_video)
+        if not video_path.exists():
+            raise FileNotFoundError(f"비디오 파일을 찾을 수 없습니다: {video_path}")
+        
+        # 원본 음성 추출
+        project_dir = TRANSLATOR_DIR / project_id
+        temp_dir = project_dir / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        original_audio = temp_dir / "original.wav"
+        subprocess.run([
+            "ffmpeg", "-y", "-i", str(video_path),
+            "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+            str(original_audio)
+        ], check=True, capture_output=True)
+        
+        # 음성 로드
+        audio = AudioSegment.from_wav(str(original_audio))
+        
+        # 번역 음성 구간을 mute
+        for segment in project.segments:
+            if segment.start is not None and segment.end is not None:
+                start_ms = int(segment.start * 1000)
+                end_ms = int(segment.end * 1000)
+                # 해당 구간을 무음으로 대체
+                silence = AudioSegment.silent(duration=end_ms - start_ms)
+                audio = audio[:start_ms] + silence + audio[end_ms:]
+        
+        # 대사 전용 파일 저장
+        dialogue_path = project_dir / "dialogue.wav"
+        audio.export(str(dialogue_path), format="wav")
+        
+        # 임시 파일 삭제
+        original_audio.unlink()
+        
+        # 웹 URL 변환
+        output_dir = TRANSLATOR_DIR.parent
+        dialogue_url = f"/outputs/{dialogue_path.relative_to(output_dir).as_posix()}"
+        
+        return {
+            "dialogue_path": dialogue_url,
+            "message": "대사 추출 완료 (번역 구간 제거됨)"
+        }
+    
+    try:
+        result = await run_in_threadpool(_extract)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Dialogue extraction failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"대사 추출 실패: {str(e)}"
+        )
+
+
+@router.post("/projects/{project_id}/merge-tracks")
+async def api_merge_tracks(project_id: str, payload: dict):
+    """선택한 트랙들을 합칩니다."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    track_paths = payload.get("track_paths", [])
+    if not track_paths:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="트랙 경로가 필요합니다."
+        )
+    
+    def _merge():
+        from pathlib import Path
+        from pydub import AudioSegment
+        
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+        
+        # 모든 트랙을 로드하고 합치기
+        combined = None
+        for track_path in track_paths:
+            # 웹 URL을 실제 파일 경로로 변환
+            if track_path.startswith("/outputs/"):
+                file_path = TRANSLATOR_DIR.parent / track_path[9:]  # /outputs/ 제거
+            else:
+                file_path = Path(track_path)
+            
+            if not file_path.exists():
+                logger.warning(f"Track file not found: {file_path}")
+                continue
+            
+            track_audio = AudioSegment.from_file(str(file_path))
+            
+            if combined is None:
+                combined = track_audio
+            else:
+                # 오디오 믹싱 (overlay)
+                combined = combined.overlay(track_audio)
+        
+        if combined is None:
+            raise ValueError("합칠 트랙이 없습니다.")
+        
+        # 합쳐진 파일 저장
+        project_dir = TRANSLATOR_DIR / project_id
+        merged_path = project_dir / "merged_tracks.wav"
+        combined.export(str(merged_path), format="wav")
+        
+        # 웹 URL 변환
+        output_dir = TRANSLATOR_DIR.parent
+        merged_url = f"/outputs/{merged_path.relative_to(output_dir).as_posix()}"
+        
+        return {
+            "merged_path": merged_url,
+            "message": f"{len(track_paths)}개 트랙 합치기 완료"
+        }
+    
+    try:
+        result = await run_in_threadpool(_merge)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Track merging failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"트랙 합치기 실패: {str(e)}"
+        )
+
+
+@router.post("/projects/{project_id}/save-tracks")
+async def api_save_tracks(project_id: str, track_state: dict):
+    """트랙 상태를 프로젝트에 저장합니다."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        project = translator_load_project(project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+
+        # extra 필드에 트랙 정보 저장
+        if project.extra is None:
+            project.extra = {}
+
+        project.extra['bgm_path'] = track_state.get('bgm_path')
+        project.extra['dialogue_path'] = track_state.get('dialogue_path')
+
+        # 프로젝트 저장
+        from ai_shorts_maker.translator import save_project
+        save_project(project)
+
+        return {
+            "message": "트랙 상태가 저장되었습니다.",
+            "bgm_path": project.extra.get('bgm_path'),
+            "dialogue_path": project.extra.get('dialogue_path')
+        }
+    except Exception as e:
+        logger.error(f"Track save failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"트랙 저장 실패: {str(e)}"
+        )
+
+
+@router.get("/projects/{project_id}/load-tracks")
+async def api_load_tracks(project_id: str):
+    """저장된 트랙 상태를 불러옵니다."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        project = translator_load_project(project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+
+        # extra 필드에서 트랙 정보 가져오기
+        bgm_path = project.extra.get('bgm_path') if project.extra else None
+        dialogue_path = project.extra.get('dialogue_path') if project.extra else None
+
+        return {
+            "message": "트랙 정보를 불러왔습니다.",
+            "bgm_path": bgm_path,
+            "dialogue_path": dialogue_path
+        }
+    except Exception as e:
+        logger.error(f"Track load failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"트랙 불러오기 실패: {str(e)}"
+        )

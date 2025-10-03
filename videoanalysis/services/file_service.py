@@ -25,6 +25,11 @@ def get_files_list(path: str, filter_type: str = "all") -> Dict[str, Any]:
 
                 # 파일 타입 필터링
                 file_type = get_file_type(file_ext)
+
+                # 미디어 파일(영상, 음성, 자막)만 표시
+                if file_type == 'other':
+                    continue
+
                 if filter_type != "all" and file_type != filter_type:
                     continue
 
@@ -80,9 +85,12 @@ def build_folder_tree(directory: Path, max_depth: int = 3, current_depth: int = 
         files = [item for item in items if item.is_file()]
         folders = [item for item in items if item.is_dir()]
 
-        # 파일 정보 계산
-        tree["file_count"] = len(files)
-        tree["total_size"] = sum(f.stat().st_size for f in files if f.exists())
+        # 미디어 파일만 카운트
+        media_files = [f for f in files if get_file_type(f.suffix.lower()) != 'other']
+
+        # 파일 정보 계산 (미디어 파일만)
+        tree["file_count"] = len(media_files)
+        tree["total_size"] = sum(f.stat().st_size for f in media_files if f.exists())
 
         # 하위 폴더 추가
         for folder in sorted(folders):
@@ -92,8 +100,8 @@ def build_folder_tree(directory: Path, max_depth: int = 3, current_depth: int = 
                 tree["file_count"] += subtree["file_count"]
                 tree["total_size"] += subtree["total_size"]
 
-        # 파일 추가 (처음 10개만)
-        for file_item in sorted(files)[:10]:
+        # 파일 추가 (미디어 파일만, 처음 10개)
+        for file_item in sorted(media_files)[:10]:
             tree["children"].append({
                 "name": file_item.name,
                 "path": str(file_item),
