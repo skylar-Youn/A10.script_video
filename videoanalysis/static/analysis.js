@@ -6,6 +6,8 @@
 class VideoAnalysisApp {
     constructor() {
         this.selectedFiles = new Set();
+        this.hiddenFiles = new Set();
+        this.lastHiddenFiles = new Set(); // 전체보기 전 숨긴 파일 백업
         this.fileMetadata = new Map();
         this.currentTab = 'audio';
         this.analysisResults = {};
@@ -52,6 +54,16 @@ class VideoAnalysisApp {
             console.warn('translator project id storage unavailable:', error);
         }
 
+        // 숨긴 파일 목록 불러오기
+        try {
+            const storedHiddenFiles = window.localStorage.getItem('videoanalysis_hidden_files');
+            if (storedHiddenFiles) {
+                this.hiddenFiles = new Set(JSON.parse(storedHiddenFiles));
+            }
+        } catch (error) {
+            console.warn('hidden files storage unavailable:', error);
+        }
+
         // 재생 버튼 초기 상태 설정
         setTimeout(() => {
             this.updatePlayPauseButton();
@@ -77,6 +89,15 @@ class VideoAnalysisApp {
 
         document.getElementById('refresh-files').addEventListener('click', () => {
             this.loadFileList();
+        });
+
+        // 파일 숨기기/보이기
+        document.getElementById('show-all-files').addEventListener('click', () => {
+            this.showAllFiles();
+        });
+
+        document.getElementById('restore-hidden-files').addEventListener('click', () => {
+            this.restoreHiddenFiles();
         });
 
         // 파일 선택 관련
@@ -372,7 +393,18 @@ class VideoAnalysisApp {
         try {
             this.showLoadingState('file-grid', '📄 파일 목록을 불러오는 중...');
 
-            const response = await fetch(`/api/files?filter_type=${filterType}`);
+            // URL에서 path 파라미터 읽기
+            const urlParams = new URLSearchParams(window.location.search);
+            const pathParam = urlParams.get('path');
+
+            let url = `/api/files?filter_type=${filterType}`;
+            if (pathParam) {
+                // 절대 경로로 변환
+                const fullPath = `/home/sk/ws/youtubeanalysis/${pathParam}`;
+                url += `&path=${encodeURIComponent(fullPath)}`;
+            }
+
+            const response = await fetch(url);
             const data = await response.json();
 
             if (data.error) {
@@ -393,7 +425,18 @@ class VideoAnalysisApp {
         try {
             this.showLoadingState('folder-tree', '📁 폴더 구조를 불러오는 중...');
 
-            const response = await fetch('/api/folder-tree');
+            // URL에서 path 파라미터 읽기
+            const urlParams = new URLSearchParams(window.location.search);
+            const pathParam = urlParams.get('path');
+
+            let url = '/api/folder-tree';
+            if (pathParam) {
+                // 절대 경로로 변환
+                const fullPath = `/home/sk/ws/youtubeanalysis/${pathParam}`;
+                url += `?path=${encodeURIComponent(fullPath)}`;
+            }
+
+            const response = await fetch(url);
             const data = await response.json();
 
             this.renderFolderTree(data);
@@ -420,7 +463,15 @@ class VideoAnalysisApp {
             }
         });
 
-        grid.innerHTML = files.map(file => this.createFileCard(file)).join('');
+        // 숨겨진 파일 제외하고 렌더링
+        const visibleFiles = files.filter(file => !this.hiddenFiles.has(file.path));
+
+        if (visibleFiles.length === 0) {
+            grid.innerHTML = '<div class="empty-state">📭 모든 파일이 숨겨져 있습니다. 전체 보이기 버튼을 클릭하세요.</div>';
+            return;
+        }
+
+        grid.innerHTML = visibleFiles.map(file => this.createFileCard(file)).join('');
 
         // 파일 카드 클릭 이벤트 추가
         grid.querySelectorAll('.file-card').forEach(card => {
@@ -453,6 +504,7 @@ class VideoAnalysisApp {
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <span class="file-type-badge ${typeClass}">${file.extension.toUpperCase()}</span>
+                        <button class="hide-file-btn" onclick="window.app.hideFile('${file.path.replace(/'/g, "\\'")}'); event.stopPropagation();" title="파일 숨기기" style="background: #FF9800; color: white; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 12px;">👁️</button>
                         <button class="delete-file-btn" onclick="window.app.deleteFile('${file.path.replace(/'/g, "\\'")}'); event.stopPropagation();" title="파일 삭제" style="background: #f44336; color: white; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 12px;">🗑️</button>
                     </div>
                 </div>
@@ -12677,6 +12729,48 @@ class VideoAnalysisApp {
         }
     }
 
+    // 파일 숨기기
+    hideFile(filePath) {
+        this.hiddenFiles.add(filePath);
+        // localStorage에 저장
+        try {
+            window.localStorage.setItem('videoanalysis_hidden_files', JSON.stringify([...this.hiddenFiles]));
+        } catch (error) {
+            console.warn('Failed to save hidden files:', error);
+        }
+        this.loadFileList(); // 파일 목록 새로고침
+    }
+
+    // 전체 파일 보이기
+    showAllFiles() {
+        // 현재 숨긴 파일 목록을 백업
+        this.lastHiddenFiles = new Set(this.hiddenFiles);
+
+        // 화면에서만 모두 보이게 (localStorage는 유지)
+        this.hiddenFiles.clear();
+        this.loadFileList(); // 파일 목록 새로고침
+    }
+
+    // 이전에 숨겼던 파일들 다시 숨기기
+    restoreHiddenFiles() {
+        if (this.lastHiddenFiles.size === 0) {
+            alert('복원할 숨김 목록이 없습니다. 먼저 파일을 숨긴 후 "전체보기"를 눌러주세요.');
+            return;
+        }
+
+        // 백업된 숨김 목록 복원
+        this.hiddenFiles = new Set(this.lastHiddenFiles);
+
+        // localStorage에 저장
+        try {
+            window.localStorage.setItem('videoanalysis_hidden_files', JSON.stringify([...this.hiddenFiles]));
+        } catch (error) {
+            console.warn('Failed to save hidden files:', error);
+        }
+
+        this.loadFileList(); // 파일 목록 새로고침
+    }
+
     // 설명자막 음성 묵음처리
     async cutTranslationAudio() {
         try {
@@ -13368,6 +13462,173 @@ let app;
 document.addEventListener('DOMContentLoaded', () => {
     app = new VideoAnalysisApp();
     window.app = app; // 전역으로 노출
+
+    // 분석 대상 저장 버튼 (다른 이름으로 저장)
+    const saveBtn = document.getElementById('save-analysis-target');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            try {
+                if (app.selectedFiles.size === 0) {
+                    alert('선택된 파일이 없습니다.');
+                    return;
+                }
+
+                // 이름 입력받기
+                const saveName = prompt('저장할 이름을 입력하세요:', `분석세트_${new Date().toLocaleDateString()}`);
+                if (!saveName || saveName.trim() === '') {
+                    return; // 취소
+                }
+
+                // 기존 저장 목록 가져오기
+                let savedTargets = {};
+                const existingData = localStorage.getItem('analysisTargets');
+                if (existingData) {
+                    savedTargets = JSON.parse(existingData);
+                }
+
+                // 새 데이터 저장
+                savedTargets[saveName.trim()] = {
+                    files: Array.from(app.selectedFiles),
+                    timestamp: new Date().toISOString(),
+                    fileCount: app.selectedFiles.size
+                };
+
+                localStorage.setItem('analysisTargets', JSON.stringify(savedTargets));
+
+                // 사용자 피드백
+                const originalText = saveBtn.textContent;
+                saveBtn.textContent = '✅ 저장됨';
+                saveBtn.style.backgroundColor = '#4CAF50';
+                setTimeout(() => {
+                    saveBtn.textContent = originalText;
+                    saveBtn.style.backgroundColor = '';
+                }, 2000);
+
+                console.log('분석 대상 저장 완료:', saveName, '-', app.selectedFiles.size, '개 파일');
+            } catch (error) {
+                console.error('저장 실패:', error);
+                alert('저장 중 오류가 발생했습니다: ' + error.message);
+            }
+        });
+    }
+
+    // 분석 대상 불러오기 버튼 (목록에서 선택)
+    const loadBtn = document.getElementById('load-analysis-target');
+    const loadModal = document.getElementById('analysis-target-load-modal');
+    const loadModalCancelBtn = document.getElementById('load-modal-cancel-btn');
+    const savedTargetsList = document.getElementById('saved-targets-list');
+
+    if (loadBtn && loadModal && loadModalCancelBtn && savedTargetsList) {
+        loadBtn.addEventListener('click', () => {
+            try {
+                // 저장된 목록 가져오기
+                const existingData = localStorage.getItem('analysisTargets');
+                if (!existingData) {
+                    alert('저장된 분석 대상이 없습니다.');
+                    return;
+                }
+
+                const savedTargets = JSON.parse(existingData);
+                const targetNames = Object.keys(savedTargets);
+
+                if (targetNames.length === 0) {
+                    alert('저장된 분석 대상이 없습니다.');
+                    return;
+                }
+
+                // 목록 렌더링
+                savedTargetsList.innerHTML = targetNames.map(name => {
+                    const target = savedTargets[name];
+                    const date = new Date(target.timestamp).toLocaleString('ko-KR');
+                    return `
+                        <div style="background: #333; padding: 15px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+                            <div style="flex: 1;">
+                                <div style="color: #fff; font-weight: bold; margin-bottom: 5px;">${name}</div>
+                                <div style="color: #aaa; font-size: 0.9em;">파일 ${target.fileCount}개 · ${date}</div>
+                            </div>
+                            <div style="display: flex; gap: 5px;">
+                                <button class="load-target-btn" data-name="${name}" style="padding: 8px 15px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer;">📂 불러오기</button>
+                                <button class="delete-target-btn" data-name="${name}" style="padding: 8px 15px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">🗑️ 삭제</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                // 불러오기 버튼 이벤트
+                savedTargetsList.querySelectorAll('.load-target-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const name = e.target.dataset.name;
+                        const target = savedTargets[name];
+
+                        if (target && target.files && Array.isArray(target.files)) {
+                            // 선택된 파일 복원
+                            app.selectedFiles.clear();
+                            target.files.forEach(filePath => app.selectedFiles.add(filePath));
+
+                            // UI 업데이트
+                            app.updateSelectedFilesList();
+
+                            // 모달 닫기
+                            loadModal.style.display = 'none';
+
+                            // 피드백
+                            const originalText = loadBtn.textContent;
+                            loadBtn.textContent = `✅ ${target.files.length}개 불러옴`;
+                            loadBtn.style.backgroundColor = '#2196F3';
+                            setTimeout(() => {
+                                loadBtn.textContent = originalText;
+                                loadBtn.style.backgroundColor = '';
+                            }, 2000);
+
+                            console.log('분석 대상 불러오기 완료:', name, '-', target.files.length, '개 파일');
+                        }
+                    });
+                });
+
+                // 삭제 버튼 이벤트
+                savedTargetsList.querySelectorAll('.delete-target-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const name = e.target.dataset.name;
+                        if (confirm(`"${name}"을(를) 삭제하시겠습니까?`)) {
+                            delete savedTargets[name];
+                            localStorage.setItem('analysisTargets', JSON.stringify(savedTargets));
+
+                            // 목록 다시 렌더링
+                            const remainingNames = Object.keys(savedTargets);
+                            if (remainingNames.length === 0) {
+                                loadModal.style.display = 'none';
+                                alert('모든 저장 항목이 삭제되었습니다.');
+                            } else {
+                                // 버튼 클릭 재발동
+                                loadBtn.click();
+                            }
+
+                            console.log('분석 대상 삭제:', name);
+                        }
+                    });
+                });
+
+                // 모달 표시
+                loadModal.style.display = 'flex';
+
+            } catch (error) {
+                console.error('불러오기 실패:', error);
+                alert('불러오기 중 오류가 발생했습니다: ' + error.message);
+            }
+        });
+
+        // 모달 닫기
+        loadModalCancelBtn.addEventListener('click', () => {
+            loadModal.style.display = 'none';
+        });
+
+        // 배경 클릭으로 모달 닫기
+        loadModal.addEventListener('click', (e) => {
+            if (e.target === loadModal) {
+                loadModal.style.display = 'none';
+            }
+        });
+    }
 });
 
 // 전역 함수 (HTML에서 호출)

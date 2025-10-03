@@ -229,6 +229,22 @@ body {
     transform: rotate(180deg);
 }
 
+/* 파일 액션 버튼 (회전 없음) */
+.file-action-btn {
+    background: var(--primary-color);
+    border: none;
+    border-radius: 6px;
+    padding: 0.75rem;
+    color: white;
+    cursor: pointer;
+    transition: var(--transition);
+    font-size: 0.9rem;
+}
+
+.file-action-btn:hover {
+    background: var(--primary-dark);
+}
+
 /* 파일 그리드 */
 .file-grid {
     display: flex;
@@ -264,6 +280,7 @@ body {
 .file-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 0.8rem;
     flex: 1;
     min-width: 0;

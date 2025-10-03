@@ -48,19 +48,20 @@ async def get_file_content(path: str = Query(...)):
             file_path = DOWNLOAD_DIR / file_path
 
         # 경로 검증
-        try:
-            file_path = file_path.resolve()
-            DOWNLOAD_DIR.resolve()
+        file_path = file_path.resolve()
+        base_dir = DOWNLOAD_DIR.resolve()
 
-            # 다운로드 디렉토리 하위인지 확인
-            if not str(file_path).startswith(str(DOWNLOAD_DIR.resolve())):
-                raise HTTPException(status_code=403, detail="접근 권한이 없습니다")
-        except:
-            raise HTTPException(status_code=403, detail="잘못된 파일 경로입니다")
+        # 다운로드 디렉토리 하위인지 확인
+        try:
+            file_path.relative_to(base_dir)
+        except ValueError:
+            logger.warning(f"Access denied: {file_path} not under {base_dir}")
+            raise HTTPException(status_code=403, detail="접근 권한이 없습니다")
 
         # 파일 존재 여부 확인
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
+            logger.warning(f"File not found: {file_path}")
+            raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {file_path.name}")
 
         # MIME 타입 결정
         content_type, _ = mimetypes.guess_type(str(file_path))

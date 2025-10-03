@@ -18,6 +18,7 @@ def get_files_list(path: str, filter_type: str = "all") -> Dict[str, Any]:
         if not base_path.exists():
             return {"files": [], "total": 0, "error": "폴더를 찾을 수 없습니다"}
 
+        # 현재 디렉토리의 모든 파일 탐색
         for file_path in base_path.rglob("*"):
             if file_path.is_file():
                 file_stat = file_path.stat()
