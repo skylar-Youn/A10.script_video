@@ -41,6 +41,8 @@ class TranslatorSegment(BaseModel):
     commentary_reverse_korean: Optional[str] = None  # 해설 역번역 한국어
     speaker_name: Optional[str] = None  # 화자 표시
     audio_path: Optional[str] = None  # 일본어 음성 파일 경로
+    audio_duration: Optional[float] = None  # 최종 저장된 음성 길이(초)
+    audio_generated_duration: Optional[float] = None  # TTS로 생성된 원본 음성 길이(초)
 
 
 class TranslatorProject(BaseModel):
@@ -115,6 +117,7 @@ class TranslatorProjectUpdate(BaseModel):
     source_subtitle: Optional[str] = None
     target_lang: Optional[Literal["ko", "en", "ja"]] = None
     translation_mode: Optional[Literal["literal", "adaptive", "reinterpret"]] = None
+    extra: Optional[Dict[str, Any]] = None
 
 
 def ensure_directories() -> None:
@@ -303,6 +306,70 @@ def save_project(project: TranslatorProject) -> TranslatorProject:
     _save_translation_version(project)
 
     return project
+
+
+def _restore_missing_audio_paths(project: TranslatorProject) -> TranslatorProject:
+    """Back-fill segment audio_path values from existing audio files if metadata is missing."""
+    try:
+        audio_dir = TRANSLATOR_DIR / project.id / "audio"
+        if not audio_dir.exists():
+            return project
+
+        missing_segments = [seg for seg in project.segments if not seg.audio_path]
+        if not missing_segments:
+            return project
+
+        restored_segment_ids: List[str] = []
+
+        # Prefer per-segment audio files named with the segment id prefix
+        for segment in missing_segments:
+            pattern = f"segment_*_{segment.id[:8]}.*"
+            matches = sorted(audio_dir.glob(pattern))
+            if matches:
+                segment.audio_path = str(matches[0])
+                restored_segment_ids.append(segment.id)
+
+        # If no individual matches were found, fall back to combined timeline audio
+        if not restored_segment_ids:
+            combined_candidates = sorted(audio_dir.glob("selected_audio_*_segments.*"))
+            for candidate in combined_candidates:
+                match = re.search(r"selected_audio_(\d+)_segments", candidate.name)
+                if not match:
+                    continue
+                segment_count = int(match.group(1))
+                if segment_count != len(project.segments):
+                    continue
+
+                path_str = str(candidate)
+                for segment in missing_segments:
+                    segment.audio_path = path_str
+                    restored_segment_ids.append(segment.id)
+                break
+
+        if restored_segment_ids:
+            try:
+                save_project(project)
+                logger.info(
+                    "Restored %d segment audio paths for project %s using local files",
+                    len(restored_segment_ids),
+                    project.id,
+                )
+            except Exception as exc:  # pragma: no cover - best effort persistence
+                logger.warning(
+                    "Failed to persist restored audio paths for project %s: %s",
+                    project.id,
+                    exc,
+                )
+
+        return project
+
+    except Exception as exc:  # pragma: no cover - restoration should never block loading
+        logger.warning(
+            "Failed to restore missing audio paths for project %s: %s",
+            getattr(project, "id", "<unknown>"),
+            exc,
+        )
+        return project
 
 
 def _save_translation_version(project: TranslatorProject) -> None:
@@ -498,7 +565,7 @@ def load_project(project_id: str) -> TranslatorProject:
         project = TranslatorProject.model_validate(data)
     except ValidationError as exc:  # pragma: no cover
         raise ValueError(f"Invalid translator project data: {exc}") from exc
-    return project
+    return _restore_missing_audio_paths(project)
 
 
 def list_projects() -> List[TranslatorProject]:
@@ -575,6 +642,11 @@ def update_project(project_id: str, payload: TranslatorProjectUpdate) -> Transla
             pass
     if payload.source_subtitle is not None:
         project.source_subtitle = payload.source_subtitle
+    if payload.extra is not None:
+        # Merge extra dict with existing extra
+        if not isinstance(project.extra, dict):
+            project.extra = {}
+        project.extra.update(payload.extra)
 
     return save_project(project)
 
@@ -1713,6 +1785,26 @@ def clone_translator_project_with_name(project_id: str, new_name: str) -> Transl
                 shutil.copy2(original_audio_path, new_audio_path)
                 cloned_project.extra["audio_files"][key] = str(new_audio_path)
 
+    # audio 디렉토리 전체 복사 (생성된 음성 트랙 파일들 포함)
+    original_audio_dir = TRANSLATOR_DIR / project_id / "audio"
+    if original_audio_dir.exists() and original_audio_dir.is_dir():
+        new_audio_dir = assets_dir / "audio"
+        new_audio_dir.mkdir(parents=True, exist_ok=True)
+
+        # audio 디렉토리의 모든 파일 복사
+        for audio_file in original_audio_dir.iterdir():
+            if audio_file.is_file():
+                new_audio_file_path = new_audio_dir / audio_file.name
+                shutil.copy2(audio_file, new_audio_file_path)
+                logger.info(f"📁 Copied audio file: {audio_file.name}")
+
+                # extra.voice_path가 이 파일을 가리키고 있다면 업데이트
+                if "voice_path" in cloned_project.extra:
+                    original_voice_path = Path(cloned_project.extra["voice_path"])
+                    if original_voice_path.name == audio_file.name:
+                        cloned_project.extra["voice_path"] = str(new_audio_file_path)
+                        logger.info(f"📝 Updated voice_path to: {new_audio_file_path}")
+
     # 복제된 프로젝트 저장
     return save_project(cloned_project)
 
@@ -1836,6 +1928,21 @@ def generate_segment_audio(
             audio_format=normalized_format,
         )
 
+        # 생성된 음성 길이를 기록 (초 단위)
+        try:
+            from pydub import AudioSegment as PydubAudioSegment
+
+            generated_audio = PydubAudioSegment.from_file(
+                str(audio_path), format=normalized_format
+            )
+            duration_seconds = len(generated_audio) / 1000.0
+        except Exception:  # pragma: no cover - 메타데이터 추출 실패는 치명적이지 않음
+            duration_seconds = None
+
+        if duration_seconds is not None:
+            segment.audio_generated_duration = duration_seconds
+            segment.audio_duration = duration_seconds
+
         # Update segment with audio path
         segment.audio_path = str(audio_path)
 
@@ -1896,9 +2003,28 @@ def generate_selected_audio_with_silence(
 
         normalized_format = _normalize_audio_format(audio_format)
 
-        # 전체 오디오 트랙 생성
-        combined_audio = AudioSegment.silent(duration=0)
-        current_time = 0.0
+        # 겹치는 세그먼트 감지
+        overlapping_segments = []
+        for i, seg1 in enumerate(selected_segments):
+            for j, seg2 in enumerate(selected_segments[i+1:], start=i+1):
+                # 두 세그먼트가 겹치는지 확인
+                if seg1.end > seg2.start and seg1.start < seg2.end:
+                    overlapping_segments.append((i, j))
+                    logger.info(
+                        f"Overlap detected: Segment {i} ({seg1.start:.2f}s-{seg1.end:.2f}s) "
+                        f"overlaps with Segment {j} ({seg2.start:.2f}s-{seg2.end:.2f}s)"
+                    )
+
+        has_overlaps = len(overlapping_segments) > 0
+        if has_overlaps:
+            logger.info(f"Total {len(overlapping_segments)} overlapping segment pairs detected")
+
+        # 전체 타임라인 길이 계산 (가장 늦게 끝나는 세그먼트 기준)
+        max_end_time = max(seg.end for seg in selected_segments)
+        total_duration_ms = int(max_end_time * 1000)
+
+        # 전체 타임라인에 해당하는 빈 오디오 트랙 생성
+        combined_audio = AudioSegment.silent(duration=total_duration_ms)
 
         for idx, segment in enumerate(selected_segments):
             # 진행률 업데이트
@@ -1907,12 +2033,6 @@ def generate_selected_audio_with_silence(
             if not segment.translated_text:
                 logger.warning(f"Segment {segment.id} has no translated text, skipping")
                 continue
-
-            # 세그먼트 시작 시간까지 무음 추가
-            if segment.start > current_time:
-                silence_duration = int((segment.start - current_time) * 1000)  # ms
-                combined_audio += AudioSegment.silent(duration=silence_duration)
-                current_time = segment.start
 
             # TTS 음성 생성
             temp_audio_path = audio_dir / f"temp_{segment.id[:8]}.{normalized_format}"
@@ -1931,7 +2051,9 @@ def generate_selected_audio_with_silence(
 
             # 자막 기간에 맞춰 조정
             subtitle_duration = int((segment.end - segment.start) * 1000)  # ms
-            audio_duration = len(audio_segment)
+            raw_duration_ms = len(audio_segment)
+
+            audio_duration = raw_duration_ms
 
             if audio_duration < subtitle_duration:
                 # 음성이 자막보다 짧으면 뒤에 무음 추가
@@ -1941,19 +2063,67 @@ def generate_selected_audio_with_silence(
                 # 음성이 자막보다 길면 잘라냄
                 audio_segment = audio_segment[:subtitle_duration]
 
-            combined_audio += audio_segment
-            current_time = segment.end
+            # 겹치는 경우 볼륨 감소 (믹싱 시 과도한 볼륨 방지)
+            if has_overlaps:
+                audio_segment = audio_segment - 3  # 3dB 감소
+                logger.debug(f"Applied -3dB volume reduction for segment {idx} (overlap detected)")
+
+            # 페이드 인/아웃 효과 적용 (자연스러운 전환)
+            fade_duration_ms = min(100, len(audio_segment) // 4)  # 최대 100ms 또는 오디오 길이의 1/4
+            if fade_duration_ms > 0:
+                audio_segment = audio_segment.fade_in(fade_duration_ms).fade_out(fade_duration_ms)
+
+            # 세그먼트 시작 위치에 오디오를 오버레이 (겹치는 경우 자동으로 믹싱됨)
+            segment_start_ms = int(segment.start * 1000)
+            combined_audio = combined_audio.overlay(audio_segment, position=segment_start_ms)
 
             # 임시 파일 삭제
             temp_audio_path.unlink()
 
-            logger.info(f"Added audio for segment {segment.id}: {segment.start:.2f}s - {segment.end:.2f}s")
+            # 세그먼트 음성 길이 기록
+            segment.audio_generated_duration = raw_duration_ms / 1000.0
+            segment.audio_duration = len(audio_segment) / 1000.0
+
+            logger.info(
+                f"Added audio for segment {segment.id}: {segment.start:.2f}s - {segment.end:.2f}s "
+                f"(duration: {subtitle_duration}ms, fade: {fade_duration_ms}ms)"
+            )
 
         # 최종 음성 파일 저장
         _audio_generation_progress[task_id]["message"] = "음성 파일 저장 중..."
         output_filename = f"selected_audio_{len(segment_ids)}_segments.{normalized_format}"
         output_path = audio_dir / output_filename
         combined_audio.export(str(output_path), format=normalized_format)
+
+        # 선택된 세그먼트의 audio_path 업데이트
+        _audio_generation_progress[task_id]["message"] = "세그먼트 정보 업데이트 중..."
+        output_path_str = str(output_path)
+
+        # selected_segments를 딕셔너리로 변환 (빠른 조회를 위해)
+        selected_seg_dict = {seg.id: seg for seg in selected_segments}
+
+        # project.segments에서 직접 세그먼트를 찾아서 업데이트
+        updated_count = 0
+        for segment in project.segments:
+            if segment.id in segment_ids:
+                segment.audio_path = output_path_str
+
+                # duration 정보도 업데이트
+                if segment.id in selected_seg_dict:
+                    selected_seg = selected_seg_dict[segment.id]
+                    segment.audio_generated_duration = selected_seg.audio_generated_duration
+                    segment.audio_duration = selected_seg.audio_duration
+                    logger.debug(
+                        f"Updated segment {segment.id}: audio_path={output_path_str}, "
+                        f"generated_duration={segment.audio_generated_duration:.2f}s, "
+                        f"audio_duration={segment.audio_duration:.2f}s"
+                    )
+
+                updated_count += 1
+
+        # 프로젝트 저장
+        save_project(project)
+        logger.info(f"Updated {updated_count}/{len(segment_ids)} segments with audio path: {output_path_str}")
 
         # 완료 상태 업데이트
         _audio_generation_progress[task_id]["status"] = "completed"
@@ -2003,6 +2173,23 @@ def generate_all_audio(
 
         normalized_format = _normalize_audio_format(audio_format)
 
+        # 겹치는 세그먼트 감지 (정보 로깅용)
+        overlapping_count = 0
+        for i, seg1 in enumerate(project.segments):
+            for j, seg2 in enumerate(project.segments[i+1:], start=i+1):
+                if seg1.end > seg2.start and seg1.start < seg2.end:
+                    overlapping_count += 1
+                    logger.info(
+                        f"Overlap detected: Segment {i} ({seg1.start:.2f}s-{seg1.end:.2f}s) "
+                        f"overlaps with Segment {j} ({seg2.start:.2f}s-{seg2.end:.2f}s)"
+                    )
+
+        if overlapping_count > 0:
+            logger.warning(
+                f"Total {overlapping_count} overlapping segment pairs detected. "
+                f"Consider using generate_selected_audio_with_silence for timeline-based mixing."
+            )
+
         for idx, segment in enumerate(project.segments):
             # 진행률 업데이트
             _audio_generation_progress[task_id]["current"] = idx
@@ -2014,19 +2201,42 @@ def generate_all_audio(
             # Generate audio filename
             audio_filename = f"segment_{segment.clip_index}_{segment.id[:8]}.{normalized_format}"
             audio_path = audio_dir / audio_filename
+            temp_audio_path = audio_dir / f"temp_{segment.id[:8]}.{normalized_format}"
 
-            # Generate TTS audio
+            # Generate TTS audio to temp file first
             client.synthesize_voice(
                 text=segment.translated_text,
                 voice=voice,
-                output_path=audio_path,
+                output_path=temp_audio_path,
                 audio_format=normalized_format,
             )
 
+            # Load audio and apply fade effects
+            from pydub import AudioSegment as PydubAudioSegment
+            audio_segment = PydubAudioSegment.from_file(str(temp_audio_path), format=normalized_format)
+
+            # 페이드 인/아웃 효과 적용
+            fade_duration_ms = min(100, len(audio_segment) // 4)  # 최대 100ms 또는 오디오 길이의 1/4
+            if fade_duration_ms > 0:
+                audio_segment = audio_segment.fade_in(fade_duration_ms).fade_out(fade_duration_ms)
+
+            duration_seconds = len(audio_segment) / 1000.0
+
+            # Export final audio with fade effects
+            audio_segment.export(str(audio_path), format=normalized_format)
+
+            # Clean up temp file
+            temp_audio_path.unlink()
+
             # Update segment with audio path
             segment.audio_path = str(audio_path)
+            segment.audio_generated_duration = duration_seconds
+            segment.audio_duration = duration_seconds
 
-            logger.info(f"Generated audio for segment {segment.id}: {audio_path}")
+            logger.info(
+                f"Generated audio for segment {segment.id}: {audio_path} "
+                f"({segment.start:.2f}s-{segment.end:.2f}s, fade: {fade_duration_ms}ms)"
+            )
 
         # 완료 상태 업데이트
         _audio_generation_progress[task_id]["status"] = "completed"

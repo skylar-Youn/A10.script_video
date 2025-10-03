@@ -23,6 +23,9 @@ class TranslatorSegment(BaseModel):
     commentary_korean: Optional[str] = None  # 해설 한국어
     commentary_japanese: Optional[str] = None  # 해설 일본어
     commentary_reverse_korean: Optional[str] = None  # 해설 역번역 한국어
+    audio_path: Optional[str] = None
+    audio_duration: Optional[float] = None
+    audio_generated_duration: Optional[float] = None
 
 
 class TranslatorProject(BaseModel):

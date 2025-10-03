@@ -345,6 +345,62 @@ app.include_router(api_router)
 translator_router = APIRouter(prefix="/api/translator", tags=["translator"])
 
 
+def _audio_path_to_url(audio_path: Optional[str]) -> Optional[str]:
+    """Convert filesystem paths inside outputs/ to web URLs."""
+    if audio_path is None:
+        return None
+
+    if isinstance(audio_path, (int, float)):
+        return audio_path
+
+    value = str(audio_path)
+    if not value:
+        return value
+
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+
+    if value.startswith("/outputs/"):
+        return value
+
+    try:
+        base_output_dir = translator_module.TRANSLATOR_DIR.parent
+        path_obj = Path(value)
+        relative_path = path_obj.relative_to(base_output_dir)
+        return f"/outputs/{relative_path.as_posix()}"
+    except ValueError:
+        return value
+
+
+def _convert_audio_paths(project: Optional[TranslatorProject]) -> Optional[TranslatorProject]:
+    """Normalize audio paths in a translator project for web delivery."""
+    if project is None:
+        return None
+
+    project.source_video = _audio_path_to_url(project.source_video)
+    project.source_subtitle = _audio_path_to_url(project.source_subtitle)
+
+    for segment in project.segments:
+        segment.audio_path = _audio_path_to_url(segment.audio_path)
+
+    if isinstance(project.extra, dict):
+        if isinstance(project.extra.get("voice_path"), str):
+            project.extra["voice_path"] = _audio_path_to_url(project.extra["voice_path"])
+        if isinstance(project.extra.get("rendered_video_path"), str):
+            project.extra["rendered_video_path"] = _audio_path_to_url(project.extra["rendered_video_path"])
+        if isinstance(project.extra.get("audio_files"), dict):
+            project.extra["audio_files"] = {
+                key: _audio_path_to_url(value) if isinstance(value, str) else value
+                for key, value in project.extra["audio_files"].items()
+            }
+
+    return project
+
+
+def _convert_project_list(projects: List[TranslatorProject]) -> List[TranslatorProject]:
+    return [_convert_audio_paths(project) for project in projects]
+
+
 @translator_router.get("/downloads")
 async def api_list_downloads() -> List[Dict[str, str]]:
     return downloads_listing()
@@ -370,7 +426,7 @@ async def api_list_translator_projects():
     try:
         from ai_shorts_maker.translator import list_projects
         projects = await run_in_threadpool(list_projects)
-        return projects
+        return _convert_project_list(projects)
     except Exception as exc:
         logger.exception("Failed to list translator projects")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -385,7 +441,8 @@ async def api_create_translator_project(payload: TranslatorProjectCreate) -> Tra
             "tone_hint": payload.tone_hint,
         }
         save_translator_settings(settings_to_save)
-        return await run_in_threadpool(translator_create_project, payload)
+        project = await run_in_threadpool(translator_create_project, payload)
+        return _convert_audio_paths(project)
     except Exception as exc:
         logger.exception("Failed to create translator project")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -394,7 +451,8 @@ async def api_create_translator_project(payload: TranslatorProjectCreate) -> Tra
 @translator_router.get("/projects/{project_id}", response_model=TranslatorProject)
 async def api_get_translator_project(project_id: str) -> TranslatorProject:
     try:
-        return await run_in_threadpool(translator_load_project, project_id)
+        project = await run_in_threadpool(translator_load_project, project_id)
+        return _convert_audio_paths(project)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -406,7 +464,8 @@ async def api_update_translator_project(
     project_id: str, payload: TranslatorProjectUpdate
 ) -> TranslatorProject:
     try:
-        return await run_in_threadpool(translator_update_project, project_id, payload)
+        project = await run_in_threadpool(translator_update_project, project_id, payload)
+        return _convert_audio_paths(project)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -433,7 +492,8 @@ async def api_delete_translator_project(project_id: str) -> Response:
 async def api_generate_ai_commentary(project_id: str) -> TranslatorProject:
     try:
         from ai_shorts_maker.translator import generate_ai_commentary_for_project
-        return await run_in_threadpool(generate_ai_commentary_for_project, project_id)
+        project = await run_in_threadpool(generate_ai_commentary_for_project, project_id)
+        return _convert_audio_paths(project)
     except Exception as exc:
         logger.exception("Failed to generate AI commentary for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -443,7 +503,8 @@ async def api_generate_ai_commentary(project_id: str) -> TranslatorProject:
 async def api_generate_korean_ai_commentary(project_id: str) -> TranslatorProject:
     try:
         from ai_shorts_maker.translator import generate_korean_ai_commentary_for_project
-        return await run_in_threadpool(generate_korean_ai_commentary_for_project, project_id)
+        project = await run_in_threadpool(generate_korean_ai_commentary_for_project, project_id)
+        return _convert_audio_paths(project)
     except Exception as exc:
         logger.exception("Failed to generate Korean AI commentary for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -452,7 +513,8 @@ async def api_generate_korean_ai_commentary(project_id: str) -> TranslatorProjec
 @translator_router.post("/projects/{project_id}/translate", response_model=TranslatorProject)
 async def api_translate_project(project_id: str) -> TranslatorProject:
     try:
-        return await run_in_threadpool(translate_project_segments, project_id)
+        project = await run_in_threadpool(translate_project_segments, project_id)
+        return _convert_audio_paths(project)
     except Exception as exc:
         logger.exception("Failed to run translation for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -468,7 +530,7 @@ async def api_translate_segments(project_id: str, payload: Dict[str, Any] = Body
 
         from ai_shorts_maker.translator import translate_selected_segments
 
-        return await run_in_threadpool(
+        project = await run_in_threadpool(
             translate_selected_segments,
             project_id,
             segment_ids,
@@ -476,6 +538,7 @@ async def api_translate_segments(project_id: str, payload: Dict[str, Any] = Body
             translation_mode,
             tone_hint
         )
+        return _convert_audio_paths(project)
     except Exception as exc:
         logger.exception("Failed to translate segments for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -484,7 +547,8 @@ async def api_translate_segments(project_id: str, payload: Dict[str, Any] = Body
 @translator_router.post("/projects/{project_id}/voice", response_model=TranslatorProject)
 async def api_synthesize_voice(project_id: str) -> TranslatorProject:
     try:
-        return await run_in_threadpool(synthesize_voice_for_project, project_id)
+        project = await run_in_threadpool(synthesize_voice_for_project, project_id)
+        return _convert_audio_paths(project)
     except Exception as exc:
         logger.exception("Failed to run voice synthesis for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -493,7 +557,8 @@ async def api_synthesize_voice(project_id: str) -> TranslatorProject:
 @translator_router.post("/projects/{project_id}/render", response_model=TranslatorProject)
 async def api_render_project(project_id: str) -> TranslatorProject:
     try:
-        return await run_in_threadpool(render_translated_project, project_id)
+        project = await run_in_threadpool(render_translated_project, project_id)
+        return _convert_audio_paths(project)
     except Exception as exc:
         logger.exception("Failed to run render for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -576,7 +641,7 @@ async def api_reverse_translate_segments(project_id: str, payload: Dict[str, Any
             tone_hint=None
         )
 
-        return updated_project
+        return _convert_audio_paths(updated_project)
 
     except FileNotFoundError as exc:
         logger.exception("Project %s not found", project_id)
@@ -618,7 +683,7 @@ async def api_reorder_segments(project_id: str, payload: Dict[str, Any] = Body(.
         from ai_shorts_maker.translator import reorder_project_segments
 
         project = await run_in_threadpool(reorder_project_segments, project_id, segment_orders)
-        return project
+        return _convert_audio_paths(project)
 
     except Exception as exc:
         logger.exception("Failed to reorder segments for project %s", project_id)
@@ -633,7 +698,7 @@ async def api_apply_saved_result(project_id: str, payload: Dict[str, Any] = Body
 
     try:
         project = await run_in_threadpool(apply_saved_result_to_project, project_id, saved_result)
-        return project
+        return _convert_audio_paths(project)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -647,7 +712,7 @@ async def api_apply_saved_result(project_id: str, payload: Dict[str, Any] = Body
 async def api_delete_segment(project_id: str, segment_id: str) -> TranslatorProject:
     try:
         project = await run_in_threadpool(delete_project_segment, project_id, segment_id)
-        return project
+        return _convert_audio_paths(project)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -701,7 +766,7 @@ async def api_reset_to_translated(project_id: str):
         from ai_shorts_maker.translator import reset_project_to_translated
 
         project = await run_in_threadpool(reset_project_to_translated, project_id)
-        return project
+        return _convert_audio_paths(project)
 
     except Exception as exc:
         logger.exception("Failed to reset project %s to translated state", project_id)
@@ -770,9 +835,10 @@ async def api_clone_translator_project(project_id: str, payload: Dict[str, Any] 
         from ai_shorts_maker.translator import clone_translator_project_with_name
 
         if new_name:
-            return await run_in_threadpool(clone_translator_project_with_name, project_id, new_name)
+            project = await run_in_threadpool(clone_translator_project_with_name, project_id, new_name)
         else:
-            return await run_in_threadpool(clone_translator_project, project_id)
+            project = await run_in_threadpool(clone_translator_project, project_id)
+        return _convert_audio_paths(project)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -801,7 +867,7 @@ async def api_generate_selected_audio(project_id: str, payload: dict):
     try:
         from ai_shorts_maker.translator import generate_selected_audio_with_silence
         audio_path = await run_in_threadpool(generate_selected_audio_with_silence, project_id, segment_ids, voice, audio_format, task_id)
-        return {"audio_path": audio_path, "task_id": task_id}
+        return {"audio_path": _audio_path_to_url(audio_path), "task_id": task_id}
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -830,7 +896,7 @@ async def api_generate_all_audio(project_id: str, payload: dict) -> TranslatorPr
     try:
         from ai_shorts_maker.translator import generate_all_audio
         updated_project = await run_in_threadpool(generate_all_audio, project_id, voice, audio_format, task_id)
-        return updated_project
+        return _convert_audio_paths(updated_project)
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -863,6 +929,109 @@ async def api_get_audio_progress(task_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get audio progress: {str(e)}"
+        )
+
+
+@translator_router.get("/projects/{project_id}/load-generated-tracks")
+async def api_load_generated_tracks(project_id: str):
+    """생성된 음성 트랙 파일들을 불러옵니다."""
+    try:
+        from ai_shorts_maker.translator import TRANSLATOR_DIR
+        import re
+
+        project = await run_in_threadpool(translator_load_project, project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+
+        audio_dir = TRANSLATOR_DIR / project_id / "audio"
+        if not audio_dir.exists():
+            return {"tracks": []}
+
+        # 생성된 음성 파일 찾기
+        tracks = []
+
+        # 1. 선택 세그먼트 음성 파일들 찾기 (selected_audio_*_segments.*)
+        selected_audio_files = sorted(audio_dir.glob("selected_audio_*_segments.*"))
+        for audio_file in selected_audio_files:
+            try:
+                output_dir = TRANSLATOR_DIR.parent
+                relative_path = audio_file.relative_to(output_dir)
+                audio_url = f"/outputs/{relative_path.as_posix()}"
+
+                # 파일명에서 세그먼트 개수 추출
+                match = re.search(r"selected_audio_(\d+)_segments", audio_file.name)
+                segment_count = int(match.group(1)) if match else 0
+
+                tracks.append({
+                    "type": "selected",
+                    "path": audio_url,
+                    "filename": audio_file.name,
+                    "segment_count": segment_count,
+                    "created_at": audio_file.stat().st_mtime,
+                    "file_path": str(audio_file)  # 삭제를 위한 전체 경로
+                })
+            except Exception as e:
+                logger.warning(f"Failed to process audio file {audio_file}: {e}")
+
+        return {"tracks": tracks}
+
+    except HTTPException:
+        raise
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Translator project '{project_id}' not found."
+        )
+    except Exception as e:
+        logger.exception("Failed to load generated tracks for project %s", project_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load generated tracks: {str(e)}"
+        )
+
+
+@translator_router.delete("/projects/{project_id}/tracks")
+async def api_delete_track(project_id: str, file_path: str = Body(..., embed=True)):
+    """트랙 파일을 삭제합니다."""
+    try:
+        from ai_shorts_maker.translator import TRANSLATOR_DIR
+        from pathlib import Path
+
+        # 보안: 프로젝트 디렉터리 내의 파일만 삭제 가능
+        track_path = Path(file_path)
+        project_audio_dir = TRANSLATOR_DIR / project_id / "audio"
+
+        if not track_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Track file not found."
+            )
+
+        # 보안 체크: 파일이 프로젝트 audio 디렉터리 내에 있는지 확인
+        try:
+            track_path.relative_to(project_audio_dir)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot delete files outside project directory."
+            )
+
+        # 파일 삭제
+        track_path.unlink()
+        logger.info(f"Deleted track file: {track_path}")
+
+        return {"success": True, "message": "Track deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete track for project %s", project_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete track: {str(e)}"
         )
 
 

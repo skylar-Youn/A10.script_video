@@ -1027,6 +1027,27 @@ summary {
     font-weight: 500;
 }
 
+.time-display .time-audio-diff {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #a1adc2;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.time-display .time-audio-diff.positive {
+    color: #ff9f68;
+}
+
+.time-display .time-audio-diff.negative {
+    color: #5be7a9;
+}
+
+.time-display .time-audio-diff.neutral {
+    color: #93a4c0;
+}
+
 .segment-time .time-edit {
     display: none;
     flex-wrap: wrap;
