@@ -263,6 +263,18 @@
             if (path.startsWith('/outputs/')) {
                 return path;
             }
+
+            // /youtube/download/ 경로 처리
+            const youtubeMarker = '/youtube/download/';
+            if (path.includes(youtubeMarker)) {
+                const parts = path.split(youtubeMarker);
+                if (parts.length > 1) {
+                    // 파일명을 URL 인코딩하여 반환
+                    const filename = parts[1];
+                    return '/youtube/download/' + encodeURIComponent(filename);
+                }
+            }
+
             const marker = '/ai_shorts_maker/outputs/';
             if (path.includes(marker)) {
                 const parts = path.split(marker);
@@ -1622,9 +1634,99 @@
                 });
         }
 
+        function attachSubtitleUploadListener() {
+            const uploadBtn = document.getElementById('upload-subtitle-file-btn');
+            const uploadInput = document.getElementById('upload-subtitle-file-input');
+
+            if (uploadBtn && uploadInput) {
+                uploadBtn.onclick = () => {
+                    uploadInput.click();
+                };
+
+                uploadInput.onchange = async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+
+                    if (!currentProject) {
+                        alert('프로젝트를 먼저 로드하세요.');
+                        return;
+                    }
+
+                    try {
+                        uploadBtn.disabled = true;
+                        uploadBtn.textContent = '📤 업로드 중...';
+
+                        // 선택된 대상 확인
+                        const targetRadio = document.querySelector('input[name="subtitle-target"]:checked');
+                        const targetField = targetRadio ? targetRadio.value : 'source_text';
+
+                        // 파일 읽기
+                        const text = await file.text();
+
+                        // 자막 파일을 프로젝트에 추가
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/add-subtitle-text`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                subtitle_text: text,
+                                subtitle_format: file.name.endsWith('.vtt') ? 'vtt' : 'srt',
+                                target_field: targetField
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+
+                        const result = await response.json();
+                        const targetName = targetField === 'source_text' ? '현재 자막(한국어)' : '재해석자막 (한국어)';
+                        alert(`${targetName}에 자막이 성공적으로 추가되었습니다!\n${result.segments_count || 0}개의 자막 구간이 추가되었습니다.`);
+
+                        // 모달 닫고 프로젝트 새로고침
+                        closeSourceSelectorModal();
+                        await loadProject(currentProject.id);
+
+                    } catch (error) {
+                        console.error('자막 업로드 실패:', error);
+                        alert('자막 파일 업로드에 실패했습니다: ' + error.message);
+                    } finally {
+                        uploadBtn.disabled = false;
+                        uploadBtn.textContent = '📋 자막 파일 업로드하여 추가';
+                        uploadInput.value = '';
+                    }
+                };
+            }
+        }
+
         function renderSavedResultOptions() {
+            let headerHtml = `
+                <div style="margin-bottom: 15px; padding: 10px; background: #f0f4f8; border-radius: 5px;">
+                    <div style="margin-bottom: 10px;">
+                        <label style="font-weight: bold; display: block; margin-bottom: 8px;">추가할 대상 선택:</label>
+                        <label style="display: inline-block; margin-right: 20px; cursor: pointer;">
+                            <input type="radio" name="subtitle-target" value="source_text" checked>
+                            현재 자막(한국어)
+                        </label>
+                        <label style="display: inline-block; cursor: pointer;">
+                            <input type="radio" name="subtitle-target" value="commentary_korean">
+                            재해석자막 (한국어)
+                        </label>
+                    </div>
+                    <button type="button" id="upload-subtitle-file-btn" class="btn-primary" style="width: 100%;">
+                        📋 자막 파일 업로드하여 추가
+                    </button>
+                    <input type="file" id="upload-subtitle-file-input" accept=".srt,.vtt" style="display: none;">
+                    <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">
+                        .srt 또는 .vtt 자막 파일을 선택하여 프로젝트에 추가할 수 있습니다.
+                    </p>
+                </div>
+            `;
+
             if (!savedResultOptions.length) {
-                sourceSelectorList.innerHTML = '<p class="empty-state">저장된 재해석 결과가 없습니다.</p>';
+                sourceSelectorList.innerHTML = headerHtml + '<p class="empty-state">저장된 재해석 결과가 없습니다.</p>';
+
+                // 자막 업로드 버튼 이벤트 리스너
+                attachSubtitleUploadListener();
                 return;
             }
 
@@ -1645,7 +1747,11 @@
                 `;
             }).join('');
 
-            sourceSelectorList.innerHTML = html;
+            sourceSelectorList.innerHTML = headerHtml + html;
+
+            // 자막 업로드 버튼 이벤트 리스너
+            attachSubtitleUploadListener();
+
             sourceSelectorList.querySelectorAll('input[name="saved-result-selection"]').forEach(input => {
                 input.addEventListener('change', async (event) => {
                     selectedSavedResultId = event.target.value;

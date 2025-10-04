@@ -4537,6 +4537,48 @@ class VideoAnalysisApp {
             console.error('번역기 음성 로드 버튼을 찾을 수 없습니다!');
         }
 
+        // 파일 목록의 자막 불러오기 버튼
+        const loadSubtitleFromFilelist = document.getElementById('load-subtitle-from-filelist');
+        if (loadSubtitleFromFilelist) {
+            loadSubtitleFromFilelist.addEventListener('click', async () => {
+                await this.loadFileList();
+                this.loadSelectedSubtitle();
+            });
+        }
+
+        // 파일 목록의 번역기 자막 불러오기 버튼
+        const loadTranslatorFromFilelist = document.getElementById('load-translator-from-filelist');
+        if (loadTranslatorFromFilelist) {
+            loadTranslatorFromFilelist.addEventListener('click', async () => {
+                await this.loadTranslatorSubtitles();
+            });
+        }
+
+        // 번역 결과의 자막 불러오기 버튼
+        const loadSubtitleFromResults = document.getElementById('load-subtitle-from-results');
+        if (loadSubtitleFromResults) {
+            loadSubtitleFromResults.addEventListener('click', async () => {
+                await this.loadFileList();
+                this.loadSelectedSubtitle();
+            });
+        }
+
+        // 번역 결과의 번역기 자막 불러오기 버튼
+        const loadTranslatorFromResults = document.getElementById('load-translator-from-results');
+        if (loadTranslatorFromResults) {
+            loadTranslatorFromResults.addEventListener('click', async () => {
+                await this.loadTranslatorSubtitles();
+            });
+        }
+
+        // 분석 대상의 자막 불러오기 버튼 (번역 결과에 추가)
+        const loadSubtitleToResults = document.getElementById('load-subtitle-to-results');
+        if (loadSubtitleToResults) {
+            loadSubtitleToResults.addEventListener('click', async () => {
+                await this.loadSubtitleToResults();
+            });
+        }
+
         // 설명자막 음성 자르기 버튼
         const cutTranslationAudioBtn = document.getElementById('cut-translation-audio');
         if (cutTranslationAudioBtn) {
@@ -5754,6 +5796,77 @@ class VideoAnalysisApp {
         } catch (error) {
             console.error('자막 로드 에러:', error);
             this.showError('자막 파일 로드 실패: ' + error.message);
+        }
+    }
+
+    async loadSubtitleToResults() {
+        try {
+            // 자막 파일 자동 검색
+            const response = await fetch('/api/files?filter_type=all');
+            const data = await response.json();
+            const availableSubtitles = [];
+
+            if (data.files) {
+                data.files.forEach(file => {
+                    if (file.path && (file.path.endsWith('.srt') || file.path.endsWith('.vtt'))) {
+                        availableSubtitles.push(file.path);
+                    }
+                });
+            }
+
+            if (availableSubtitles.length === 0) {
+                this.showError('자막 파일이 없습니다. .srt 또는 .vtt 파일을 업로드하거나 선택하세요.');
+                return;
+            }
+
+            // _fixed.srt, _generated.srt 파일을 우선적으로 선택
+            const preferredSubtitle = availableSubtitles.find(path =>
+                path.includes('_fixed.srt') || path.includes('_generated.srt')) || availableSubtitles[0];
+
+            this.showInfo(`자막 파일을 분석하고 있습니다: ${preferredSubtitle.split('/').pop()}`);
+
+            // 자막 파일 분석 API 호출
+            const analysisResponse = await fetch('/api/analysis/subtitle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: [preferredSubtitle] })
+            });
+
+            const analysisData = await analysisResponse.json();
+
+            if (analysisData.results && analysisData.results[0] && analysisData.results[0].status === 'success') {
+                const resultData = analysisData.results[0].data;
+
+                // 자막 데이터 추출
+                let subtitles = [];
+                if (resultData.subtitles) {
+                    subtitles = resultData.subtitles;
+                } else if (resultData.analysis && resultData.analysis.subtitles) {
+                    subtitles = resultData.analysis.subtitles;
+                }
+
+                // 자막 텍스트를 재해석 형식으로 변환
+                let reinterpretationText = '';
+                if (subtitles.length > 0) {
+                    reinterpretationText = subtitles.map((sub, index) => {
+                        const timeStr = `[${this.formatDuration(sub.start_time)} → ${this.formatDuration(sub.end_time)}]`;
+                        return `${index + 1}. ${timeStr}\n${sub.text}`;
+                    }).join('\n\n');
+                }
+
+                // 재해석 패널에 표시
+                if (reinterpretationText) {
+                    this.showReinterpretationResult(reinterpretationText);
+                    this.showSuccess(`자막이 재해석 자막 (한국어)에 추가되었습니다: ${preferredSubtitle.split('/').pop()} (${subtitles.length}개 구간)`);
+                } else {
+                    this.showError('자막 내용을 추출할 수 없습니다.');
+                }
+            } else {
+                throw new Error(analysisData.results?.[0]?.error || '자막 분석 실패');
+            }
+        } catch (error) {
+            console.error('자막 불러오기 에러:', error);
+            this.showError('자막 불러오기 실패: ' + error.message);
         }
     }
 

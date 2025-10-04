@@ -49,6 +49,10 @@
                     <button class="file-action-btn" id="restore-hidden-files" title="다시 숨기기">🙈 다시숨기기</button>
                     <button class="file-action-btn danger" id="delete-hidden-files" title="숨긴 파일 삭제하기">🙈 숨김파일삭제</button>
                 </div>
+                <div class="file-controls" style="margin-top: 8px;">
+                    <button class="file-action-btn" id="load-subtitle-from-filelist" style="background-color: #3498db;" title="자막 파일 불러오기">📋 자막 불러오기</button>
+                    <button class="file-action-btn" id="load-translator-from-filelist" style="background-color: #2196F3;" title="번역기 자막 불러오기">🌐 번역기 자막 불러오기</button>
+                </div>
                 <div class="file-grid" id="file-grid">
                     <div class="loading">📄 파일 목록을 불러오는 중...</div>
                 </div>
@@ -63,6 +67,7 @@
             <div>
                 <button class="btn-xs" id="save-analysis-target" title="현재 선택된 파일 저장">💾 저장</button>
                 <button class="btn-xs" id="load-analysis-target" title="저장된 파일 불러오기">📂 불러오기</button>
+                <button class="btn-xs" id="load-subtitle-to-results" style="background-color: #3498db;" title="자막 파일 불러와서 번역 결과에 추가">📋 자막 불러오기</button>
             </div>
         </div>
         <div class="selection-layout">
@@ -829,6 +834,10 @@
             <div class="actions-section">
                 <h3>🚀 결과 활용</h3>
                 <div class="action-buttons">
+                    <div class="subtitle-load-controls" style="display: flex; gap: 10px; margin-bottom: 15px;">
+                        <button class="action-btn secondary" id="load-subtitle-from-results" style="background-color: #3498db;">📋 자막 불러오기</button>
+                        <button class="action-btn secondary" id="load-translator-from-results" style="background-color: #2196F3;">🌐 번역기 자막 불러오기</button>
+                    </div>
                     <div class="reinterpret-mode-select">
                         <label>
                             재해석 실행 모드

@@ -225,6 +225,87 @@ def _parse_srt_segments(srt_path: str) -> List[TranslatorSegment]:
     return segments
 
 
+def _parse_srt_text(srt_text: str) -> List[TranslatorSegment]:
+    """Parse SRT text content and create segments with timing and text."""
+    segments: List[TranslatorSegment] = []
+    try:
+        content = srt_text.strip()
+        if not content:
+            return []
+
+        # Split by double newlines to separate subtitle blocks
+        blocks = content.split('\n\n')
+
+        for i, block in enumerate(blocks):
+            lines = block.strip().split('\n')
+            if len(lines) < 3:
+                continue
+
+            # Skip subtitle number (first line)
+            timing_line = lines[1]
+            text_lines = lines[2:]
+
+            # Parse timing: "00:00:00,160 --> 00:00:05,480"
+            if ' --> ' not in timing_line:
+                continue
+
+            start_str, end_str = timing_line.split(' --> ')
+            start_time = _parse_srt_time(start_str)
+            end_time = _parse_srt_time(end_str)
+
+            # Combine text lines
+            source_text = ' '.join(text_lines).strip()
+
+            if source_text:  # Only add segments with text
+                segments.append(
+                    TranslatorSegment(
+                        clip_index=i,
+                        start=round(start_time, 3),
+                        end=round(end_time, 3),
+                        source_text=source_text,
+                    )
+                )
+    except Exception as exc:
+        logger.warning(f"Failed to parse SRT text: {exc}")
+
+    return segments
+
+
+def parse_subtitle_text_and_add_to_project(
+    project_id: str, subtitle_text: str, subtitle_format: str = "srt"
+) -> TranslatorProject:
+    """Parse subtitle text and add segments to project."""
+    project = load_project(project_id)
+
+    # Parse subtitle text
+    if subtitle_format.lower() == "srt":
+        new_segments = _parse_srt_text(subtitle_text)
+    else:
+        # VTT format could be added here in the future
+        raise ValueError(f"Unsupported subtitle format: {subtitle_format}")
+
+    if not new_segments:
+        raise ValueError("No valid segments found in subtitle text")
+
+    # Find the maximum clip_index from existing segments
+    max_clip_index = -1
+    if project.segments:
+        max_clip_index = max(seg.clip_index for seg in project.segments)
+
+    # Update clip_index for new segments to avoid conflicts
+    for i, seg in enumerate(new_segments):
+        seg.clip_index = max_clip_index + 1 + i
+
+    # Add new segments to project
+    project.segments.extend(new_segments)
+
+    # Save project
+    save_project(project)
+
+    logger.info(f"Added {len(new_segments)} segments to project {project_id} (clip_index {max_clip_index + 1} ~ {max_clip_index + len(new_segments)})")
+    return project
+
+
 def _build_segments(duration: Optional[float], max_length: float, subtitle_path: Optional[str] = None) -> List[TranslatorSegment]:
     # If we have a subtitle file, parse it first
     if subtitle_path and Path(subtitle_path).exists():
@@ -2308,6 +2389,7 @@ __all__ = [
     "generate_all_audio",
     "get_audio_generation_progress",
     "clear_audio_generation_progress",
+    "parse_subtitle_text_and_add_to_project",
     "UPLOADS_DIR",
     "ensure_directories",
 ]

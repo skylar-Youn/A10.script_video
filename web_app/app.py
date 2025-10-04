@@ -207,6 +207,7 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/outputs", StaticFiles(directory=OUTPUT_DIR), name="outputs")
+app.mount("/youtube/download", StaticFiles(directory=DEFAULT_YTDL_OUTPUT_DIR), name="youtube_download")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -486,6 +487,39 @@ async def api_delete_translator_project(project_id: str) -> Response:
         logger.exception("Failed to delete translator project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@translator_router.post("/projects/{project_id}/add-subtitle-text")
+async def api_add_subtitle_text(project_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """자막 텍스트를 파싱하여 프로젝트에 추가"""
+    try:
+        subtitle_text = payload.get("subtitle_text", "")
+        subtitle_format = payload.get("subtitle_format", "srt")  # srt 또는 vtt
+        target_field = payload.get("target_field", "source_text")  # source_text 또는 commentary_korean
+
+        if not subtitle_text:
+            raise ValueError("subtitle_text is required")
+
+        # 자막 파싱
+        from ai_shorts_maker.translator import parse_subtitle_text_and_add_to_project
+
+        project = await run_in_threadpool(
+            parse_subtitle_text_and_add_to_project,
+            project_id,
+            subtitle_text,
+            subtitle_format,
+            target_field
+        )
+
+        return {
+            "success": True,
+            "project_id": project_id,
+            "segments_count": len(project.segments) if project else 0,
+            "target_field": target_field
+        }
+    except Exception as exc:
+        logger.exception("Failed to add subtitle text to project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @translator_router.post("/projects/{project_id}/generate-commentary", response_model=TranslatorProject)
