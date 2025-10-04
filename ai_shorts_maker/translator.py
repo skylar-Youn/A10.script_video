@@ -225,20 +225,40 @@ def _parse_srt_segments(srt_path: str) -> List[TranslatorSegment]:
     return segments
 
 
-def _parse_srt_text(srt_text: str) -> List[TranslatorSegment]:
-    """Parse SRT text content and create segments with timing and text."""
+def _parse_srt_text(srt_text: str, selected_speakers: Optional[List[str]] = None) -> List[TranslatorSegment]:
+    """Parse SRT text content and create segments with timing and text.
+
+    Args:
+        srt_text: SRT text content
+        selected_speakers: List of speaker names to filter (e.g., ['화자1', '화자3'])
+    """
     segments: List[TranslatorSegment] = []
     try:
         content = srt_text.strip()
         if not content:
             return []
 
+        logger.info(f"🔍 Parsing SRT with selected_speakers: {selected_speakers}")
+        print(f"🔍 Parsing SRT with selected_speakers: {selected_speakers}", flush=True)
+
         # Split by double newlines to separate subtitle blocks
         blocks = content.split('\n\n')
+        logger.info(f"📋 Total blocks: {len(blocks)}")
+        print(f"📋 Total blocks: {len(blocks)}", flush=True)
+
+        import re
+        total_count = 0
+        filtered_count = 0
+
+        # Print first block for debugging
+        if len(blocks) > 0:
+            print(f"📝 First block sample:\n{blocks[0][:200]}", flush=True)
 
         for i, block in enumerate(blocks):
             lines = block.strip().split('\n')
             if len(lines) < 3:
+                if i < 3:
+                    print(f"  Block {i} skipped: only {len(lines)} lines", flush=True)
                 continue
 
             # Skip subtitle number (first line)
@@ -247,6 +267,8 @@ def _parse_srt_text(srt_text: str) -> List[TranslatorSegment]:
 
             # Parse timing: "00:00:00,160 --> 00:00:05,480"
             if ' --> ' not in timing_line:
+                if i < 3:
+                    print(f"  Block {i} skipped: no --> in timing line", flush=True)
                 continue
 
             start_str, end_str = timing_line.split(' --> ')
@@ -255,6 +277,47 @@ def _parse_srt_text(srt_text: str) -> List[TranslatorSegment]:
 
             # Combine text lines
             source_text = ' '.join(text_lines).strip()
+            total_count += 1
+
+            # Extract speaker information from text - matching frontend pattern
+            speaker = None
+            original_text = source_text
+
+            # Frontend pattern: /^[\[\(]?(화자\d+|SPEAKER_\d+|Speaker \d+)[\]\)]?:?/i
+            speaker_match = re.match(r'^[\[\(]?(화자\d+|SPEAKER_\d+|Speaker\s+\d+)[\]\)]?:?\s*', source_text, re.IGNORECASE)
+            if speaker_match:
+                speaker = speaker_match.group(1)
+                # Normalize speaker name to 화자X format
+                if speaker.upper().startswith('SPEAKER_'):
+                    num = speaker.split('_')[1]
+                    speaker = f'화자{num}'
+                elif speaker.upper().startswith('SPEAKER '):
+                    num = speaker.split()[-1]
+                    speaker = f'화자{num}'
+                # Remove speaker prefix from text
+                source_text = source_text[speaker_match.end():].strip()
+
+            # Log first few segments for debugging
+            if i < 5:
+                print(f"  Segment {i}: speaker={speaker}, original_text={original_text[:80]}", flush=True)
+                logger.info(f"  Segment {i}: speaker={speaker}, original_text={original_text[:50]}")
+
+            # Filter by selected speakers if provided
+            if selected_speakers is not None and len(selected_speakers) > 0:
+                if speaker is None:
+                    if i < 3:
+                        print(f"  ⏭️  Skipping segment {i}: no speaker detected", flush=True)
+                    logger.info(f"  ⏭️  Skipping segment {i}: no speaker detected in '{original_text[:50]}'")
+                    continue
+                if speaker not in selected_speakers:
+                    if i < 5:
+                        print(f"  ⏭️  Skipping segment {i}: speaker '{speaker}' not in {selected_speakers}", flush=True)
+                    logger.info(f"  ⏭️  Skipping segment {i}: speaker '{speaker}' not in selected_speakers {selected_speakers}")
+                    continue
+                filtered_count += 1
+                if i < 10:
+                    print(f"  ✓ Including segment {i}: speaker '{speaker}' matched", flush=True)
+                logger.info(f"  ✓ Including segment {i}: speaker '{speaker}' matched")
 
             if source_text:  # Only add segments with text
                 segments.append(
@@ -263,46 +326,52 @@ def _parse_srt_text(srt_text: str) -> List[TranslatorSegment]:
                         start=round(start_time, 3),
                         end=round(end_time, 3),
                         source_text=source_text,
+                        speaker_name=speaker,
                     )
                 )
+
+        print(f"✅ Parsed {len(segments)} segments (total: {total_count}, filtered: {filtered_count}, selected_speakers: {selected_speakers})", flush=True)
+        logger.info(f"✅ Parsed {len(segments)} segments (total: {total_count}, filtered: {filtered_count}, selected_speakers: {selected_speakers})")
+
     except Exception as exc:
-        logger.warning(f"Failed to parse SRT text: {exc}")
+        logger.exception(f"Failed to parse SRT text: {exc}")
 
     return segments
 
 
 def parse_subtitle_text_and_add_to_project(
-    project_id: str, subtitle_text: str, subtitle_format: str = "srt", target_field: str = "source_text"
-) -> TranslatorProject:
-    """Parse subtitle text and add segments to project.
+    project_id: str,
+    subtitle_text: str,
+    subtitle_format: str = "srt",
+    target_field: str = "source_text",
+    selected_speakers: Optional[List[str]] = None
+) -> dict:
+    """Parse subtitle text and add segments to project, sorted by time.
 
     Args:
         project_id: Project ID
         subtitle_text: Subtitle file content
         subtitle_format: Format of subtitle (srt or vtt)
         target_field: Target field to add subtitle text (source_text or commentary_korean)
+        selected_speakers: List of speaker names to filter (e.g., ['화자1', '화자3'])
+
+    Returns:
+        dict with 'project' and 'added_count'
     """
     project = load_project(project_id)
 
-    # Parse subtitle text
+    # Parse subtitle text with speaker filtering
     if subtitle_format.lower() == "srt":
-        new_segments = _parse_srt_text(subtitle_text)
+        new_segments = _parse_srt_text(subtitle_text, selected_speakers)
     else:
         # VTT format could be added here in the future
         raise ValueError(f"Unsupported subtitle format: {subtitle_format}")
 
     if not new_segments:
-        raise ValueError("No valid segments found in subtitle text")
+        raise ValueError("No valid segments found in subtitle text (after speaker filtering)")
 
-    # Find the maximum clip_index from existing segments
-    max_clip_index = -1
-    if project.segments:
-        max_clip_index = max(seg.clip_index for seg in project.segments)
-
-    # Update clip_index for new segments and set target field
-    for i, seg in enumerate(new_segments):
-        seg.clip_index = max_clip_index + 1 + i
-
+    # Update target field for new segments
+    for seg in new_segments:
         # 타겟 필드에 따라 자막 위치 설정
         if target_field == "commentary_korean":
             # 재해석자막(한국어)에 추가
@@ -313,11 +382,31 @@ def parse_subtitle_text_and_add_to_project(
     # Add new segments to project
     project.segments.extend(new_segments)
 
-    # Note: Not saving automatically - user must click save button
-    # save_project(project)
+    # Sort all segments by start time
+    project.segments.sort(key=lambda seg: seg.start)
 
-    logger.info(f"Added {len(new_segments)} segments to project {project_id} in field '{target_field}' (clip_index {max_clip_index + 1} ~ {max_clip_index + len(new_segments)}) - not saved yet")
-    return project
+    # Re-assign clip_index based on sorted order
+    for i, seg in enumerate(project.segments):
+        seg.clip_index = i
+
+    added_count = len(new_segments)
+    speaker_info = f" (speakers: {', '.join(selected_speakers)})" if selected_speakers else ""
+
+    # 즉시 저장하여 UI 새로고침 이전에도 데이터가 유지되도록 함
+    saved_project = save_project(project)
+
+    logger.info(
+        "Saved %s segments to project %s in field '%s'%s",
+        added_count,
+        project_id,
+        target_field,
+        speaker_info,
+    )
+
+    return {
+        "project": saved_project,
+        "added_count": added_count
+    }
 
 
 def _build_segments(duration: Optional[float], max_length: float, subtitle_path: Optional[str] = None) -> List[TranslatorSegment]:

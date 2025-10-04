@@ -1653,6 +1653,19 @@
                     }
 
                     try {
+                        // 프로젝트 ID 검증
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const expectedProjectId = urlParams.get('id') || urlParams.get('project');
+
+                        if (expectedProjectId && currentProject.id !== expectedProjectId) {
+                            console.error(`⚠️ 프로젝트 ID 불일치 감지!`);
+                            console.error(`   URL: ${expectedProjectId}`);
+                            console.error(`   currentProject: ${currentProject.id}`);
+                            alert('프로젝트 정보가 일치하지 않습니다.\n페이지를 새로고침합니다.');
+                            window.location.reload();
+                            return;
+                        }
+
                         uploadBtn.disabled = true;
                         uploadBtn.textContent = '📤 업로드 중...';
 
@@ -1663,6 +1676,23 @@
                         // 파일 읽기
                         const text = await file.text();
 
+                        // SRT 파일에서 화자 정보 추출
+                        const speakers = extractSpeakersFromSRT(text);
+                        console.log('🎤 추출된 화자:', speakers);
+
+                        // 화자가 있으면 선택 다이얼로그 표시
+                        let selectedSpeakers = null;
+                        if (speakers.length > 0) {
+                            selectedSpeakers = await showSpeakerSelectionDialog(speakers, text);
+                            if (selectedSpeakers === null) {
+                                // 사용자가 취소한 경우
+                                uploadBtn.disabled = false;
+                                uploadBtn.textContent = '📋 자막 파일 업로드하여 추가';
+                                uploadInput.value = '';
+                                return;
+                            }
+                        }
+
                         // 자막 파일을 프로젝트에 추가
                         const response = await fetch(`/api/translator/projects/${currentProject.id}/add-subtitle-text`, {
                             method: 'POST',
@@ -1670,7 +1700,8 @@
                             body: JSON.stringify({
                                 subtitle_text: text,
                                 subtitle_format: file.name.endsWith('.vtt') ? 'vtt' : 'srt',
-                                target_field: targetField
+                                target_field: targetField,
+                                selected_speakers: selectedSpeakers  // 선택된 화자 전송
                             })
                         });
 
@@ -1680,7 +1711,8 @@
 
                         const result = await response.json();
                         const targetName = targetField === 'source_text' ? '현재 자막(한국어)' : '재해석자막 (한국어)';
-                        alert(`${targetName}에 자막이 성공적으로 추가되었습니다!\n${result.segments_count || 0}개의 자막 구간이 추가되었습니다.`);
+                        const speakerInfo = selectedSpeakers && selectedSpeakers.length > 0 ? ` (화자: ${selectedSpeakers.join(', ')})` : '';
+                        alert(`${targetName}에 자막이 성공적으로 추가되었습니다!${speakerInfo}\n${result.added_count || 0}개의 자막 구간이 추가되었습니다.`);
 
                         // 모달 닫고 프로젝트 새로고침
                         closeSourceSelectorModal();
@@ -1696,6 +1728,170 @@
                     }
                 };
             }
+        }
+
+        // SRT 파일에서 화자 정보 추출
+        function extractSpeakersFromSRT(srtText) {
+            const speakers = new Set();
+            const lines = srtText.split('\n');
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                // [화자1], (화자1), 화자1: 등의 패턴 검색
+                const speakerMatch = line.match(/^[\[\(]?(화자\d+|SPEAKER_\d+|Speaker \d+)[\]\)]?:?/i);
+                if (speakerMatch) {
+                    speakers.add(speakerMatch[1]);
+                }
+            }
+
+            return Array.from(speakers);
+        }
+
+        // 화자 선택 다이얼로그 표시
+        async function showSpeakerSelectionDialog(speakers, srtText) {
+            return new Promise((resolve) => {
+                // 각 화자의 자막 개수 계산
+                const speakerCounts = {};
+                speakers.forEach(speaker => {
+                    const regex = new RegExp(`^[\\[\\(]?${speaker}[\\]\\)]?:?`, 'gmi');
+                    const matches = srtText.match(regex);
+                    speakerCounts[speaker] = matches ? matches.length : 0;
+                });
+
+                // 다이얼로그 HTML 생성
+                const dialogHTML = `
+                    <div id="speaker-selection-dialog" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background-color: rgba(0, 0, 0, 0.7);
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        z-index: 10000;
+                    ">
+                        <div style="
+                            background: white;
+                            padding: 30px;
+                            border-radius: 12px;
+                            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                            max-width: 500px;
+                            width: 90%;
+                        ">
+                            <h3 style="margin-top: 0; margin-bottom: 20px; color: #000;">🎤 화자 선택</h3>
+                            <p style="margin-bottom: 20px; color: #000;">불러올 자막의 화자를 선택하세요 (여러 개 선택 가능):</p>
+                            <div id="speaker-options" style="margin-bottom: 20px;">
+                                ${speakers.map(speaker => {
+                                    const count = speakerCounts[speaker] || 0;
+                                    return `
+                                        <label style="display: block; margin-bottom: 12px; cursor: pointer; padding: 10px; border: 2px solid #ddd; border-radius: 6px; transition: all 0.2s; color: #000 !important; background-color: white;">
+                                            <input type="checkbox" name="speaker" value="${speaker}" style="margin-right: 8px;">
+                                            <strong style="color: #000 !important; font-size: 16px;">${speaker}</strong> <span style="color: #000 !important; font-size: 14px;">(${count}개)</span>
+                                        </label>
+                                    `;
+                                }).join('')}
+                            </div>
+                            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                                <button id="speaker-cancel-btn" style="
+                                    padding: 10px 20px;
+                                    background-color: #ccc;
+                                    color: #000;
+                                    border: none;
+                                    border-radius: 6px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: bold;
+                                ">취소</button>
+                                <button id="speaker-ok-btn" style="
+                                    padding: 10px 20px;
+                                    background-color: #4CAF50;
+                                    color: white;
+                                    border: none;
+                                    border-radius: 6px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: bold;
+                                ">확인</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // 다이얼로그를 body에 추가
+                document.body.insertAdjacentHTML('beforeend', dialogHTML);
+
+                const dialog = document.getElementById('speaker-selection-dialog');
+                const okBtn = document.getElementById('speaker-ok-btn');
+                const cancelBtn = document.getElementById('speaker-cancel-btn');
+
+                // 체크박스 hover 효과
+                const labels = dialog.querySelectorAll('label');
+                labels.forEach(label => {
+                    // 모든 텍스트 요소에 검정색 강제 적용
+                    const strong = label.querySelector('strong');
+                    const span = label.querySelector('span');
+                    if (strong) strong.style.color = '#000';
+                    if (span) span.style.color = '#000';
+
+                    label.addEventListener('mouseenter', () => {
+                        label.style.backgroundColor = '#f0f0f0';
+                        label.style.borderColor = '#4CAF50';
+                        if (strong) strong.style.color = '#000';
+                        if (span) span.style.color = '#000';
+                    });
+                    label.addEventListener('mouseleave', () => {
+                        label.style.backgroundColor = 'white';
+                        if (strong) strong.style.color = '#000';
+                        if (span) span.style.color = '#000';
+                        if (!label.querySelector('input').checked) {
+                            label.style.borderColor = '#ddd';
+                        }
+                    });
+                    label.querySelector('input').addEventListener('change', () => {
+                        if (label.querySelector('input').checked) {
+                            label.style.borderColor = '#4CAF50';
+                            label.style.backgroundColor = '#e8f5e9';
+                        } else {
+                            label.style.borderColor = '#ddd';
+                            label.style.backgroundColor = 'white';
+                        }
+                        if (strong) strong.style.color = '#000';
+                        if (span) span.style.color = '#000';
+                    });
+                });
+
+                // 확인 버튼
+                okBtn.addEventListener('click', () => {
+                    const checkboxes = dialog.querySelectorAll('input[name="speaker"]:checked');
+                    const selectedSpeakers = Array.from(checkboxes).map(cb => cb.value);
+
+                    if (selectedSpeakers.length === 0) {
+                        alert('최소 1개 이상의 화자를 선택해주세요.');
+                        return;
+                    }
+
+                    dialog.remove();
+                    resolve(selectedSpeakers);
+                });
+
+                // 취소 버튼
+                cancelBtn.addEventListener('click', () => {
+                    dialog.remove();
+                    resolve(null);
+                });
+
+                // ESC 키로 닫기
+                const handleKeyPress = (e) => {
+                    if (e.key === 'Escape') {
+                        dialog.remove();
+                        resolve(null);
+                        document.removeEventListener('keydown', handleKeyPress);
+                    }
+                };
+                document.addEventListener('keydown', handleKeyPress);
+            });
         }
 
         function renderSavedResultOptions() {
@@ -3384,6 +3580,21 @@
         });
 
         function renderProject(project) {
+            // URL의 프로젝트 ID와 로드된 프로젝트 ID 검증
+            const urlParams = new URLSearchParams(window.location.search);
+            const expectedProjectId = urlParams.get('id') || urlParams.get('project');
+
+            if (expectedProjectId && project.id !== expectedProjectId) {
+                console.warn(`⚠️ Project ID mismatch detected!`);
+                console.warn(`   URL expects: ${expectedProjectId}`);
+                console.warn(`   But got: ${project.id}`);
+                console.warn(`   Reloading correct project...`);
+
+                // 올바른 프로젝트 다시 로드
+                loadProject(expectedProjectId);
+                return;
+            }
+
             currentProject = project;
             syncSelectionWithProject();
             creationView.classList.add('hidden');

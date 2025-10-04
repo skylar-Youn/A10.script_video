@@ -496,6 +496,7 @@ async def api_add_subtitle_text(project_id: str, payload: Dict[str, Any] = Body(
         subtitle_text = payload.get("subtitle_text", "")
         subtitle_format = payload.get("subtitle_format", "srt")  # srt 또는 vtt
         target_field = payload.get("target_field", "source_text")  # source_text 또는 commentary_korean
+        selected_speakers = payload.get("selected_speakers", None)  # 선택된 화자 리스트
 
         if not subtitle_text:
             raise ValueError("subtitle_text is required")
@@ -503,19 +504,22 @@ async def api_add_subtitle_text(project_id: str, payload: Dict[str, Any] = Body(
         # 자막 파싱
         from ai_shorts_maker.translator import parse_subtitle_text_and_add_to_project
 
-        project = await run_in_threadpool(
+        result = await run_in_threadpool(
             parse_subtitle_text_and_add_to_project,
             project_id,
             subtitle_text,
             subtitle_format,
-            target_field
+            target_field,
+            selected_speakers
         )
 
         return {
             "success": True,
             "project_id": project_id,
-            "segments_count": len(project.segments) if project else 0,
-            "target_field": target_field
+            "segments_count": len(result["project"].segments) if result["project"] else 0,
+            "added_count": result.get("added_count", 0),
+            "target_field": target_field,
+            "selected_speakers": selected_speakers
         }
     except Exception as exc:
         logger.exception("Failed to add subtitle text to project %s", project_id)

@@ -3349,11 +3349,13 @@ class VideoAnalysisApp {
     }
 
     showReinterpretationResult(reinterpretationText, outline = null) {
+        console.log('📋 showReinterpretationResult 호출됨', { textLength: reinterpretationText?.length, hasOutline: !!outline });
+
         const panel = document.getElementById('reinterpretation-panel');
         const textElement = document.getElementById('reinterpretation-text');
 
         if (!panel || !textElement) {
-            console.warn('재해석 결과 패널을 찾을 수 없습니다');
+            console.warn('❌ 재해석 결과 패널을 찾을 수 없습니다', { panel: !!panel, textElement: !!textElement });
             return;
         }
 
@@ -3365,6 +3367,12 @@ class VideoAnalysisApp {
 
         textElement.textContent = displayText.trim();
         panel.style.display = 'flex';
+
+        // 패널이 화면에 보이도록 스크롤
+        setTimeout(() => {
+            panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            console.log('✅ 재해석 패널 표시됨', { displayText: displayText.substring(0, 100) + '...' });
+        }, 100);
     }
 
     hideReinterpretationPanel() {
@@ -5845,10 +5853,39 @@ class VideoAnalysisApp {
                     subtitles = resultData.analysis.subtitles;
                 }
 
+                console.log('📋 전체 자막 개수:', subtitles.length);
+
+                // 화자 정보 추출
+                const speakers = new Set();
+                subtitles.forEach(sub => {
+                    if (sub.speaker) {
+                        speakers.add(sub.speaker);
+                    }
+                });
+
+                console.log('🎤 감지된 화자:', Array.from(speakers));
+
+                // 화자가 있으면 선택 다이얼로그 표시
+                let selectedSpeaker = null;
+                if (speakers.size > 0) {
+                    selectedSpeaker = await this.showSpeakerSelectionDialog(Array.from(speakers), subtitles);
+                    if (selectedSpeaker === null) {
+                        // 사용자가 취소한 경우
+                        return;
+                    }
+                }
+
+                // 선택한 화자의 자막만 필터링
+                let filteredSubtitles = subtitles;
+                if (selectedSpeaker !== null && selectedSpeaker !== 'all') {
+                    filteredSubtitles = subtitles.filter(sub => sub.speaker === selectedSpeaker);
+                    console.log(`🎯 화자 "${selectedSpeaker}" 자막 필터링: ${filteredSubtitles.length}개`);
+                }
+
                 // 자막 텍스트를 재해석 형식으로 변환
                 let reinterpretationText = '';
-                if (subtitles.length > 0) {
-                    reinterpretationText = subtitles.map((sub, index) => {
+                if (filteredSubtitles.length > 0) {
+                    reinterpretationText = filteredSubtitles.map((sub, index) => {
                         const timeStr = `[${this.formatDuration(sub.start_time)} → ${this.formatDuration(sub.end_time)}]`;
                         return `${index + 1}. ${timeStr}\n${sub.text}`;
                     }).join('\n\n');
@@ -5857,7 +5894,8 @@ class VideoAnalysisApp {
                 // 재해석 패널에 표시
                 if (reinterpretationText) {
                     this.showReinterpretationResult(reinterpretationText);
-                    this.showSuccess(`자막이 재해석 자막 (한국어)에 추가되었습니다: ${preferredSubtitle.split('/').pop()} (${subtitles.length}개 구간)`);
+                    const speakerInfo = selectedSpeaker && selectedSpeaker !== 'all' ? ` (화자: ${selectedSpeaker})` : '';
+                    this.showSuccess(`자막이 재해석 자막 (한국어)에 추가되었습니다: ${preferredSubtitle.split('/').pop()}${speakerInfo} (${filteredSubtitles.length}개 구간)`);
                 } else {
                     this.showError('자막 내용을 추출할 수 없습니다.');
                 }
@@ -5868,6 +5906,124 @@ class VideoAnalysisApp {
             console.error('자막 불러오기 에러:', error);
             this.showError('자막 불러오기 실패: ' + error.message);
         }
+    }
+
+    async showSpeakerSelectionDialog(speakers, subtitles) {
+        return new Promise((resolve) => {
+            // 다이얼로그 HTML 생성
+            const dialogHTML = `
+                <div id="speaker-selection-dialog" style="
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background-color: rgba(0, 0, 0, 0.7);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 10000;
+                ">
+                    <div style="
+                        background: white;
+                        padding: 30px;
+                        border-radius: 12px;
+                        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                        max-width: 500px;
+                        width: 90%;
+                    ">
+                        <h3 style="margin-top: 0; margin-bottom: 20px; color: #333;">🎤 화자 선택</h3>
+                        <p style="margin-bottom: 20px; color: #666;">불러올 자막의 화자를 선택하세요:</p>
+                        <div id="speaker-options" style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 12px; cursor: pointer; padding: 10px; border: 2px solid #ddd; border-radius: 6px; transition: all 0.2s;">
+                                <input type="radio" name="speaker" value="all" checked style="margin-right: 8px;">
+                                <strong>전체 (${subtitles.length}개)</strong>
+                            </label>
+                            ${speakers.map(speaker => {
+                                const count = subtitles.filter(sub => sub.speaker === speaker).length;
+                                return `
+                                    <label style="display: block; margin-bottom: 12px; cursor: pointer; padding: 10px; border: 2px solid #ddd; border-radius: 6px; transition: all 0.2s;">
+                                        <input type="radio" name="speaker" value="${speaker}" style="margin-right: 8px;">
+                                        <strong>${speaker}</strong> (${count}개)
+                                    </label>
+                                `;
+                            }).join('')}
+                        </div>
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button id="speaker-cancel-btn" style="
+                                padding: 10px 20px;
+                                background-color: #ccc;
+                                border: none;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                font-size: 14px;
+                            ">취소</button>
+                            <button id="speaker-ok-btn" style="
+                                padding: 10px 20px;
+                                background-color: #4CAF50;
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                font-size: 14px;
+                            ">확인</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // 다이얼로그를 body에 추가
+            document.body.insertAdjacentHTML('beforeend', dialogHTML);
+
+            const dialog = document.getElementById('speaker-selection-dialog');
+            const okBtn = document.getElementById('speaker-ok-btn');
+            const cancelBtn = document.getElementById('speaker-cancel-btn');
+
+            // 라디오 버튼 hover 효과
+            const labels = dialog.querySelectorAll('label');
+            labels.forEach(label => {
+                label.addEventListener('mouseenter', () => {
+                    label.style.backgroundColor = '#f0f0f0';
+                    label.style.borderColor = '#4CAF50';
+                });
+                label.addEventListener('mouseleave', () => {
+                    label.style.backgroundColor = 'white';
+                    if (!label.querySelector('input').checked) {
+                        label.style.borderColor = '#ddd';
+                    }
+                });
+                label.querySelector('input').addEventListener('change', () => {
+                    labels.forEach(l => l.style.borderColor = '#ddd');
+                    if (label.querySelector('input').checked) {
+                        label.style.borderColor = '#4CAF50';
+                    }
+                });
+            });
+
+            // 확인 버튼
+            okBtn.addEventListener('click', () => {
+                const selected = dialog.querySelector('input[name="speaker"]:checked');
+                const value = selected ? selected.value : 'all';
+                dialog.remove();
+                resolve(value);
+            });
+
+            // 취소 버튼
+            cancelBtn.addEventListener('click', () => {
+                dialog.remove();
+                resolve(null);
+            });
+
+            // ESC 키로 닫기
+            const handleKeyPress = (e) => {
+                if (e.key === 'Escape') {
+                    dialog.remove();
+                    resolve(null);
+                    document.removeEventListener('keydown', handleKeyPress);
+                }
+            };
+            document.addEventListener('keydown', handleKeyPress);
+        });
     }
 
     renderSubtitleTrack() {
