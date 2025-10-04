@@ -272,9 +272,16 @@ def _parse_srt_text(srt_text: str) -> List[TranslatorSegment]:
 
 
 def parse_subtitle_text_and_add_to_project(
-    project_id: str, subtitle_text: str, subtitle_format: str = "srt"
+    project_id: str, subtitle_text: str, subtitle_format: str = "srt", target_field: str = "source_text"
 ) -> TranslatorProject:
-    """Parse subtitle text and add segments to project."""
+    """Parse subtitle text and add segments to project.
+
+    Args:
+        project_id: Project ID
+        subtitle_text: Subtitle file content
+        subtitle_format: Format of subtitle (srt or vtt)
+        target_field: Target field to add subtitle text (source_text or commentary_korean)
+    """
     project = load_project(project_id)
 
     # Parse subtitle text
@@ -292,17 +299,24 @@ def parse_subtitle_text_and_add_to_project(
     if project.segments:
         max_clip_index = max(seg.clip_index for seg in project.segments)
 
-    # Update clip_index for new segments to avoid conflicts
+    # Update clip_index for new segments and set target field
     for i, seg in enumerate(new_segments):
         seg.clip_index = max_clip_index + 1 + i
+
+        # 타겟 필드에 따라 자막 위치 설정
+        if target_field == "commentary_korean":
+            # 재해석자막(한국어)에 추가
+            seg.commentary_korean = seg.source_text
+            seg.source_text = ""  # source_text는 비워둠
+        # source_text는 기본값이므로 별도 처리 불필요
 
     # Add new segments to project
     project.segments.extend(new_segments)
 
-    # Save project
-    save_project(project)
+    # Note: Not saving automatically - user must click save button
+    # save_project(project)
 
-    logger.info(f"Added {len(new_segments)} segments to project {project_id} (clip_index {max_clip_index + 1} ~ {max_clip_index + len(new_segments)})")
+    logger.info(f"Added {len(new_segments)} segments to project {project_id} in field '{target_field}' (clip_index {max_clip_index + 1} ~ {max_clip_index + len(new_segments)}) - not saved yet")
     return project
 
 
