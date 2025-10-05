@@ -975,7 +975,7 @@ async def api_list_bgm_candidates(project_id: str):
         audio_dir = project_dir / "audio"
         separated_dir = project_dir / "separated"
 
-        added: Set[Path] = set()
+        added: Set[Tuple[Path, str]] = set()
         candidates: List[Dict[str, object]] = []
 
         def add_candidate(path: Optional[Path], *, label: str, kind: str,
@@ -988,10 +988,10 @@ async def api_list_bgm_candidates(project_id: str):
             except OSError:
                 logger.debug("Failed to resolve BGM path: %s", path)
                 return
-            if not resolved.exists() or resolved in added:
+            if not resolved.exists() or (resolved, kind) in added:
                 return
 
-            added.add(resolved)
+            added.add((resolved, kind))
             web_path = _path_to_web_url(resolved)
             stat = resolved.stat()
             candidate: Dict[str, object] = {
@@ -1026,6 +1026,16 @@ async def api_list_bgm_candidates(project_id: str):
         source_path = _web_url_to_path(extras.get("bgm_source_path"))
         if source_path:
             add_candidate(source_path, label="배경음악 원본", kind="reference")
+
+        bgm_v2_path = _web_url_to_path(extras.get("bgm_v2_path") or extras.get("bgm_custom_v2_path"))
+        if bgm_v2_path:
+            add_candidate(
+                bgm_v2_path,
+                label="배경음악 V2",
+                kind="custom_v2",
+                volume=extras.get("bgm_v2_volume_percent"),
+                cache_token=extras.get("bgm_v2_cache_token"),
+            )
 
         # Files inside audio directory (bgm_custom*, bgm_working, etc.)
         if audio_dir.exists():
@@ -1176,6 +1186,123 @@ async def api_upload_bgm_file(
         )
 
 
+@router.post("/projects/{project_id}/bgm/remove")
+async def api_remove_bgm_candidate(project_id: str, payload: dict = Body(...)):
+    """Remove a background music candidate file from the project."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    path_value = payload.get("path") if isinstance(payload, dict) else None
+    if not path_value or not isinstance(path_value, str):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="제거할 배경음악 경로가 필요합니다.")
+
+    def _remove():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        resolved = _web_url_to_path(path_value)
+        if not resolved:
+            raise ValueError("배경음악 파일 경로가 올바르지 않습니다.")
+
+        try:
+            resolved_path = resolved.resolve()
+        except OSError as exc:  # pragma: no cover - OS specific
+            raise ValueError("배경음악 파일 경로를 확인할 수 없습니다.") from exc
+
+        project_root = (TRANSLATOR_DIR / project_id).resolve()
+        try:
+            relative_path = resolved_path.relative_to(project_root)
+        except ValueError as exc:
+            raise PermissionError("프로젝트 범위 밖의 파일은 제거할 수 없습니다.") from exc
+
+        if not relative_path.parts or relative_path.parts[0] not in {"audio", "separated"}:
+            raise PermissionError("지정한 배경음악 파일을 제거할 수 없습니다.")
+
+        removed = False
+        if resolved_path.exists():
+            if resolved_path.is_file():
+                resolved_path.unlink()
+                removed = True
+            else:
+                raise ValueError("파일이 아닌 항목은 제거할 수 없습니다.")
+
+        extras = project.extra or {}
+        cleared_main = False
+        cleared_v2 = False
+        cleared_keys = []
+
+        def matches_extra(value: Optional[str]) -> bool:
+            if not value:
+                return False
+            if value == path_value:
+                return True
+            try:
+                candidate_path = _web_url_to_path(value)
+                if candidate_path:
+                    return candidate_path.resolve() == resolved_path
+            except Exception:  # pragma: no cover - best effort cleanup
+                return False
+            return False
+
+        for key in ("bgm_path", "bgm_custom_path", "bgm_source_path"):
+            if matches_extra(extras.get(key)):
+                cleared_keys.append(key)
+                cleared_main = True
+
+        for key in ("bgm_v2_path", "bgm_custom_v2_path"):
+            if matches_extra(extras.get(key)):
+                cleared_keys.append(key)
+                cleared_v2 = True
+
+        for key in cleared_keys:
+            extras.pop(key, None)
+
+        if cleared_main:
+            extras.pop("bgm_cache_token", None)
+            extras.pop("bgm_volume_percent", None)
+
+        if cleared_v2:
+            extras.pop("bgm_v2_cache_token", None)
+            extras.pop("bgm_v2_volume_percent", None)
+
+        project.extra = extras
+        save_project(project)
+
+        return {
+            "removed": removed,
+            "extra": extras,
+        }
+
+    try:
+        result = await run_in_threadpool(_remove)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+
+        message = "배경음악 파일을 제거했습니다." if result.get("removed") else "이미 제거된 파일입니다."
+        return {
+            "message": message,
+            "removed": bool(result.get("removed")),
+            "extra": result.get("extra") or {},
+        }
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Failed to remove BGM candidate: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"배경음악 파일 제거에 실패했습니다: {exc}"
+        ) from exc
+
+
 @router.post("/projects/{project_id}/bgm/apply")
 async def api_apply_bgm_candidate(project_id: str, payload: dict = Body(...)):
     """Apply a chosen background music file as the working BGM."""
@@ -1213,6 +1340,39 @@ async def api_apply_bgm_candidate(project_id: str, payload: dict = Body(...)):
             )
 
         extras = project.extra or {}
+        current_bgm_path = extras.get("bgm_path")
+        current_bgm_volume = extras.get("bgm_volume_percent", 100.0)
+        current_bgm_cache = extras.get("bgm_cache_token", int(time.time()))
+
+        is_bgm_v2 = bool(kind_value and str(kind_value).startswith("custom_v2"))
+
+        if is_bgm_v2:
+            v2_web_path = _path_to_web_url(resolved)
+            extras["bgm_v2_path"] = v2_web_path
+            extras["bgm_custom_v2_path"] = v2_web_path
+
+            if volume_value is not None:
+                try:
+                    extras["bgm_v2_volume_percent"] = float(volume_value)
+                except (TypeError, ValueError) as exc:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            else:
+                extras.setdefault("bgm_v2_volume_percent", 100.0)
+
+            extras["bgm_v2_cache_token"] = int(time.time())
+
+            project.extra = extras
+            save_project(project)
+
+            return {
+                "bgm_path": current_bgm_path,
+                "bgm_volume_percent": current_bgm_volume,
+                "bgm_cache_token": current_bgm_cache,
+                "bgm_v2_path": extras["bgm_v2_path"],
+                "bgm_v2_volume_percent": extras.get("bgm_v2_volume_percent", 100.0),
+                "bgm_v2_cache_token": extras["bgm_v2_cache_token"],
+            }
+
         extras["bgm_path"] = _path_to_web_url(resolved)
 
         if volume_value is not None:
@@ -1231,11 +1391,22 @@ async def api_apply_bgm_candidate(project_id: str, payload: dict = Body(...)):
         project.extra = extras
         save_project(project)
 
-        return {
+        response_payload = {
             "bgm_path": extras["bgm_path"],
             "bgm_volume_percent": extras.get("bgm_volume_percent", 100.0),
             "bgm_cache_token": extras["bgm_cache_token"],
         }
+
+        if extras.get("bgm_v2_path"):
+            response_payload.update(
+                {
+                    "bgm_v2_path": extras["bgm_v2_path"],
+                    "bgm_v2_volume_percent": extras.get("bgm_v2_volume_percent", 100.0),
+                    "bgm_v2_cache_token": extras.get("bgm_v2_cache_token"),
+                }
+            )
+
+        return response_payload
 
     try:
         result = await run_in_threadpool(_apply)
@@ -1252,6 +1423,52 @@ async def api_apply_bgm_candidate(project_id: str, payload: dict = Body(...)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"배경음악 적용 실패: {exc}"
+        ) from exc
+
+
+@router.delete("/projects/{project_id}/bgm/v2")
+async def api_clear_bgm_v2(project_id: str):
+    """Remove the stored BGM V2 track from the project extras."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    def _clear():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        extras = project.extra or {}
+        removed = False
+        for key in ("bgm_v2_path", "bgm_custom_v2_path", "bgm_v2_cache_token", "bgm_v2_volume_percent"):
+            if key in extras:
+                extras.pop(key, None)
+                removed = True
+
+        project.extra = extras
+
+        if removed:
+            from ai_shorts_maker.translator import save_project
+
+            save_project(project)
+
+        return {"message": "배경음악 V2를 제거했습니다.", "removed": removed}
+
+    try:
+        result = await run_in_threadpool(_clear)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Failed to clear BGM V2: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"배경음악 V2 제거 실패: {exc}"
         ) from exc
 
 
@@ -1557,6 +1774,23 @@ async def api_save_tracks(project_id: str, track_state: dict):
                 pass
         project.extra['bgm_cache_token'] = int(time.time())
 
+        bgm_v2_path = track_state.get('bgm_v2_path')
+        project.extra['bgm_v2_path'] = bgm_v2_path
+        if bgm_v2_path:
+            project.extra['bgm_custom_v2_path'] = bgm_v2_path
+            project.extra['bgm_v2_cache_token'] = int(time.time())
+        else:
+            project.extra.pop('bgm_custom_v2_path', None)
+            project.extra.pop('bgm_v2_cache_token', None)
+
+        if track_state.get('bgm_v2_volume_percent') is not None:
+            try:
+                project.extra['bgm_v2_volume_percent'] = float(track_state['bgm_v2_volume_percent'])
+            except (TypeError, ValueError):
+                pass
+        elif not bgm_v2_path:
+            project.extra.pop('bgm_v2_volume_percent', None)
+
         # 프로젝트 저장
         from ai_shorts_maker.translator import save_project
         save_project(project)
@@ -1568,6 +1802,9 @@ async def api_save_tracks(project_id: str, track_state: dict):
             "dialogue_muted_path": project.extra.get('dialogue_muted_path'),
             "bgm_volume_percent": project.extra.get('bgm_volume_percent'),
             "bgm_cache_token": project.extra.get('bgm_cache_token'),
+            "bgm_v2_path": project.extra.get('bgm_v2_path'),
+            "bgm_v2_volume_percent": project.extra.get('bgm_v2_volume_percent'),
+            "bgm_v2_cache_token": project.extra.get('bgm_v2_cache_token'),
         }
     except Exception as e:
         logger.error(f"Track save failed: {e}")
@@ -1598,6 +1835,9 @@ async def api_load_tracks(project_id: str):
         dialogue_muted_path = extras.get('dialogue_muted_path')
         bgm_volume = extras.get('bgm_volume_percent')
         bgm_cache = extras.get('bgm_cache_token')
+        bgm_v2_path = extras.get('bgm_v2_path') or extras.get('bgm_custom_v2_path')
+        bgm_v2_volume = extras.get('bgm_v2_volume_percent')
+        bgm_v2_cache = extras.get('bgm_v2_cache_token')
 
         return {
             "message": "트랙 정보를 불러왔습니다.",
@@ -1606,6 +1846,9 @@ async def api_load_tracks(project_id: str):
             "dialogue_muted_path": dialogue_muted_path,
             "bgm_volume_percent": bgm_volume,
             "bgm_cache_token": bgm_cache,
+            "bgm_v2_path": bgm_v2_path,
+            "bgm_v2_volume_percent": bgm_v2_volume,
+            "bgm_v2_cache_token": bgm_v2_cache,
         }
     except Exception as e:
         logger.error(f"Track load failed: {e}")

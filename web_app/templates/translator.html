@@ -205,6 +205,7 @@
         let timelinePlayTranslatedBtn = null;
         let timelinePlayBothBtn = null;
         let timelinePlayCheckedBtn = null;
+        let timelineDeleteCheckedBtn = null;
         let timelineStatusElem = null;
         let timelineOriginalDurationElem = null;
         let timelineTranslatedDurationElem = null;
@@ -293,6 +294,7 @@
             if (window.bgmTimelineWaveform && typeof window.bgmTimelineWaveform.setVolume === 'function') {
                 window.bgmTimelineWaveform.setVolume(Math.min(bgmPlaybackVolume, 2));
             }
+            updateBgmVolumeUI(Boolean(window.bgmTimelineWaveform));
         }
 
         function destroyBgmWaveform() {
@@ -324,6 +326,134 @@
             const inlineBgmBtn = document.getElementById('btn-bgm-load');
             if (inlineBgmBtn) {
                 inlineBgmBtn.disabled = true;
+            }
+            const durationTarget = document.getElementById('timeline-bgm-duration');
+            if (durationTarget) {
+                updateTimelineDuration(0, durationTarget);
+            }
+        }
+
+        function updateBgmV2VolumeLabel(percent) {
+            const label = document.getElementById('bgm-v2-volume-percent');
+            if (!label) {
+                return;
+            }
+            if (Number.isFinite(percent)) {
+                label.textContent = `${Math.round(percent)}%`;
+            } else {
+                label.textContent = '--';
+            }
+        }
+
+        function destroyBgmV2Waveform() {
+            const durationTarget = document.getElementById('timeline-bgm-v2-duration');
+            if (durationTarget) {
+                updateTimelineDuration(0, durationTarget);
+            }
+            if (window.bgmV2TimelineWaveform) {
+                try {
+                    window.bgmV2TimelineWaveform.destroy();
+                } catch (error) {
+                    if (error?.name !== 'AbortError') {
+                        console.debug('Failed to destroy BGM V2 waveform:', error);
+                    }
+                }
+            }
+            window.bgmV2TimelineWaveform = null;
+            window.bgmV2TimelineUrl = '';
+            const container = document.getElementById('timeline-track-bgm-v2');
+            if (container) {
+                container.style.display = 'none';
+            }
+            const checkbox = document.getElementById('track-checkbox-bgm-v2');
+            if (checkbox) {
+                checkbox.checked = false;
+            }
+            const clearBtn = document.getElementById('btn-bgm-v2-clear');
+            if (clearBtn) {
+                clearBtn.disabled = true;
+            }
+            updateBgmV2VolumeLabel(null);
+        }
+
+        async function setBgmV2Track(rawPath, options = {}) {
+            const trackContainer = document.getElementById('timeline-track-bgm-v2');
+            const waveformContainer = document.getElementById('timeline-bgm-v2-waveform');
+            const hasRawPath = typeof rawPath === 'string' && rawPath.trim().length > 0;
+
+            if (!trackContainer || !waveformContainer) {
+                return;
+            }
+
+            if (!hasRawPath) {
+                destroyBgmV2Waveform();
+                return;
+            }
+
+            const normalizedPath = toWebAudioPath(rawPath).trim();
+            const previousPath = window.bgmV2TimelineUrl || '';
+            const forceReload = Boolean(options.force);
+            const volumePercent = clamp(
+                Number.isFinite(Number(options.volumePercent)) ? Number(options.volumePercent) : 100,
+                0,
+                200,
+            );
+            const cacheToken = options.cacheToken || Date.now();
+            const separator = normalizedPath.includes('?') ? '&' : '?';
+            const cacheBustedUrl = `${normalizedPath}${separator}v=${cacheToken}`;
+
+            if (!forceReload && previousPath === normalizedPath && window.bgmV2TimelineWaveform) {
+                updateBgmV2VolumeLabel(volumePercent);
+                return;
+            }
+
+            destroyBgmV2Waveform();
+            trackContainer.style.display = '';
+            updateBgmV2VolumeLabel(volumePercent);
+
+            const clearBtn = document.getElementById('btn-bgm-v2-clear');
+            if (clearBtn) {
+                clearBtn.disabled = false;
+            }
+
+            if (typeof WaveSurfer === 'undefined') {
+                console.warn('WaveSurfer is not loaded; cannot render BGM V2 track.');
+                return;
+            }
+
+            window.bgmV2TimelineWaveform = WaveSurfer.create({
+                container: '#timeline-bgm-v2-waveform',
+                height: 90,
+                waveColor: '#06d6a0',
+                progressColor: '#118ab2',
+                cursorColor: '#ffffff',
+                normalize: true,
+                responsive: true,
+            });
+
+            const durationTarget = document.getElementById('timeline-bgm-v2-duration');
+
+            window.bgmV2TimelineWaveform.on('ready', () => {
+                window.bgmV2TimelineUrl = normalizedPath;
+                if (durationTarget) {
+                    updateTimelineDuration(window.bgmV2TimelineWaveform.getDuration(), durationTarget);
+                }
+            });
+
+            window.bgmV2TimelineWaveform.on('error', (error) => {
+                if (error?.name !== 'AbortError') {
+                    console.error('BGM V2 waveform load error:', error, cacheBustedUrl);
+                }
+                destroyBgmV2Waveform();
+            });
+
+            try {
+                await window.bgmV2TimelineWaveform.load(cacheBustedUrl);
+            } catch (error) {
+                if (error?.name !== 'AbortError') {
+                    console.error('Failed to load BGM V2 waveform:', error, cacheBustedUrl);
+                }
+                destroyBgmV2Waveform();
             }
         }
 
@@ -440,6 +570,10 @@
                 bgmPlaybackVolume = initialPercent / 100;
                 applyBgmPlaybackVolume(initialPercent);
                 updateBgmVolumeUI(true);
+                const durationTarget = document.getElementById('timeline-bgm-duration');
+                if (durationTarget) {
+                    updateTimelineDuration(window.bgmTimelineWaveform.getDuration(), durationTarget);
+                }
                 if (bgmRegionsPlugin) {
                     if (previousTrimMode && typeof bgmRegionsPlugin.enableDragSelection === 'function') {
                         bgmTrimMode = true;
@@ -551,6 +685,233 @@
                     clearBgmRegion();
                 }
             }
+        }
+
+        function clearDialogueTimelineTrack() {
+            let changed = false;
+            if (window.dialogueTimelineWaveform) {
+                try {
+                    window.dialogueTimelineWaveform.destroy();
+                } catch (error) {
+                    if (error?.name !== 'AbortError') {
+                        console.debug('Failed to destroy dialogue waveform:', error);
+                    }
+                }
+                changed = true;
+            }
+            window.dialogueTimelineWaveform = null;
+            window.dialogueTimelineUrl = '';
+
+            const track = document.getElementById('timeline-track-dialogue');
+            if (track) {
+                track.style.display = 'none';
+            }
+            const checkbox = document.getElementById('track-checkbox-dialogue');
+            if (checkbox) {
+                checkbox.checked = false;
+            }
+            const durationElem = document.getElementById('timeline-dialogue-duration');
+            if (durationElem) {
+                updateTimelineDuration(0, durationElem);
+            }
+
+            if (currentProject?.extra && currentProject.extra.dialogue_path) {
+                delete currentProject.extra.dialogue_path;
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        function clearDialogueMutedTimelineTrack() {
+            let changed = false;
+            if (window.dialogueMutedTimelineWaveform) {
+                try {
+                    window.dialogueMutedTimelineWaveform.destroy();
+                } catch (error) {
+                    if (error?.name !== 'AbortError') {
+                        console.debug('Failed to destroy dialogue-muted waveform:', error);
+                    }
+                }
+                changed = true;
+            }
+            window.dialogueMutedTimelineWaveform = null;
+            window.dialogueMutedTimelineUrl = '';
+
+            const track = document.getElementById('timeline-track-dialogue-muted');
+            if (track) {
+                track.style.display = 'none';
+            }
+            const checkbox = document.getElementById('track-checkbox-dialogue-muted');
+            if (checkbox) {
+                checkbox.checked = false;
+            }
+            const durationElem = document.getElementById('timeline-dialogue-muted-duration');
+            if (durationElem) {
+                updateTimelineDuration(0, durationElem);
+            }
+
+            if (currentProject?.extra && currentProject.extra.dialogue_muted_path) {
+                delete currentProject.extra.dialogue_muted_path;
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        async function persistCurrentTrackState() {
+            if (!currentProject) {
+                return false;
+            }
+            if (!currentProject.extra) {
+                currentProject.extra = {};
+            }
+
+            const trackState = {
+                bgm_path: currentProject.extra.bgm_path ?? null,
+                bgm_volume_percent: currentProject.extra.bgm_volume_percent ?? Math.round(bgmPlaybackVolume * 100),
+                bgm_v2_path: currentProject.extra.bgm_v2_path ?? currentProject.extra.bgm_custom_v2_path ?? null,
+                bgm_v2_volume_percent: currentProject.extra.bgm_v2_volume_percent ?? 100,
+                dialogue_path: currentProject.extra.dialogue_path ?? null,
+                dialogue_muted_path: currentProject.extra.dialogue_muted_path ?? null,
+            };
+
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/save-tracks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(trackState),
+                });
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    console.warn('Track state persistence failed:', text || `HTTP ${response.status}`);
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                console.warn('Track state persistence error:', error);
+                return false;
+            }
+        }
+
+        async function deleteCheckedTracks() {
+            if (!currentProject) {
+                alert('프로젝트를 먼저 로드하세요.');
+                return;
+            }
+
+            if (!currentProject.extra) {
+                currentProject.extra = {};
+            }
+
+            const deleteBtn = document.getElementById('timeline-delete-checked-btn');
+            const originalLabel = deleteBtn ? deleteBtn.textContent : '';
+            if (deleteBtn) {
+                deleteBtn.disabled = true;
+                deleteBtn.textContent = '삭제 중...';
+            }
+
+            const removableTracks = [
+                {
+                    id: 'track-checkbox-bgm',
+                    label: '배경음악',
+                    remove: () => {
+                        const hadTrack = Boolean(
+                            window.bgmTimelineWaveform ||
+                            currentProject.extra.bgm_path ||
+                            currentProject.extra.bgm_custom_path
+                        );
+                        setBgmTrack('', { force: true });
+                        delete currentProject.extra.bgm_path;
+                        delete currentProject.extra.bgm_custom_path;
+                        delete currentProject.extra.bgm_volume_percent;
+                        delete currentProject.extra.bgm_cache_token;
+                        return hadTrack;
+                    },
+                },
+                {
+                    id: 'track-checkbox-bgm-v2',
+                    label: '배경음악 V2',
+                    remove: () => {
+                        const hadTrack = Boolean(
+                            window.bgmV2TimelineWaveform ||
+                            currentProject.extra.bgm_v2_path ||
+                            currentProject.extra.bgm_custom_v2_path
+                        );
+                        setBgmV2Track('', { force: true });
+                        delete currentProject.extra.bgm_v2_path;
+                        delete currentProject.extra.bgm_custom_v2_path;
+                        delete currentProject.extra.bgm_v2_volume_percent;
+                        delete currentProject.extra.bgm_v2_cache_token;
+                        return hadTrack;
+                    },
+                },
+                {
+                    id: 'track-checkbox-dialogue',
+                    label: '원본 대사',
+                    remove: () => clearDialogueTimelineTrack(),
+                },
+                {
+                    id: 'track-checkbox-dialogue-muted',
+                    label: '원본 대사 (번역 제외)',
+                    remove: () => clearDialogueMutedTimelineTrack(),
+                },
+            ];
+
+            const nonRemovableTracks = [
+                { id: 'track-checkbox-original', label: '원본 음성' },
+                { id: 'track-checkbox-translated', label: '번역 음성' },
+            ];
+
+            const removedLabels = [];
+            const blockedLabels = [];
+
+            for (const { id, remove, label } of removableTracks) {
+                const checkbox = document.getElementById(id);
+                if (checkbox && checkbox.checked) {
+                    const removed = remove();
+                    checkbox.checked = false;
+                    if (removed) {
+                        removedLabels.push(label);
+                    }
+                }
+            }
+
+            for (const { id, label } of nonRemovableTracks) {
+                const checkbox = document.getElementById(id);
+                if (checkbox && checkbox.checked) {
+                    blockedLabels.push(label);
+                    checkbox.checked = false;
+                }
+            }
+
+            if (!removedLabels.length) {
+                if (deleteBtn) {
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = originalLabel || '🗑️ 체크 트랙 삭제';
+                }
+
+                if (blockedLabels.length) {
+                    alert(`${blockedLabels.join(', ')} 트랙은 삭제할 수 없습니다.`);
+                } else {
+                    alert('삭제할 트랙을 선택하세요.');
+                }
+                return;
+            }
+
+            try {
+                await persistCurrentTrackState();
+                await updateComparisonTimeline();
+            } finally {
+                if (deleteBtn) {
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = originalLabel || '🗑️ 체크 트랙 삭제';
+                }
+            }
+
+            const blockedSuffix = blockedLabels.length ? ` (삭제 불가: ${blockedLabels.join(', ')})` : '';
+            alert(`${removedLabels.join(', ')} 트랙을 삭제했습니다.${blockedSuffix}`);
         }
 
         async function deleteSelectedBgmRegion() {
@@ -1046,6 +1407,7 @@
                 }
                 translatedTimelineWaveform = null;
             }
+            destroyBgmV2Waveform();
             timelineActiveWaveformKey = null;
             updateTranslatedMuteButton(false);
         }
@@ -1076,6 +1438,7 @@
             if (originalTimelineWaveform) waveforms.push(originalTimelineWaveform);
             if (translatedTimelineWaveform) waveforms.push(translatedTimelineWaveform);
             if (window.bgmTimelineWaveform) waveforms.push(window.bgmTimelineWaveform);
+            if (window.bgmV2TimelineWaveform) waveforms.push(window.bgmV2TimelineWaveform);
             if (window.dialogueTimelineWaveform) waveforms.push(window.dialogueTimelineWaveform);
             if (window.dialogueMutedTimelineWaveform) waveforms.push(window.dialogueMutedTimelineWaveform);
             return waveforms;
@@ -1276,6 +1639,7 @@
                 const checkboxes = [
                     { id: 'track-checkbox-original', waveform: originalTimelineWaveform, url: originalTimelineUrl },
                     { id: 'track-checkbox-bgm', waveform: window.bgmTimelineWaveform, url: window.bgmTimelineUrl },
+                    { id: 'track-checkbox-bgm-v2', waveform: window.bgmV2TimelineWaveform, url: window.bgmV2TimelineUrl },
                     { id: 'track-checkbox-dialogue', waveform: window.dialogueTimelineWaveform, url: window.dialogueTimelineUrl },
                     { id: 'track-checkbox-dialogue-muted', waveform: window.dialogueMutedTimelineWaveform, url: window.dialogueMutedTimelineUrl },
                     { id: 'track-checkbox-translated', waveform: translatedTimelineWaveform, url: translatedTimelineUrl }
@@ -1398,6 +1762,7 @@
             timelinePlayTranslatedBtn = panel.querySelector('#timeline-play-translated-btn');
             timelinePlayBothBtn = panel.querySelector('#timeline-play-both-btn');
             timelinePlayCheckedBtn = panel.querySelector('#timeline-play-checked-btn');
+            timelineDeleteCheckedBtn = panel.querySelector('#timeline-delete-checked-btn');
             timelinePauseBtn = panel.querySelector('#timeline-pause-btn');
             timelineStopBtn = panel.querySelector('#timeline-stop-btn');
             timelineOriginalDurationElem = panel.querySelector('#timeline-original-duration');
@@ -1446,6 +1811,20 @@
                 });
             } else {
                 setBgmTrack('', { force: true });
+            }
+
+            const storedBgmV2Path = extras.bgm_v2_path || extras.bgm_custom_v2_path || '';
+            const storedBgmV2Percent = Number.isFinite(Number(extras.bgm_v2_volume_percent))
+                ? Number(extras.bgm_v2_volume_percent)
+                : 100;
+            const storedBgmV2Cache = extras.bgm_v2_cache_token || Date.now();
+            if (storedBgmV2Path) {
+                setBgmV2Track(storedBgmV2Path, {
+                    volumePercent: storedBgmV2Percent,
+                    cacheToken: storedBgmV2Cache,
+                });
+            } else {
+                setBgmV2Track('', { force: true });
             }
 
             const rawOriginalUrl = getOriginalTimelineAudioUrl();
@@ -1513,6 +1892,11 @@
             }
             if (timelinePlayCheckedBtn) {
                 timelinePlayCheckedBtn.onclick = () => playTimelineTrack('checked');
+            }
+            if (timelineDeleteCheckedBtn) {
+                timelineDeleteCheckedBtn.onclick = () => {
+                    deleteCheckedTracks().catch((error) => console.error('Failed to delete checked tracks:', error));
+                };
             }
             if (timelinePauseBtn) {
                 timelinePauseBtn.onclick = () => {
@@ -2765,6 +3149,24 @@
                         <div id="timeline-bgm-waveform" class="waveform"></div>
                     </div>
 
+                    <!-- 배경음악 V2 비교 트랙 -->
+                    <div class="timeline-track" id="timeline-track-bgm-v2" style="display: none;">
+                        <div class="timeline-track-header" style="gap: 8px; flex-wrap: wrap; align-items: center;">
+                            <div style="display: inline-flex; align-items: center; gap: 6px;">
+                                <input type="checkbox" id="track-checkbox-bgm-v2" class="track-checkbox" />
+                                <span class="track-label">🎵 배경음악 V2</span>
+                                <span class="track-duration" id="timeline-bgm-v2-duration"></span>
+                            </div>
+                            <div class="bgm-controls" style="gap: 12px;">
+                                <span class="bgm-volume-label" id="bgm-v2-volume-label">
+                                    볼륨 <span id="bgm-v2-volume-percent">--</span>
+                                </span>
+                                <button type="button" class="btn-xs" id="btn-bgm-v2-clear" title="배경음악 V2 제거" disabled>❌ 제거</button>
+                            </div>
+                        </div>
+                        <div id="timeline-bgm-v2-waveform" class="waveform"></div>
+                    </div>
+
                     <!-- 원본 대사분리 음성 트랙 (대사추출 후) -->
                     <div class="timeline-track" id="timeline-track-dialogue" style="display: none;">
                         <div class="timeline-track-header">
@@ -2803,6 +3205,7 @@
                         <button type="button" class="btn-sm" id="timeline-play-translated-btn">▶️ 번역 재생</button>
                         <button type="button" class="btn-success btn-sm" id="timeline-play-both-btn">▶️ 동시재생</button>
                         <button type="button" class="btn-success btn-sm" id="timeline-play-checked-btn">✅ 체크만 재생</button>
+                        <button type="button" class="btn-danger btn-sm" id="timeline-delete-checked-btn">🗑️ 체크 트랙 삭제</button>
                         <button type="button" class="btn-sm" id="timeline-pause-btn">⏸️ 일시정지</button>
                         <button type="button" class="btn-danger btn-sm" id="timeline-stop-btn">⏹️ 멈추기</button>
                         <button type="button" class="btn-primary btn-sm" id="timeline-merge-checked-btn">🔀 체크한 트랙 합치기</button>
@@ -2874,7 +3277,9 @@
             const saveSelectedAudioBtn = container.querySelector('#save-selected-audio-btn');
             const generateAllAudioBtn = container.querySelector('#generate-all-audio-btn');
             const loadGeneratedTracksBtn = container.querySelector('#load-generated-tracks-btn');
+            const inlineBgmBtn = container.querySelector('#btn-bgm-load');
             const loadBgmV2Btn = container.querySelector('#btn-load-bgm-v2');
+            const clearBgmV2Btn = container.querySelector('#btn-bgm-v2-clear');
             const playAllAudioBtn = container.querySelector('#play-all-audio-btn');
             const saveAllAudioBtn = container.querySelector('#save-all-audio-btn');
 
@@ -2902,8 +3307,62 @@
             if (loadGeneratedTracksBtn) {
                 loadGeneratedTracksBtn.addEventListener('click', loadGeneratedTracks);
             }
-            if (loadBgmV2Btn) {
-                loadBgmV2Btn.addEventListener('click', () => loadBgmFromCandidates());
+            if (inlineBgmBtn && !inlineBgmBtn.dataset.boundLoad) {
+                inlineBgmBtn.addEventListener('click', () => loadBgmFromCandidates({ target: 'bgm' }));
+                inlineBgmBtn.dataset.boundLoad = '1';
+            }
+            if (loadBgmV2Btn && !loadBgmV2Btn.dataset.boundLoad) {
+                loadBgmV2Btn.addEventListener('click', () => loadBgmFromCandidates({ target: 'v2' }));
+                loadBgmV2Btn.dataset.boundLoad = '1';
+            }
+            if (clearBgmV2Btn) {
+                clearBgmV2Btn.addEventListener('click', async () => {
+                    if (!currentProject) {
+                        alert('프로젝트를 먼저 로드하세요.');
+                        return;
+                    }
+
+                    if (!currentProject.extra) {
+                        currentProject.extra = {};
+                    }
+
+                    if (!currentProject.extra.bgm_v2_path && !currentProject.extra.bgm_custom_v2_path) {
+                        alert('제거할 배경음악 V2가 없습니다.');
+                        return;
+                    }
+
+                    const originalLabel = clearBgmV2Btn.textContent;
+                    try {
+                        clearBgmV2Btn.disabled = true;
+                        clearBgmV2Btn.textContent = '제거 중...';
+
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/bgm/v2`, {
+                            method: 'DELETE',
+                        });
+
+                        if (!response.ok) {
+                            const text = await response.text();
+                            throw new Error(text || `HTTP ${response.status}`);
+                        }
+
+                        delete currentProject.extra.bgm_v2_path;
+                        delete currentProject.extra.bgm_custom_v2_path;
+                        delete currentProject.extra.bgm_v2_volume_percent;
+                        delete currentProject.extra.bgm_v2_cache_token;
+
+                        setBgmV2Track('', { force: true });
+                        await updateComparisonTimeline();
+
+                        alert('배경음악 V2를 제거했습니다.');
+                    } catch (err) {
+                        console.error('Failed to clear BGM V2:', err);
+                        alert('배경음악 V2를 제거하지 못했습니다: ' + err.message);
+                    } finally {
+                        const hasV2Track = Boolean(currentProject?.extra?.bgm_v2_path || currentProject?.extra?.bgm_custom_v2_path);
+                        clearBgmV2Btn.disabled = !hasV2Track;
+                        clearBgmV2Btn.textContent = originalLabel || '❌ 제거';
+                    }
+                });
             }
             if (playAllAudioBtn) {
                 playAllAudioBtn.addEventListener('click', playAllAudio);
@@ -3383,13 +3842,16 @@
             }
         }
 
-        async function loadBgmFromCandidates() {
+        async function loadBgmFromCandidates(options = {}) {
             if (!currentProject) {
                 alert('프로젝트가 로드되지 않았습니다.');
                 return;
             }
 
-            const loadBtn = document.getElementById('btn-load-bgm-v2');
+            const target = options.target === 'bgm' ? 'bgm' : 'v2';
+            const loadBtnId = target === 'v2' ? 'btn-load-bgm-v2' : 'btn-bgm-load';
+            const defaultLabel = target === 'v2' ? '🎵 배경음악 V2 불러오기' : '🎵 배경음악 불러오기';
+            const loadBtn = document.getElementById(loadBtnId);
             const originalLabel = loadBtn ? loadBtn.textContent : '';
 
             try {
@@ -3411,14 +3873,30 @@
                     return;
                 }
 
-                let defaultIndex = candidates.findIndex((item) => String(item.kind || '').includes('custom_v2'));
-                if (defaultIndex < 0) {
-                    defaultIndex = candidates.findIndex((item) => item.kind === 'current');
-                }
-                if (defaultIndex < 0) {
-                    defaultIndex = 0;
-                }
+                const findDefaultIndex = () => {
+                    if (target === 'v2') {
+                        const v2Index = candidates.findIndex((item) => String(item.kind || '').includes('custom_v2'));
+                        if (v2Index >= 0) {
+                            return v2Index;
+                        }
+                        const extraIndex = candidates.findIndex((item) => item.label && String(item.label).includes('V2'));
+                        if (extraIndex >= 0) {
+                            return extraIndex;
+                        }
+                    } else {
+                        const currentIndex = candidates.findIndex((item) => item.kind === 'current' && !String(item.kind || '').includes('v2'));
+                        if (currentIndex >= 0) {
+                            return currentIndex;
+                        }
+                        const workingIndex = candidates.findIndex((item) => item.kind === 'working');
+                        if (workingIndex >= 0) {
+                            return workingIndex;
+                        }
+                    }
+                    return 0;
+                };
 
+                let defaultIndex = findDefaultIndex();
                 let selected = candidates[defaultIndex];
                 if (candidates.length > 1) {
                     const dialogSelection = await showBgmSelectionDialog(candidates, defaultIndex);
@@ -3428,15 +3906,28 @@
                     selected = dialogSelection;
                 }
 
-                await applyBgmCandidate(selected);
-                alert('배경음악을 타임라인에 불러왔습니다.');
+                const payloadCandidate = { ...selected };
+                const originalKind = String(payloadCandidate.kind || '');
+
+                if (target === 'v2') {
+                    if (!originalKind.includes('v2')) {
+                        payloadCandidate.kind = 'custom_v2';
+                    }
+                } else if (originalKind.includes('custom_v2')) {
+                    payloadCandidate.kind = 'custom';
+                }
+
+                await applyBgmCandidate(payloadCandidate);
+                alert(target === 'v2'
+                    ? '배경음악 V2를 타임라인에 불러왔습니다.'
+                    : '배경음악을 타임라인에 불러왔습니다.');
             } catch (err) {
                 console.error('Failed to load BGM candidate:', err);
-                alert('배경음악을 불러오지 못했습니다: ' + err.message);
+                alert((target === 'v2' ? '배경음악 V2를 ' : '배경음악을 ') + '불러오지 못했습니다: ' + err.message);
             } finally {
                 if (loadBtn) {
                     loadBtn.disabled = false;
-                    loadBtn.textContent = originalLabel || '🎵 배경음악 V2 불러오기';
+                    loadBtn.textContent = originalLabel || defaultLabel;
                 }
             }
         }
@@ -3514,6 +4005,17 @@
                         return '';
                     }
                     return normalized.slice(0, lastSlash);
+                };
+
+                const isRemovableCandidate = (candidate) => {
+                    if (!candidate || !candidate.path) {
+                        return false;
+                    }
+                    const normalized = normalizePath(candidate.path).toLowerCase();
+                    if (!normalized.includes('/translator_projects/')) {
+                        return false;
+                    }
+                    return normalized.includes('/audio/') || normalized.includes('/separated/');
                 };
 
                 const updateFolderOptions = (currentValue = '') => {
@@ -3618,6 +4120,13 @@
                         const wrapperStyle = isSelected
                             ? 'border: 2px solid #4bd4ff; background: rgba(75, 212, 255, 0.08);'
                             : 'border: 2px solid rgba(255, 255, 255, 0.1); background: rgba(13, 21, 32, 0.9);';
+                        const removable = isRemovableCandidate(candidate);
+                        const actionsHtml = `
+                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                <button type="button" class="btn-sm" data-bgm-preview="${index}" style="background: #4bd4ff; color: #04142e;">▶️ 미리듣기</button>
+                                ${removable ? `<button type="button" class="btn-sm" data-bgm-remove="${index}" style="background: #ff6b6b; color: #04142e;">❌ 제거</button>` : ''}
+                            </div>
+                        `;
                         return `
                             <label style="
                                 display: flex;
@@ -3644,7 +4153,7 @@
                                             수정 시각: ${modifiedLabel}
                                         </div>
                                     </div>
-                                    <button type="button" class="btn-sm" data-bgm-preview="${index}" style="background: #4bd4ff; color: #04142e;">▶️ 미리듣기</button>
+                                    ${actionsHtml}
                                 </div>
                             </label>
                         `;
@@ -3712,6 +4221,81 @@
                     }
                 });
 
+                const removeCandidate = async (candidate, index, buttonEl) => {
+                    if (!candidate || !candidate.path) {
+                        alert('제거할 배경음악 정보를 찾을 수 없습니다.');
+                        return;
+                    }
+                    if (!currentProject || !currentProject.id) {
+                        alert('프로젝트 정보가 없습니다. 다시 시도해 주세요.');
+                        return;
+                    }
+                    if (!window.confirm('선택한 배경음악 파일을 제거할까요?')) {
+                        return;
+                    }
+
+                    const originalText = buttonEl?.textContent;
+                    try {
+                        if (buttonEl) {
+                            buttonEl.disabled = true;
+                            buttonEl.textContent = '제거 중...';
+                        }
+
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/bgm/remove`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ path: candidate.path }),
+                        });
+
+                        if (!response.ok) {
+                            const text = await response.text();
+                            throw new Error(text || `HTTP ${response.status}`);
+                        }
+
+                        const result = await response.json();
+
+                        stopPreview();
+
+                        candidates.splice(index, 1);
+                        if (selectedIndex === index) {
+                            if (candidates.length === 0) {
+                                selectedIndex = -1;
+                            } else if (index >= candidates.length) {
+                                selectedIndex = candidates.length - 1;
+                            }
+                        } else if (selectedIndex > index) {
+                            selectedIndex -= 1;
+                        }
+
+                        updateFolderOptions(folderFilter);
+                        folderFilter = folderSelect ? folderSelect.value || '' : '';
+
+                        if (currentProject) {
+                            currentProject.extra = { ...(result?.extra || {}) };
+                        }
+
+                        renderList();
+
+                        if (typeof updateComparisonTimeline === 'function') {
+                            try {
+                                await updateComparisonTimeline();
+                            } catch (error) {
+                                console.warn('타임라인 갱신 중 오류:', error);
+                            }
+                        }
+
+                        alert(result?.message || '배경음악 파일을 제거했습니다.');
+                    } catch (error) {
+                        console.error('Failed to remove BGM candidate:', error);
+                        alert(error?.message || '배경음악 파일 제거에 실패했습니다.');
+                    } finally {
+                        if (buttonEl) {
+                            buttonEl.disabled = false;
+                            buttonEl.textContent = originalText || '❌ 제거';
+                        }
+                    }
+                };
+
                 const cleanup = () => {
                     stopPreview();
                     document.body.removeChild(overlay);
@@ -3739,6 +4323,15 @@
                         const candidate = candidates[index];
                         if (candidate) {
                             playPreview(candidate);
+                        }
+                        return;
+                    }
+                    if (target.dataset && target.dataset.bgmRemove !== undefined) {
+                        event.preventDefault();
+                        const index = Number(target.dataset.bgmRemove);
+                        const candidate = candidates[index];
+                        if (candidate) {
+                            removeCandidate(candidate, index, target);
                         }
                         return;
                     }
@@ -3813,11 +4406,60 @@
             if (!currentProject.extra) {
                 currentProject.extra = {};
             }
-            currentProject.extra.bgm_path = result.bgm_path;
-            currentProject.extra.bgm_volume_percent = result.bgm_volume_percent;
-            currentProject.extra.bgm_cache_token = result.bgm_cache_token;
-            if (candidate.kind && String(candidate.kind).startsWith('custom')) {
+
+            const kindString = candidate.kind ? String(candidate.kind) : '';
+
+            if (typeof result.bgm_path !== 'undefined') {
+                currentProject.extra.bgm_path = result.bgm_path;
+            }
+            if (typeof result.bgm_volume_percent !== 'undefined') {
+                currentProject.extra.bgm_volume_percent = result.bgm_volume_percent;
+            }
+            if (typeof result.bgm_cache_token !== 'undefined') {
+                currentProject.extra.bgm_cache_token = result.bgm_cache_token;
+            }
+            if (kindString.startsWith('custom') && !kindString.startsWith('custom_v2')) {
                 currentProject.extra.bgm_custom_path = result.bgm_path;
+            }
+
+            if (typeof result.bgm_v2_path !== 'undefined') {
+                if (result.bgm_v2_path) {
+                    currentProject.extra.bgm_v2_path = result.bgm_v2_path;
+                    currentProject.extra.bgm_custom_v2_path = result.bgm_v2_path;
+                } else {
+                    delete currentProject.extra.bgm_v2_path;
+                    delete currentProject.extra.bgm_custom_v2_path;
+                }
+            } else if (kindString.startsWith('custom_v2')) {
+                currentProject.extra.bgm_v2_path = candidate.path;
+                currentProject.extra.bgm_custom_v2_path = candidate.path;
+            }
+
+            if (typeof result.bgm_v2_volume_percent !== 'undefined') {
+                currentProject.extra.bgm_v2_volume_percent = result.bgm_v2_volume_percent;
+            } else if (kindString.startsWith('custom_v2')) {
+                currentProject.extra.bgm_v2_volume_percent = clamp(
+                    Number.isFinite(Number(candidate.volume_percent)) ? Number(candidate.volume_percent) : 100,
+                    0,
+                    200,
+                );
+            }
+
+            if (typeof result.bgm_v2_cache_token !== 'undefined') {
+                currentProject.extra.bgm_v2_cache_token = result.bgm_v2_cache_token;
+            } else if (kindString.startsWith('custom_v2')) {
+                currentProject.extra.bgm_v2_cache_token = Date.now();
+            }
+
+            const appliedBgmV2Path = currentProject.extra.bgm_v2_path || currentProject.extra.bgm_custom_v2_path || '';
+            if (appliedBgmV2Path) {
+                setBgmV2Track(appliedBgmV2Path, {
+                    volumePercent: currentProject.extra.bgm_v2_volume_percent ?? 100,
+                    cacheToken: currentProject.extra.bgm_v2_cache_token || Date.now(),
+                    force: true,
+                });
+            } else {
+                setBgmV2Track('', { force: true });
             }
 
             await updateComparisonTimeline();
@@ -6362,6 +7004,7 @@
                     const checkboxes = [
                         { id: 'track-checkbox-original', waveform: originalTimelineWaveform, url: originalTimelineUrl },
                         { id: 'track-checkbox-bgm', waveform: window.bgmTimelineWaveform, url: window.bgmTimelineUrl },
+                        { id: 'track-checkbox-bgm-v2', waveform: window.bgmV2TimelineWaveform, url: window.bgmV2TimelineUrl },
                         { id: 'track-checkbox-dialogue', waveform: window.dialogueTimelineWaveform, url: window.dialogueTimelineUrl },
                         { id: 'track-checkbox-translated', waveform: translatedTimelineWaveform, url: translatedTimelineUrl }
                     ];
@@ -6430,6 +7073,8 @@
                     const trackState = {
                         bgm_path: (currentProject?.extra?.bgm_path) || (window.bgmTimelineUrl ? window.bgmTimelineUrl.replace('/web-audio/', '') : null),
                         bgm_volume_percent: currentProject?.extra?.bgm_volume_percent ?? Math.round(bgmPlaybackVolume * 100),
+                        bgm_v2_path: (currentProject?.extra?.bgm_v2_path) || (currentProject?.extra?.bgm_custom_v2_path) || null,
+                        bgm_v2_volume_percent: currentProject?.extra?.bgm_v2_volume_percent ?? 100,
                         dialogue_path: window.dialogueTimelineUrl ? window.dialogueTimelineUrl.replace('/web-audio/', '') : null,
                         dialogue_muted_path: window.dialogueMutedTimelineUrl ? window.dialogueMutedTimelineUrl.replace('/web-audio/', '') : null
                     };
@@ -6494,6 +7139,33 @@
                             });
                         } else {
                             setBgmTrack('', { force: true });
+                        }
+
+                        if (typeof result.bgm_v2_path !== 'undefined') {
+                            if (result.bgm_v2_path) {
+                                currentProject.extra.bgm_v2_path = result.bgm_v2_path;
+                                currentProject.extra.bgm_custom_v2_path = result.bgm_v2_path;
+                            } else {
+                                delete currentProject.extra.bgm_v2_path;
+                                delete currentProject.extra.bgm_custom_v2_path;
+                            }
+                        }
+                        if (typeof result.bgm_v2_volume_percent !== 'undefined') {
+                            currentProject.extra.bgm_v2_volume_percent = result.bgm_v2_volume_percent;
+                        }
+                        if (typeof result.bgm_v2_cache_token !== 'undefined') {
+                            currentProject.extra.bgm_v2_cache_token = result.bgm_v2_cache_token;
+                        }
+                        if (typeof result.bgm_v2_path !== 'undefined') {
+                            if (result.bgm_v2_path) {
+                                setBgmV2Track(result.bgm_v2_path, {
+                                    volumePercent: result.bgm_v2_volume_percent ?? 100,
+                                    cacheToken: result.bgm_v2_cache_token || Date.now(),
+                                    force: true,
+                                });
+                            } else {
+                                setBgmV2Track('', { force: true });
+                            }
                         }
 
                         // 대사 트랙 복원
