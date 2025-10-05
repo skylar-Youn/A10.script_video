@@ -24,6 +24,9 @@
             <div class="brand">
                 <h1><a href="/">유튜브 제작기</a> / 쇼츠 번역기</h1>
             </div>
+            <div class="header-actions">
+                <button type="button" class="btn-secondary btn-sm" id="btn-open-videoanalysis">📊 유튜브 콘텐츠 분석 도구로 이동</button>
+            </div>
         </header>
 
         <div id="project-view" class="hidden">
@@ -222,6 +225,9 @@
         let bgmV2TrimMode = false;
         let bgmV2ActiveRegion = null;
         let bgmV2RegionsPlugin = null;
+        let bgmV2AutoDuckEnabled = false;
+        let isDialogueMutedPlaying = false;
+        let isTranslatedTimelinePlaying = false;
         let bgmV2BaseDuration = null;
         let bgmVolumeRangeInput = document.getElementById('bgm-volume-range');
         let bgmVolumeValueLabel = document.getElementById('bgm-volume-value');
@@ -234,8 +240,10 @@
         let bgmV2TrimToggleButton = document.getElementById('btn-bgm-v2-trim-mode');
         let bgmV2TrimDeleteButton = document.getElementById('btn-bgm-v2-trim-delete');
         let bgmV2SaveCopyButton = document.getElementById('btn-bgm-v2-save-copy');
+        let bgmV2DuckToggleButton = document.getElementById('btn-bgm-v2-duck-toggle');
         let bgmV2PlaybackTimeLabel = document.getElementById('bgm-v2-playback-time');
         let bgmV2JumpButton = document.getElementById('btn-bgm-v2-jump-end');
+        const BGM_V2_DUCK_RATIO = 0.35;
 
         function clamp(value, min, max) {
             if (Number.isNaN(value)) {
@@ -343,6 +351,7 @@
                 bgmV2BaseDuration = null;
             }
             updateBgmV2JumpButtonState();
+            updateBgmV2DuckButtonState();
         }
 
         function applyBgmPlaybackVolume(percent) {
@@ -370,9 +379,7 @@
             if (bgmV2VolumeRangeInput && bgmV2VolumeRangeInput.value !== String(clampedPercent)) {
                 bgmV2VolumeRangeInput.value = String(clampedPercent);
             }
-            if (window.bgmV2TimelineWaveform && typeof window.bgmV2TimelineWaveform.setVolume === 'function') {
-                window.bgmV2TimelineWaveform.setVolume(Math.min(bgmV2PlaybackVolume, 2));
-            }
+            updateBgmV2WaveformVolume();
             updateBgmV2VolumeUI(Boolean(window.bgmV2TimelineWaveform));
         }
 
@@ -385,6 +392,18 @@
                 return;
             }
             bgmV2PlaybackTimeLabel.textContent = `${seconds.toFixed(2)}초`;
+        }
+
+        function shouldDuckBgmV2() {
+            return bgmV2AutoDuckEnabled && (isDialogueMutedPlaying || isTranslatedTimelinePlaying);
+        }
+
+        function updateBgmV2WaveformVolume() {
+            if (!window.bgmV2TimelineWaveform || typeof window.bgmV2TimelineWaveform.setVolume !== 'function') {
+                return;
+            }
+            const ratio = shouldDuckBgmV2() ? BGM_V2_DUCK_RATIO : 1;
+            window.bgmV2TimelineWaveform.setVolume(Math.min(bgmV2PlaybackVolume * ratio, 2));
         }
 
         function updateBgmV2JumpButtonState() {
@@ -422,10 +441,47 @@
                     window.bgmV2TimelineWaveform.play();
                 }
                 updateBgmV2PlaybackTime(target);
+                refreshBgmV2DuckState();
             } catch (error) {
                 console.debug('Failed to set BGM V2 playback position:', error);
                 alert('재생 위치를 이동하지 못했습니다.');
             }
+        }
+
+        function updateBgmV2DuckButtonState() {
+            if (!bgmV2DuckToggleButton) {
+                return;
+            }
+            const hasTrack = Boolean(window.bgmV2TimelineWaveform);
+            bgmV2DuckToggleButton.disabled = !hasTrack;
+            if (!hasTrack) {
+                bgmV2AutoDuckEnabled = false;
+                bgmV2DuckToggleButton.classList.remove('active');
+                bgmV2DuckToggleButton.textContent = '🎧 자동감쇠 OFF';
+                return;
+            }
+            bgmV2DuckToggleButton.classList.toggle('active', bgmV2AutoDuckEnabled);
+            bgmV2DuckToggleButton.textContent = bgmV2AutoDuckEnabled ? '🎧 자동감쇠 ON' : '🎧 자동감쇠 OFF';
+        }
+
+        function refreshBgmV2DuckState() {
+            updateBgmV2WaveformVolume();
+            updateBgmV2DuckButtonState();
+        }
+
+        function toggleBgmV2AutoDuck() {
+            if (!window.bgmV2TimelineWaveform) {
+                alert('배경음악 V2 트랙을 먼저 불러오세요.');
+                return;
+            }
+            bgmV2AutoDuckEnabled = !bgmV2AutoDuckEnabled;
+            refreshBgmV2DuckState();
+        }
+
+        function recalcDuckFlagsFromPlayback() {
+            isDialogueMutedPlaying = Boolean(window.dialogueMutedTimelineWaveform?.isPlaying?.());
+            isTranslatedTimelinePlaying = Boolean(translatedTimelineWaveform?.isPlaying?.());
+            refreshBgmV2DuckState();
         }
 
         function clearBgmV2PlaybackLimit() {
@@ -549,6 +605,15 @@
             if (bgmV2SaveCopyButton) {
                 bgmV2SaveCopyButton.disabled = true;
             }
+            if (bgmV2DuckToggleButton) {
+                bgmV2DuckToggleButton.disabled = true;
+                bgmV2DuckToggleButton.classList.remove('active');
+                bgmV2DuckToggleButton.textContent = '🎧 자동감쇠 OFF';
+            }
+            bgmV2AutoDuckEnabled = false;
+            isDialogueMutedPlaying = false;
+            isTranslatedTimelinePlaying = false;
+            refreshBgmV2DuckState();
         }
 
         function getComparisonBaseDuration() {
@@ -621,6 +686,7 @@
                 updateBgmV2JumpButtonState();
                 updateBgmV2VolumeLabel(volumePercent);
                 applyBgmV2PlaybackVolume(volumePercent);
+                refreshBgmV2DuckState();
                 return;
             }
 
@@ -748,6 +814,7 @@
                 updateBgmV2PlaybackTime(0);
                 applyBgmV2PlaybackVolume(volumePercent);
                 updateBgmV2VolumeUI(true);
+                refreshBgmV2DuckState();
                 if (bgmV2RegionsPlugin) {
                     if (previousTrimMode && typeof bgmV2RegionsPlugin.enableDragSelection === 'function') {
                         bgmV2TrimMode = true;
@@ -1129,6 +1196,7 @@
                     }
                     alert(infoMessage);
                     updateBgmV2JumpButtonState();
+                    updateBgmV2DuckButtonState();
                 }
             } catch (error) {
                 console.error('Failed to save BGM V2 copy:', error);
@@ -2082,6 +2150,9 @@
             if (clearHighlight) {
                 clearSegmentHighlight();
             }
+            isDialogueMutedPlaying = false;
+            isTranslatedTimelinePlaying = false;
+            refreshBgmV2DuckState();
         }
 
         function handleTimelineFinish(trackKey) {
@@ -2098,6 +2169,17 @@
                     timelineStopBtn.disabled = true;
                 }
             }
+            if (trackKey === 'translated') {
+                isTranslatedTimelinePlaying = false;
+            }
+            if (trackKey === 'dialogue-muted') {
+                isDialogueMutedPlaying = false;
+            }
+            if (!anyPlaying) {
+                isTranslatedTimelinePlaying = false;
+                isDialogueMutedPlaying = false;
+            }
+            refreshBgmV2DuckState();
         }
 
         function updateTimelineDuration(duration, target) {
@@ -2245,10 +2327,14 @@
             stopSingleAudioPlayback({ clearHighlight: false });
             stopAllAudio({ clearHighlight: false });
             applyTranslatedMuteState();
+            isDialogueMutedPlaying = false;
+            isTranslatedTimelinePlaying = false;
 
             // 체크된 트랙만 재생 모드
             if (trackKey === 'checked') {
                 const tracksToPlay = [];
+                let willPlayTranslated = false;
+                let willPlayDialogueMuted = false;
 
                 // 각 트랙의 체크박스 상태 확인
                 const checkboxes = [
@@ -2264,6 +2350,12 @@
                     const checkbox = document.getElementById(id);
                     if (checkbox && checkbox.checked && waveform && url) {
                         tracksToPlay.push(waveform);
+                        if (id === 'track-checkbox-translated') {
+                            willPlayTranslated = true;
+                        }
+                        if (id === 'track-checkbox-dialogue-muted') {
+                            willPlayDialogueMuted = true;
+                        }
                     }
                 }
 
@@ -2271,6 +2363,10 @@
                     alert('재생할 트랙을 선택하세요 (체크박스 선택)');
                     return;
                 }
+
+                isTranslatedTimelinePlaying = willPlayTranslated;
+                isDialogueMutedPlaying = willPlayDialogueMuted;
+                refreshBgmV2DuckState();
 
                 timelineActiveWaveformKey = 'checked';
                 if (timelinePauseBtn) {
@@ -2298,6 +2394,10 @@
                     alert('재생할 트랙이 없습니다.');
                     return;
                 }
+
+                isTranslatedTimelinePlaying = Boolean(translatedTimelineWaveform);
+                isDialogueMutedPlaying = false;
+                refreshBgmV2DuckState();
 
                 timelineActiveWaveformKey = 'both';
                 if (timelinePauseBtn) {
@@ -2335,9 +2435,22 @@
 
             if (trackKey === 'original' && translatedTimelineWaveform) {
                 translatedTimelineWaveform.pause();
+                isTranslatedTimelinePlaying = false;
             } else if (trackKey === 'translated' && originalTimelineWaveform) {
                 originalTimelineWaveform.pause();
             }
+
+            if (trackKey === 'translated') {
+                isTranslatedTimelinePlaying = Boolean(translatedTimelineWaveform);
+                isDialogueMutedPlaying = false;
+            } else if (trackKey === 'original') {
+                isTranslatedTimelinePlaying = false;
+                isDialogueMutedPlaying = false;
+            } else if (trackKey === 'dialogue-muted') {
+                isDialogueMutedPlaying = Boolean(window.dialogueMutedTimelineWaveform);
+                isTranslatedTimelinePlaying = false;
+            }
+            refreshBgmV2DuckState();
 
             timelineActiveWaveformKey = trackKey;
             if (timelinePauseBtn) {
@@ -2364,6 +2477,9 @@
             } else if (timelineActiveWaveformKey === 'translated' && translatedTimelineWaveform) {
                 translatedTimelineWaveform.pause();
             }
+            isDialogueMutedPlaying = false;
+            isTranslatedTimelinePlaying = false;
+            refreshBgmV2DuckState();
         }
 
         async function updateComparisonTimeline() {
@@ -3782,6 +3898,7 @@
                                 <button type="button" class="btn-xs" id="btn-bgm-v2-trim-mode" title="드래그로 자를 구간 선택" disabled>✂️ 자르기</button>
                                 <button type="button" class="btn-xs" id="btn-bgm-v2-trim-delete" title="선택 이후 구간 삭제" disabled>🗑️ 버리기</button>
                                 <button type="button" class="btn-xs" id="btn-bgm-v2-save-copy" title="현재 배경음악 V2를 다른 이름으로 저장" disabled>💾 다른이름</button>
+                                <button type="button" class="btn-xs" id="btn-bgm-v2-duck-toggle" title="원본/번역 음성이 재생될 때 자동으로 감쇠" disabled>🎧 자동감쇠 OFF</button>
                                 <span class="bgm-volume-label" id="bgm-v2-volume-label">
                                     표시 <span id="bgm-v2-volume-percent">--</span> (<span id="bgm-v2-playback-time">0.00초</span>)
                                 </span>
@@ -7363,6 +7480,14 @@
             showAICommentarySection();
         }
 
+        const videoAnalysisBtn = document.getElementById('btn-open-videoanalysis');
+        if (videoAnalysisBtn && !videoAnalysisBtn.dataset.bound) {
+            videoAnalysisBtn.dataset.bound = '1';
+            videoAnalysisBtn.addEventListener('click', () => {
+                window.location.href = 'http://127.0.0.1:8002/';
+            });
+        }
+
         // === 트랙 처리 기능 ===
         function attachTrackProcessingEventListeners() {
             bgmVolumeRangeInput = document.getElementById('bgm-volume-range');
@@ -7376,6 +7501,7 @@
             bgmV2TrimToggleButton = document.getElementById('btn-bgm-v2-trim-mode');
             bgmV2TrimDeleteButton = document.getElementById('btn-bgm-v2-trim-delete');
             bgmV2SaveCopyButton = document.getElementById('btn-bgm-v2-save-copy');
+            bgmV2DuckToggleButton = document.getElementById('btn-bgm-v2-duck-toggle');
             bgmV2PlaybackTimeLabel = document.getElementById('bgm-v2-playback-time');
             bgmV2JumpButton = document.getElementById('btn-bgm-v2-jump-end');
 
@@ -7441,9 +7567,15 @@
                 });
             }
 
+            if (bgmV2DuckToggleButton && !bgmV2DuckToggleButton.dataset.bound) {
+                bgmV2DuckToggleButton.dataset.bound = '1';
+                bgmV2DuckToggleButton.addEventListener('click', toggleBgmV2AutoDuck);
+            }
+
             updateBgmVolumeUI(Boolean(window.bgmTimelineWaveform));
             updateBgmV2VolumeUI(Boolean(window.bgmV2TimelineWaveform));
             updateBgmV2JumpButtonState();
+            updateBgmV2DuckButtonState();
 
             // Vocal/배경음악 분리
             const btnSeparateVocal = document.getElementById('btn-separate-vocal');
@@ -7706,36 +7838,59 @@
                     }
 
                     // 체크된 트랙 찾기
-                    const checkedTracks = [];
-
-                    const checkboxes = [
-                        { id: 'track-checkbox-original', waveform: originalTimelineWaveform, url: originalTimelineUrl },
-                        { id: 'track-checkbox-bgm', waveform: window.bgmTimelineWaveform, url: window.bgmTimelineUrl },
-                        { id: 'track-checkbox-bgm-v2', waveform: window.bgmV2TimelineWaveform, url: window.bgmV2TimelineUrl },
-                        { id: 'track-checkbox-dialogue', waveform: window.dialogueTimelineWaveform, url: window.dialogueTimelineUrl },
-                        { id: 'track-checkbox-translated', waveform: translatedTimelineWaveform, url: translatedTimelineUrl }
+                    const trackDefs = [
+                        { id: 'track-checkbox-bgm-v2', waveform: window.bgmV2TimelineWaveform, url: window.bgmV2TimelineUrl, role: 'bgm_v2' },
+                        { id: 'track-checkbox-bgm', waveform: window.bgmTimelineWaveform, url: window.bgmTimelineUrl, role: 'bgm' },
+                        { id: 'track-checkbox-original', waveform: originalTimelineWaveform, url: originalTimelineUrl, role: 'original' },
+                        { id: 'track-checkbox-dialogue-muted', waveform: window.dialogueMutedTimelineWaveform, url: window.dialogueMutedTimelineUrl, role: 'dialogue_muted' },
+                        { id: 'track-checkbox-dialogue', waveform: window.dialogueTimelineWaveform, url: window.dialogueTimelineUrl, role: 'dialogue' },
+                        { id: 'track-checkbox-translated', waveform: translatedTimelineWaveform, url: translatedTimelineUrl, role: 'translated' }
                     ];
 
-                    for (const { id, waveform, url } of checkboxes) {
-                        const checkbox = document.getElementById(id);
-                        if (checkbox && checkbox.checked && waveform && url) {
-                            checkedTracks.push(url);
+                    const selectedTrackItems = [];
+                    for (const def of trackDefs) {
+                        const checkbox = document.getElementById(def.id);
+                        if (checkbox && checkbox.checked && def.url) {
+                            selectedTrackItems.push({ path: def.url, role: def.role });
                         }
                     }
 
-                    if (checkedTracks.length === 0) {
+                    if (selectedTrackItems.length === 0) {
                         alert('합칠 트랙을 선택하세요 (체크박스 선택)');
                         return;
                     }
 
+                    selectedTrackItems.sort((a, b) => {
+                        const rank = role => {
+                            switch (role) {
+                                case 'bgm_v2': return 0;
+                                case 'bgm': return 1;
+                                case 'dialogue':
+                                case 'dialogue_muted':
+                                case 'translated': return 2;
+                                default: return 3;
+                            }
+                        };
+                        return rank(a.role) - rank(b.role);
+                    });
+
                     btnMergeChecked.disabled = true;
-                    btnMergeChecked.textContent = '🔄 합치는 중...';
+                    let mergeProgress = 0;
+                    btnMergeChecked.textContent = `🔄 합치는 중... ${mergeProgress}%`;
+                    const mergeInterval = setInterval(() => {
+                        mergeProgress = Math.min(mergeProgress + 12, 95);
+                        btnMergeChecked.textContent = `🔄 합치는 중... ${mergeProgress}%`;
+                    }, 350);
 
                     try {
                         const response = await fetch(`/api/translator/projects/${currentProject.id}/merge-tracks`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ track_paths: checkedTracks })
+                            body: JSON.stringify({
+                                tracks: selectedTrackItems,
+                                auto_duck: Boolean(bgmV2AutoDuckEnabled),
+                                duck_ratio: BGM_V2_DUCK_RATIO
+                            })
                         });
 
                         if (!response.ok) {
@@ -7746,23 +7901,29 @@
                         const result = await response.json();
                         console.log('Merge result:', result);
 
-                        alert(result.message || '트랙 합치기 완료');
+                        const mergedPath = result.merged_path || '';
+                        const mergedName = result.merged_filename || (mergedPath ? mergedPath.split('/').pop() : 'merged_tracks.wav');
 
-                        // 합쳐진 파일을 파일 탐색기에서 보여주기
-                        if (result.merged_path) {
-                            // 프로젝트 ID를 사용하여 경로 생성
+                        alert((result.message || '트랙 합치기 완료') + (mergedPath ? `\n저장 위치: ${mergedPath}` : ''));
+
+                        if (mergedPath) {
                             const projectPath = `ai_shorts_maker/outputs/translator_projects/${currentProject.id}`;
-                            // 파일 탐색기 페이지로 이동 (새 탭)
                             const explorerUrl = `http://127.0.0.1:8002/?path=${encodeURIComponent(projectPath)}`;
                             console.log('Opening file explorer:', explorerUrl);
                             window.open(explorerUrl, '_blank');
                         }
+
+                        mergeProgress = 100;
+                        btnMergeChecked.textContent = `✅ 합치기 완료 (100%)`;
                     } catch (error) {
                         console.error('Track merge error:', error);
                         alert(`합치기 실패: ${error.message}`);
                     } finally {
+                        clearInterval(mergeInterval);
                         btnMergeChecked.disabled = false;
-                        btnMergeChecked.textContent = '🔀 체크한 트랙 합치기';
+                        setTimeout(() => {
+                            btnMergeChecked.textContent = '🔀 체크한 트랙 합치기';
+                        }, 1200);
                     }
                 });
             }

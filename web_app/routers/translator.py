@@ -2037,63 +2037,115 @@ async def api_trim_translated_audio(project_id: str):
 
 @router.post("/projects/{project_id}/merge-tracks")
 async def api_merge_tracks(project_id: str, payload: dict):
-    """선택한 트랙들을 합칩니다."""
+    """선택한 트랙들을 합쳐 하나의 오디오로 생성한다."""
     import logging
+
     logger = logging.getLogger(__name__)
-    
-    track_paths = payload.get("track_paths", [])
-    if not track_paths:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="트랙 경로가 필요합니다."
-        )
-    
+
+    raw_items = payload.get("tracks")
+    if not raw_items:
+        legacy_paths = payload.get("track_paths") or []
+        raw_items = [{"path": path, "role": "unknown"} for path in legacy_paths]
+
+    if not isinstance(raw_items, list) or not raw_items:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="합칠 트랙이 필요합니다.")
+
+    auto_duck = bool(payload.get("auto_duck"))
+    duck_ratio_value = payload.get("duck_ratio")
+    try:
+        duck_ratio = float(duck_ratio_value) if duck_ratio_value is not None else 1.0
+    except (TypeError, ValueError):
+        duck_ratio = 1.0
+    if duck_ratio <= 0:
+        duck_ratio = 1.0
+
     def _merge():
         from pathlib import Path
         from pydub import AudioSegment
-        
+
         project = translator_load_project(project_id)
         if not project:
             return None
-        
-        # 모든 트랙을 로드하고 합치기
-        combined = None
-        for track_path in track_paths:
-            # 웹 URL을 실제 파일 경로로 변환
-            if track_path.startswith("/outputs/"):
-                file_path = TRANSLATOR_DIR.parent / track_path[9:]  # /outputs/ 제거
+
+        track_items: List[Dict[str, object]] = []
+        voice_roles = {"dialogue", "dialogue_muted", "translated", "voice"}
+
+        for item in raw_items:
+            if isinstance(item, dict):
+                path_value = str(item.get("path") or '').strip()
+                role_value = str(item.get("role") or 'unknown').lower()
             else:
-                file_path = Path(track_path)
-            
-            if not file_path.exists():
-                logger.warning(f"Track file not found: {file_path}")
+                path_value = str(item or '').strip()
+                role_value = 'unknown'
+
+            if not path_value:
                 continue
-            
-            track_audio = AudioSegment.from_file(str(file_path))
-            
-            if combined is None:
-                combined = track_audio
+
+            if path_value.startswith("/outputs/"):
+                file_path = (TRANSLATOR_DIR.parent / path_value[9:]).resolve()
             else:
-                # 오디오 믹싱 (overlay)
-                combined = combined.overlay(track_audio)
-        
-        if combined is None:
+                file_path = Path(path_value).resolve()
+
+            if not file_path.exists():
+                logger.warning("Track file not found: %s", file_path)
+                continue
+
+            audio_segment = AudioSegment.from_file(str(file_path))
+            track_items.append({
+                "path": file_path,
+                "role": role_value,
+                "audio": audio_segment
+            })
+
+        if not track_items:
             raise ValueError("합칠 트랙이 없습니다.")
-        
-        # 합쳐진 파일 저장
+
+        # BGM V2를 우선, 그 다음 BGM, 나머지는 이후에
+        role_rank = {
+            "bgm_v2": 0,
+            "bgm": 1,
+        }
+        track_items.sort(key=lambda item: role_rank.get(item["role"], 2))
+
+        # 길이를 기준으로 패딩
+        max_duration = max(len(item["audio"]) for item in track_items)
+        for item in track_items:
+            audio = item["audio"]
+            if len(audio) < max_duration:
+                item["audio"] = audio + AudioSegment.silent(duration=max_duration - len(audio))
+
+        base_item = track_items[0]
+        base_audio = base_item["audio"]
+        base_role = base_item["role"]
+        combined = base_audio
+
+        duck_gain_db = 0.0
+        if auto_duck:
+            duck_gain_db = 20.0 * math.log10(max(duck_ratio, 1e-4))
+
+        for item in track_items[1:]:
+            audio = item["audio"]
+            role = item["role"]
+            if auto_duck and base_role == "bgm_v2" and role in voice_roles:
+                combined = combined.overlay(audio, gain_during_overlay=duck_gain_db)
+            else:
+                combined = combined.overlay(audio)
+
         project_dir = TRANSLATOR_DIR / project_id
-        merged_path = project_dir / "merged_tracks.wav"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = int(time.time())
+        merged_path = project_dir / f"merged_tracks_{timestamp:010d}.wav"
         combined.export(str(merged_path), format="wav")
-        
-        # 웹 URL 변환
+
         output_dir = TRANSLATOR_DIR.parent
         merged_url = f"/outputs/{merged_path.relative_to(output_dir).as_posix()}"
-        
+
         return {
             "merged_path": merged_url,
-            "message": f"{len(track_paths)}개 트랙 합치기 완료"
+            "merged_filename": merged_path.name,
+            "message": f"{len(track_items)}개 트랙 합치기 완료",
         }
-    
+
     try:
         result = await run_in_threadpool(_merge)
         if result is None:
@@ -2102,17 +2154,14 @@ async def api_merge_tracks(project_id: str, payload: dict):
                 detail=f"Translator project '{project_id}' not found."
             )
         return result
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Track merging failed: {e}")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Track merging failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"트랙 합치기 실패: {str(e)}"
-        )
+            detail=f"트랙 합치기 실패: {exc}"
+        ) from exc
 
 
 @router.post("/projects/{project_id}/save-tracks")
