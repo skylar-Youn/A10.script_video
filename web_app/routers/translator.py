@@ -7,7 +7,7 @@ import math
 import shutil
 import time
 
-from fastapi import APIRouter, HTTPException, status, Body
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 from pathlib import Path
@@ -1074,6 +1074,106 @@ async def api_list_bgm_candidates(project_id: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"배경음악 목록을 불러오지 못했습니다: {exc}"
         ) from exc
+
+
+@router.post("/projects/{project_id}/bgm/upload")
+async def api_upload_bgm_file(
+    project_id: str,
+    file: UploadFile = File(...),
+    mode: str = Form("replace"),
+):
+    """Upload a new background music file and set it as the current track."""
+    import logging
+    from pydub import AudioSegment
+
+    logger = logging.getLogger(__name__)
+
+    mode_normalized = (mode or "replace").strip().lower()
+    if mode_normalized not in {"replace", "append"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="지원하지 않는 처리 모드입니다.")
+
+    def _upload():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        audio_dir = TRANSLATOR_DIR / project_id / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = int(time.time())
+        name_stem = Path(file.filename or f"bgm_{timestamp}").stem or f"bgm_{timestamp}"
+        dest_path = audio_dir / f"bgm_custom_{timestamp:010d}.wav"
+
+        suffix = Path(file.filename or "").suffix.lstrip(".")
+        format_hint = suffix.lower() if suffix else None
+        if not format_hint and file.content_type:
+            format_hint = file.content_type.split("/")[-1]
+        if not format_hint:
+            raise ValueError("오디오 형식을 판별할 수 없습니다.")
+
+        file.file.seek(0)
+        new_clip = AudioSegment.from_file(file.file, format=format_hint)
+        if len(new_clip) == 0:
+            raise ValueError("업로드된 오디오 길이가 0입니다.")
+
+        if mode_normalized == "append":
+            existing_path = None
+            extras = project.extra or {}
+            existing_path = _web_url_to_path(extras.get("bgm_path")) if extras else None
+            if existing_path and existing_path.exists():
+                existing_audio = AudioSegment.from_file(str(existing_path))
+                combined_audio = existing_audio + new_clip
+            else:
+                combined_audio = new_clip
+            combined_audio.export(str(dest_path), format="wav")
+        else:
+            new_clip.export(str(dest_path), format="wav")
+
+        extras = project.extra or {}
+        web_path = _path_to_web_url(dest_path)
+        extras["bgm_custom_path"] = web_path
+        extras["bgm_path"] = web_path
+        extras["bgm_source_path"] = web_path
+        extras["bgm_volume_percent"] = 100.0
+        extras["bgm_cache_token"] = int(time.time())
+        project.extra = extras
+        save_project(project)
+
+        label, kind = _label_bgm_candidate(dest_path)
+        stat = dest_path.stat()
+        return {
+            "bgm_path": web_path,
+            "bgm_volume_percent": extras["bgm_volume_percent"],
+            "bgm_cache_token": extras["bgm_cache_token"],
+            "bgm_source_path": extras.get("bgm_source_path"),
+            "candidate": {
+                "label": label or name_stem,
+                "filename": dest_path.name,
+                "path": web_path,
+                "kind": kind,
+                "modified_at": stat.st_mtime,
+                "size": stat.st_size,
+            },
+        }
+
+    try:
+        result = await run_in_threadpool(_upload)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("BGM upload failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"배경음악 업로드 실패: {exc}"
+        )
 
 
 @router.post("/projects/{project_id}/bgm/apply")

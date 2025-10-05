@@ -82,7 +82,13 @@ from ai_shorts_maker.translator import (
 )
 from videoanalysis.config import SAVED_RESULTS_DIR
 from youtube.ytdl import download_with_options, parse_sub_langs
-from youtube.ytcompareinspector import compare_two, compare_dir, parse_resize
+try:
+    from youtube.ytcompareinspector import compare_two, compare_dir
+    SIMILARITY_IMPORT_ERROR: Optional[Exception] = None
+except Exception as exc:  # pylint: disable=broad-except
+    compare_two = None  # type: ignore[assignment]
+    compare_dir = None  # type: ignore[assignment]
+    SIMILARITY_IMPORT_ERROR = exc
 from youtube.ytcopyrightinspector import run_precheck as run_copyright_precheck
 
 
@@ -1790,7 +1796,7 @@ async def copyright_check(
                     fps=fps_value or 1.0,
                     hash_name=hash_clean,
                     hamming_th=hamming_th_value or int(form_values["hamming_th"]),
-                    resize=resize_tuple or parse_resize_form(form_values["resize"]),
+                    resize=resize_tuple,
                     max_frames=max_frames_value,
                     high_th=high_th_value or float(form_values["high_th"]),
                     med_th=med_th_value or float(form_values["med_th"]),
@@ -2004,7 +2010,9 @@ async def similarity_check(
 
     resize_tuple: Optional[Tuple[int, int]] = None
     if error is None:
-        resize_tuple = parse_resize(resize_clean)
+        resize_tuple = parse_resize_form(resize_clean)
+        if resize_tuple is None:
+            error = "리사이즈는 '가로x세로' 형식으로 입력하세요."
 
     max_frames_value: Optional[int] = None
     if error is None and max_frames_clean:
@@ -2066,6 +2074,10 @@ async def similarity_check(
                 mode = "dir"
         else:
             error = "비교할 영상 또는 폴더를 입력하세요."
+
+    if error is None and SIMILARITY_IMPORT_ERROR is not None:
+        logger.error("Similarity comparison unavailable: %s", SIMILARITY_IMPORT_ERROR)
+        error = "영상 유사도 비교 기능을 사용하려면 OpenCV (cv2) 패키지가 설치되어 있어야 합니다."
 
     if error is None and mode == "pair" and a_path and b_path:
         try:

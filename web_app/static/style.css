@@ -250,6 +250,84 @@ summary {
     color: #e5e7eb;
 }
 
+.bgm-dialog {
+    background: #1a2332;
+    border-radius: 12px;
+    padding: 24px;
+    width: min(640px, 92vw);
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+.bgm-dialog-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.bgm-dialog-header h3 {
+    margin: 0;
+    color: #f0f4f8;
+    font-size: 20px;
+}
+
+.bgm-dialog-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.bgm-dialog-toolbar label {
+    font-size: 0.85rem;
+    color: #c5d7f2;
+    margin-right: 2px;
+}
+
+.bgm-dialog-select,
+.bgm-dialog-search {
+    background: rgba(6, 14, 24, 0.62);
+    border: 1px solid rgba(148, 184, 236, 0.18);
+    color: #f0f4f8;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+.bgm-dialog-search::placeholder {
+    color: rgba(207, 221, 238, 0.6);
+}
+
+.bgm-candidate-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.bgm-dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.bgm-candidate-empty {
+    padding: 24px;
+    text-align: center;
+    color: #9ca3af;
+    border: 1px dashed rgba(148, 184, 236, 0.3);
+    border-radius: 8px;
+    background: rgba(10, 18, 30, 0.6);
+}
+
+.bgm-dialog-path {
+    color: #94a6c7;
+    font-size: 11px;
+}
+
 .btn-xs.active {
     background: rgba(255, 214, 0, 0.25);
     color: #ffe7a0;

@@ -14,6 +14,7 @@ import hmac
 import hashlib
 import argparse
 import subprocess
+from contextlib import suppress
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 
@@ -23,6 +24,11 @@ from PIL import Image
 import imagehash
 import requests
 from tqdm import tqdm
+
+try:
+    from videohash import VideoHash  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    VideoHash = None
 
 try:
     from shazamio import Shazam  # type: ignore
@@ -97,6 +103,50 @@ def video_phashes(video_path: Path, fps: float = 1.0,
     cap.release()
     return hashes
 
+
+def export_frames_for_search(
+    video_path: Path,
+    out_dir: Path,
+    fps: float,
+    max_frames: Optional[int] = None,
+    show_progress: bool = True,
+) -> List[str]:
+    """Export representative frames to disk to aid manual reverse searches."""
+    ensure_dir(out_dir)
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    step = max(1, int(round(video_fps / max(fps, 1e-6))))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+    exported: List[str] = []
+    idx = 0
+    taken = 0
+
+    with tqdm(total=total_frames,
+              desc=f"frames {video_path.name}",
+              unit="f",
+              disable=(not show_progress)) as pbar:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if idx % step == 0:
+                name = f"frame_{idx:06d}.jpg"
+                out_path = out_dir / name
+                cv2.imwrite(str(out_path), frame)
+                exported.append(str(out_path))
+                taken += 1
+                if max_frames and taken >= max_frames:
+                    break
+            idx += 1
+            pbar.update(1)
+
+    cap.release()
+    return exported
+
 def compare_hash_sets(hashes_a: List[str], hashes_b: List[str], hamming_th: int = 12) -> Tuple[float, Dict[str, Any]]:
     """Approximate set similarity based on near-duplicate hash matches."""
     if not hashes_a or not hashes_b:
@@ -124,6 +174,48 @@ def compare_hash_sets(hashes_a: List[str], hashes_b: List[str], hamming_th: int 
     details = {"matches": len(pairs), "pairs": pairs,
                "matched_a": len(matched_a), "matched_b": len(matched_b)}
     return match_ratio, details
+
+
+def video_videohash(
+    video_path: Path,
+    fps: float,
+    storage_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Compute VideoHash fingerprint; requires optional videohash package."""
+    if VideoHash is None:
+        raise RuntimeError("videohash package not installed; run `pip install videohash`.")
+
+    storage_arg = None
+    if storage_dir is not None:
+        ensure_dir(storage_dir)
+        storage_arg = str(storage_dir)
+
+    frame_interval = max(fps, 1e-3)
+    vh = VideoHash(path=str(video_path), frame_interval=frame_interval, storage_path=storage_arg)
+    info = {
+        "hash": vh.hash,
+        "hash_hex": vh.hash_hex,
+        "video_duration": getattr(vh, "video_duration", None),
+        "storage_path": getattr(vh, "storage_path", storage_arg),
+    }
+    with suppress(Exception):
+        vh.delete_storage_path()
+    return info
+
+
+def videohash_similarity(hash_a: str, hash_b: str) -> Tuple[float, int]:
+    """Compute similarity ratio and Hamming distance between two VideoHash bitstrings."""
+    bits_a = hash_a[2:] if hash_a.startswith("0b") else hash_a
+    bits_b = hash_b[2:] if hash_b.startswith("0b") else hash_b
+    length = max(len(bits_a), len(bits_b))
+    if length == 0:
+        return 0.0, 0
+
+    bits_a = bits_a.ljust(length, "0")
+    bits_b = bits_b.ljust(length, "0")
+    distance = sum(ch1 != ch2 for ch1, ch2 in zip(bits_a, bits_b))
+    similarity = 1.0 - (distance / length)
+    return similarity, distance
 
 # ----------------------------
 # ACRCloud Audio Recognition
@@ -309,7 +401,12 @@ def run_precheck(
     high_th: float = 0.30,
     med_th: float = 0.15,
     audio_only: bool = False,
+    video_backend: str = "imagehash",
     audio_provider: str = "auto",
+    export_frames: bool = False,
+    frame_export_dir: Optional[Path] = None,
+    frame_export_fps: float = 0.2,
+    frame_export_max: Optional[int] = 40,
     report_dir: Optional[Path] = None,
     show_progress: bool = True,
 ) -> Dict[str, Any]:
@@ -323,19 +420,34 @@ def run_precheck(
         raise ValueError("risk thresholds must be non-negative")
     if len(resize) != 2:
         raise ValueError("resize must be a (width, height) tuple")
+    if frame_export_fps <= 0:
+        raise ValueError("frame_export_fps must be greater than 0")
+    if frame_export_max is not None and frame_export_max <= 0:
+        raise ValueError("frame_export_max must be positive when provided")
     audio_provider_opts = {"auto", "shazam", "acrcloud"}
     if audio_provider not in audio_provider_opts:
         raise ValueError(f"Unsupported audio_provider: {audio_provider}")
+
+    video_backend_opts = {"imagehash", "videohash", "pyvideohash"}
+    if video_backend not in video_backend_opts:
+        raise ValueError(f"Unsupported video_backend: {video_backend}")
+    normalized_backend = "videohash" if video_backend in {"videohash", "pyvideohash"} else video_backend
+    if normalized_backend == "videohash" and VideoHash is None:
+        raise RuntimeError("videohash backend requested but package not installed")
+
+    video_backend = normalized_backend
 
     hash_funcs = {
         "phash": imagehash.phash,
         "ahash": imagehash.average_hash,
         "dhash": imagehash.dhash,
     }
-    try:
-        hfunc = hash_funcs[hash_name]
-    except KeyError as exc:
-        raise ValueError(f"Unsupported hash function: {hash_name}") from exc
+    hfunc = None
+    if normalized_backend == "imagehash":
+        try:
+            hfunc = hash_funcs[hash_name]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported hash function: {hash_name}") from exc
 
     video_path = video_path.expanduser().resolve()
     if not video_path.exists():
@@ -352,12 +464,16 @@ def run_precheck(
     json_path = target_report_dir / f"{base}_report.json"
     csv_path = target_report_dir / f"{base}_matches.csv"
     tmp_wav = target_report_dir / f"{base}_mono16k.wav"
+    export_target_dir: Optional[Path] = None
+    if export_frames:
+        export_target_dir = (frame_export_dir or (target_report_dir / f"{base}_frames")).expanduser().resolve()
 
     result: Dict[str, Any] = {
         "video": str(video_path),
         "audio": {},
         "video_hash": {},
         "reference_compare": {},
+        "frame_export": {},
         "risk": "LOW",
         "params": {
             "video": str(video_path),
@@ -370,7 +486,12 @@ def run_precheck(
             "high_th": high_th,
             "med_th": med_th,
             "audio_only": audio_only,
+            "video_backend": video_backend,
             "audio_provider": audio_provider,
+            "export_frames": export_frames,
+            "frame_export_dir": str(export_target_dir) if export_target_dir else None,
+            "frame_export_fps": frame_export_fps,
+            "frame_export_max": frame_export_max,
             "report_dir": str(target_report_dir),
         },
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -443,64 +564,168 @@ def run_precheck(
 
     match_ratio = 0.0
     hashes_in: List[str] = []
+    videohash_info: Optional[Dict[str, Any]] = None
+    video_hash_meta = result["video_hash"]
+    video_hash_meta["backend"] = video_backend
+    video_hash_meta["enabled"] = not audio_only
+
     if not audio_only:
         try:
-            hashes_in = video_phashes(
-                video_path,
-                fps=fps,
-                hash_func=hfunc,
-                resize=resize,
-                max_frames=max_frames,
-                show_progress=show_progress,
-            )
-            result["video_hash"]["frames"] = len(hashes_in)
+            if video_backend == "imagehash":
+                hashes_in = video_phashes(
+                    video_path,
+                    fps=fps,
+                    hash_func=hfunc,
+                    resize=resize,
+                    max_frames=max_frames,
+                    show_progress=show_progress,
+                )
+                video_hash_meta["frames"] = len(hashes_in)
+            elif video_backend == "videohash":
+                videohash_info = video_videohash(
+                    video_path,
+                    fps=fps,
+                    storage_dir=None,
+                )
+                video_hash_meta.update({
+                    "hash": videohash_info.get("hash"),
+                    "hash_hex": videohash_info.get("hash_hex"),
+                })
+                if videohash_info.get("video_duration") is not None:
+                    video_hash_meta["video_duration"] = videohash_info["video_duration"]
         except Exception as exc:  # pylint: disable=broad-except
-            result["video_hash"]["error"] = str(exc)
+            video_hash_meta["error"] = str(exc)
 
         if ref_dir:
-            ref_db = build_reference_fingerprints(
-                ref_dir,
-                fps=fps,
-                hfunc=hfunc,
-                resize=resize,
-                max_frames=max_frames,
+            reference_compare: Dict[str, Any] = {"backend": video_backend}
+
+            if video_backend == "imagehash" and hashes_in and hfunc:
+                ref_db = build_reference_fingerprints(
+                    ref_dir,
+                    fps=fps,
+                    hfunc=hfunc,
+                    resize=resize,
+                    max_frames=max_frames,
+                    show_progress=show_progress,
+                )
+                rows = []
+                best = {"ref": None, "ratio": 0.0}
+
+                for ref_name, ref_hashes in ref_db.items():
+                    ratio, det = compare_hash_sets(hashes_in, ref_hashes, hamming_th=hamming_th)
+                    rows.append([
+                        ref_name,
+                        f"{ratio:.4f}",
+                        det.get("matches", 0),
+                        det.get("matched_a", 0),
+                        det.get("matched_b", 0),
+                    ])
+                    if ratio > best["ratio"]:
+                        best = {"ref": ref_name, "ratio": ratio}
+
+                reference_compare["best_match"] = best
+                reference_compare["total_refs"] = len(ref_db)
+
+                if rows:
+                    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow([
+                            "reference_video",
+                            "match_ratio",
+                            "matched_pairs",
+                            "matched_input_frames",
+                            "matched_ref_frames",
+                        ])
+                        writer.writerows(rows)
+                else:
+                    if csv_path.exists():
+                        csv_path.unlink()
+
+                match_ratio = float(best["ratio"])
+
+            elif video_backend == "videohash" and videohash_info and videohash_info.get("hash"):
+                rows = []
+                best = {"ref": None, "ratio": 0.0, "hamming": None}
+                input_hash = videohash_info["hash"]
+                processed = 0
+                failed: List[Tuple[str, str]] = []
+
+                for ref_path in sorted(ref_dir.rglob("*")):
+                    if ref_path.suffix.lower() not in {".mp4", ".mov", ".mkv", ".avi", ".webm"}:
+                        continue
+                    processed += 1
+                    try:
+                        ref_info = video_videohash(ref_path, fps=fps, storage_dir=None)
+                    except Exception as exc:  # pragma: no cover - file specific failures
+                        failed.append((ref_path.name, str(exc)))
+                        continue
+
+                    similarity, distance = videohash_similarity(input_hash, ref_info.get("hash", ""))
+                    rows.append([
+                        ref_path.name,
+                        f"{similarity:.4f}",
+                        distance,
+                        ref_info.get("hash_hex"),
+                    ])
+                    if similarity > best["ratio"]:
+                        best = {"ref": ref_path.name, "ratio": similarity, "hamming": distance}
+
+                reference_compare["best_match"] = best
+                reference_compare["total_refs"] = processed
+                if failed:
+                    reference_compare["failures"] = failed
+
+                if rows:
+                    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow([
+                            "reference_video",
+                            "similarity",
+                            "hamming_distance",
+                            "hash_hex",
+                        ])
+                        writer.writerows(rows)
+                else:
+                    if csv_path.exists():
+                        csv_path.unlink()
+
+                match_ratio = float(best["ratio"])
+
+            else:
+                reference_compare["note"] = "Video hashing failed; no comparison performed."
+
+            result["reference_compare"] = reference_compare
+        else:
+            result["reference_compare"] = {
+                "note": "No reference_dir provided; only audio check performed.",
+                "backend": video_backend,
+            }
+    else:
+        result["reference_compare"] = {
+            "note": "Audio-only mode; video comparison skipped.",
+            "backend": video_backend,
+        }
+
+    frame_meta: Dict[str, Any] = result["frame_export"]
+    frame_meta.update({
+        "enabled": export_frames,
+        "fps": frame_export_fps,
+        "max_frames": frame_export_max,
+        "directory": str(export_target_dir) if export_target_dir else None,
+    })
+    if export_frames and export_target_dir:
+        try:
+            exported = export_frames_for_search(
+                video_path,
+                export_target_dir,
+                fps=frame_export_fps,
+                max_frames=frame_export_max,
                 show_progress=show_progress,
             )
-            rows = []
-            best = {"ref": None, "ratio": 0.0}
-
-            for ref_name, ref_hashes in ref_db.items():
-                ratio, det = compare_hash_sets(hashes_in, ref_hashes, hamming_th=hamming_th)
-                rows.append([
-                    ref_name,
-                    f"{ratio:.4f}",
-                    det.get("matches", 0),
-                    det.get("matched_a", 0),
-                    det.get("matched_b", 0),
-                ])
-                if ratio > best["ratio"]:
-                    best = {"ref": ref_name, "ratio": ratio}
-
-            result["reference_compare"] = {"best_match": best, "total_refs": len(ref_db)}
-
-            if rows:
-                with open(csv_path, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        "reference_video",
-                        "match_ratio",
-                        "matched_pairs",
-                        "matched_input_frames",
-                        "matched_ref_frames",
-                    ])
-                    writer.writerows(rows)
-            else:
-                if csv_path.exists():
-                    csv_path.unlink()
-
-            match_ratio = float(best["ratio"])
-        else:
-            result["reference_compare"] = {"note": "No reference_dir provided; only audio check performed."}
+            frame_meta["count"] = len(exported)
+            frame_meta["files"] = exported
+        except Exception as exc:  # pragma: no cover - file specific failures
+            frame_meta["error"] = str(exc)
 
     result["risk"] = risk_level(audio_hit, match_ratio, high_th=high_th, med_th=med_th)
 
@@ -516,6 +741,7 @@ def run_precheck(
         "video_path": str(video_path),
         "reference_dir": str(ref_dir) if ref_dir else None,
         "report_dir": str(target_report_dir),
+        "frame_export_dir": str(export_target_dir) if export_target_dir else None,
     }
     return payload
 
@@ -541,6 +767,16 @@ def main():
         choices=["auto", "shazam", "acrcloud"],
         help="Audio recognition backend (default: auto)",
     )
+    ap.add_argument(
+        "--video-backend",
+        default="imagehash",
+        choices=["imagehash", "videohash", "pyvideohash"],
+        help="Video comparison backend (default: imagehash)",
+    )
+    ap.add_argument("--export-frames", action="store_true", help="Export frames for manual Google Lens/Yandex search")
+    ap.add_argument("--frame-export-dir", default=None, help="Directory to save exported frames (default: reports/<video>_frames)")
+    ap.add_argument("--frame-export-fps", type=float, default=0.2, help="Frame sampling fps for export (default: 0.2 => every 5s)")
+    ap.add_argument("--frame-export-max", type=int, default=40, help="Maximum frames to export (default: 40)")
     ap.add_argument("--report-dir", default="./reports", help="Where to save reports")
     args = ap.parse_args()
 
@@ -563,7 +799,12 @@ def main():
         high_th=args.high_th,
         med_th=args.med_th,
         audio_only=args.audio_only,
+        video_backend=args.video_backend,
         audio_provider=args.audio_provider,
+        export_frames=args.export_frames,
+        frame_export_dir=Path(args.frame_export_dir).expanduser().resolve() if args.frame_export_dir else None,
+        frame_export_fps=args.frame_export_fps,
+        frame_export_max=args.frame_export_max,
         report_dir=Path(args.report_dir),
         show_progress=True,
     )
@@ -576,6 +817,8 @@ def main():
 
     print("\n==== Pre-Check Summary ====")
     print(f"Video: {video_path.name}")
+    if not args.audio_only:
+        print(f"- Video backend: {args.video_backend}")
     audio_provider_used = result.get("audio", {}).get("provider")
     audio_title = result.get("audio", {}).get("title")
     if audio_hit:
@@ -586,14 +829,36 @@ def main():
         tried = result.get("audio", {}).get("provider_order")
         tried_str = f" via {', '.join(tried)}" if tried else ""
         print(f"- Audio match: None{tried_str}")
+    ref_compare = result.get("reference_compare", {})
     if not args.audio_only and ref_dir:
-        print(f"- Best video match: {result['reference_compare'].get('best_match')}")
-        print(f"- Match ratio: {match_ratio:.4f} (HIGH>={args.high_th}, MED>={args.med_th})")
-        if csv_path:
+        best = ref_compare.get("best_match")
+        note = ref_compare.get("note")
+        meaningful_best = bool(best and (best.get("ref") or best.get("ratio", 0.0) > 0))
+        if meaningful_best:
+            print(f"- Best video match: {best}")
+            print(f"- Match ratio: {match_ratio:.4f} (HIGH>={args.high_th}, MED>={args.med_th})")
+        elif note:
+            print(f"- Video note: {note}")
+        if csv_path and meaningful_best:
             print(f"- CSV: {csv_path}")
+        failures = ref_compare.get("failures")
+        if failures:
+            print(f"- Video failures: {len(failures)} reference videos errored")
+    elif not args.audio_only:
+        note = ref_compare.get("note")
+        if note:
+            print(f"- Video note: {note}")
     print(f"- Risk: {result['risk']}")
     if json_path:
         print(f"- JSON: {json_path}")
+    frame_meta = result.get("frame_export", {})
+    if frame_meta.get("enabled"):
+        if frame_meta.get("count"):
+            print(f"- Exported frames: {frame_meta['count']} saved to {frame_meta.get('directory')}")
+        elif frame_meta.get("error"):
+            print(f"- Export frames error: {frame_meta['error']}")
+        else:
+            print(f"- Export frames: requested but none saved")
     print("===========================\n")
 
 if __name__ == "__main__":

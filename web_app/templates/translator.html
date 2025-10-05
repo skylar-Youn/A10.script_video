@@ -634,6 +634,63 @@
             }
         }
 
+        async function uploadBgmFile(file, { mode = 'replace', buttonEl = null } = {}) {
+            if (!currentProject) {
+                throw new Error('프로젝트를 먼저 로드하세요.');
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('mode', mode);
+
+            let originalText = null;
+            if (buttonEl) {
+                originalText = buttonEl.textContent;
+                buttonEl.disabled = true;
+                buttonEl.textContent = '업로드 중...';
+            }
+
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/bgm/upload`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (!currentProject.extra) {
+                    currentProject.extra = {};
+                }
+                currentProject.extra.bgm_path = result.bgm_path;
+                currentProject.extra.bgm_volume_percent = result.bgm_volume_percent;
+                currentProject.extra.bgm_cache_token = result.bgm_cache_token;
+                if (result.bgm_source_path) {
+                    currentProject.extra.bgm_source_path = result.bgm_source_path;
+                }
+                currentProject.extra.bgm_custom_path = result.bgm_path;
+
+                setBgmTrack(result.bgm_path, {
+                    volumePercent: result.bgm_volume_percent,
+                    cacheToken: result.bgm_cache_token,
+                    force: true,
+                });
+
+                return result;
+            } catch (error) {
+                throw error;
+            } finally {
+                if (buttonEl) {
+                    buttonEl.disabled = false;
+                    buttonEl.textContent = originalText || '파일 찾기';
+                }
+            }
+        }
+
         if (bgmVolumeRangeInput) {
             updateBgmVolumeUI(false);
             bgmVolumeRangeInput.addEventListener('input', () => {
@@ -3402,22 +3459,20 @@
                 overlay.style.zIndex = '10000';
 
                 overlay.innerHTML = `
-                    <div style="
-                        background: #1a2332;
-                        border-radius: 12px;
-                        padding: 24px;
-                        width: min(640px, 92vw);
-                        max-height: 80vh;
-                        overflow-y: auto;
-                        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
-                    ">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
-                            <h3 style="margin: 0; color: #f0f4f8; font-size: 20px;">배경음악 선택</h3>
-                            <button type="button" class="btn-sm" id="bgm-dialog-close" style="background: #6c757d;">닫기</button>
+                    <div class="bgm-dialog">
+                        <div class="bgm-dialog-header">
+                            <h3>배경음악 선택</h3>
+                            <button type="button" class="btn-sm" id="bgm-dialog-close">닫기</button>
                         </div>
-                        <div id="bgm-candidate-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
-                        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
-                            <button type="button" class="btn-sm" id="bgm-dialog-cancel" style="background: #6c757d;">취소</button>
+                        <div class="bgm-dialog-toolbar">
+                            <label for="bgm-dialog-folder">폴더</label>
+                            <select id="bgm-dialog-folder" class="bgm-dialog-select"></select>
+                            <input type="search" id="bgm-dialog-search" class="bgm-dialog-search" placeholder="파일명 또는 경로 검색...">
+                            <button type="button" class="btn-sm" id="bgm-dialog-browse">파일 찾기</button>
+                        </div>
+                        <div id="bgm-candidate-list" class="bgm-candidate-list"></div>
+                        <div class="bgm-dialog-footer">
+                            <button type="button" class="btn-sm" id="bgm-dialog-cancel">취소</button>
                             <button type="button" class="btn-primary btn-sm" id="bgm-dialog-confirm">확인</button>
                         </div>
                     </div>
@@ -3426,6 +3481,62 @@
                 document.body.appendChild(overlay);
 
                 const listElem = overlay.querySelector('#bgm-candidate-list');
+                const folderSelect = overlay.querySelector('#bgm-dialog-folder');
+                const searchInput = overlay.querySelector('#bgm-dialog-search');
+
+                const normalizePath = (path) => {
+                    if (!path) {
+                        return '';
+                    }
+                    return String(path).replace(/\\/g, '/');
+                };
+
+                const normalizeForMatch = (value) => {
+                    if (!value && value !== 0) {
+                        return '';
+                    }
+                    try {
+                        return decodeURIComponent(String(value))
+                            .toLowerCase()
+                            .replace(/\\/g, '/');
+                    } catch (error) {
+                        return String(value).toLowerCase().replace(/\\/g, '/');
+                    }
+                };
+
+                const extractDirectory = (candidate) => {
+                    if (!candidate || !candidate.path) {
+                        return '';
+                    }
+                    const normalized = normalizePath(candidate.path);
+                    const lastSlash = normalized.lastIndexOf('/');
+                    if (lastSlash <= 0) {
+                        return '';
+                    }
+                    return normalized.slice(0, lastSlash);
+                };
+
+                const updateFolderOptions = (currentValue = '') => {
+                    if (!folderSelect) {
+                        return;
+                    }
+                    const dirs = Array.from(
+                        new Set(
+                            candidates
+                                .map(extractDirectory)
+                                .filter(Boolean)
+                        )
+                    ).sort((a, b) => a.localeCompare(b));
+                    folderSelect.innerHTML = [
+                        '<option value="">전체 폴더</option>',
+                        ...dirs.map((dir) => `<option value="${dir}">${dir}</option>`)
+                    ].join('');
+                    if (currentValue && dirs.includes(currentValue)) {
+                        folderSelect.value = currentValue;
+                    }
+                };
+
+                updateFolderOptions();
 
                 const stopPreview = () => {
                     if (currentAudio) {
@@ -3448,18 +3559,65 @@
                     setTimeout(stopPreview, 15000);
                 };
 
+                let folderFilter = folderSelect ? folderSelect.value || '' : '';
+                let filterText = '';
+                let selectedIndex = defaultIndex;
+
                 const renderList = () => {
                     if (!listElem) {
                         return;
                     }
-                    listElem.innerHTML = candidates.map((candidate, index) => {
+
+                    const normalizedFilter = normalizeForMatch(filterText.trim());
+
+                    const filtered = candidates
+                        .map((candidate, index) => ({
+                            candidate,
+                            index,
+                            directory: extractDirectory(candidate),
+                        }))
+                        .filter(({ candidate, directory }) => {
+                            if (folderFilter && directory !== folderFilter) {
+                                return false;
+                            }
+                            if (!normalizedFilter) {
+                                return true;
+                            }
+                            const haystack = [
+                                candidate.label,
+                                candidate.filename,
+                                directory,
+                                candidate.path,
+                            ]
+                                .filter(Boolean)
+                                .map(normalizeForMatch)
+                                .join(' ');
+                            return haystack.includes(normalizedFilter);
+                        });
+
+                    if (filtered.length === 0) {
+                        listElem.innerHTML = '<div class="bgm-candidate-empty">검색 결과가 없습니다.</div>';
+                        return;
+                    }
+
+                    if (!filtered.some((item) => item.index === selectedIndex)) {
+                        selectedIndex = filtered[0].index;
+                    }
+
+                    listElem.innerHTML = filtered.map(({ candidate, index, directory }) => {
                         const modifiedLabel = candidate.modified_at
                             ? new Date(candidate.modified_at * 1000).toLocaleString('ko-KR')
                             : '알 수 없음';
-                        const isDefault = index === defaultIndex;
+                        const isSelected = index === selectedIndex;
                         const badge = candidate.kind && String(candidate.kind).includes('custom_v2')
                             ? '<span style="margin-left: 6px; color: #4bd4ff; font-size: 12px;">V2</span>'
                             : '';
+                        const directoryHtml = directory
+                            ? `<div class="bgm-dialog-path">폴더: ${escapeHtml(directory)}</div>`
+                            : '<div class="bgm-dialog-path">폴더: -</div>';
+                        const wrapperStyle = isSelected
+                            ? 'border: 2px solid #4bd4ff; background: rgba(75, 212, 255, 0.08);'
+                            : 'border: 2px solid rgba(255, 255, 255, 0.1); background: rgba(13, 21, 32, 0.9);';
                         return `
                             <label style="
                                 display: flex;
@@ -3467,21 +3625,21 @@
                                 gap: 6px;
                                 padding: 12px;
                                 border-radius: 10px;
-                                border: 2px solid ${isDefault ? '#4bd4ff' : 'rgba(255, 255, 255, 0.1)'};
-                                background: ${isDefault ? 'rgba(75, 212, 255, 0.08)' : 'rgba(13, 21, 32, 0.9)'};
+                                ${wrapperStyle}
                                 transition: border-color 0.2s ease;
                                 cursor: pointer;
                             " data-bgm-index="${index}">
                                 <div style="display: flex; align-items: center; gap: 10px;">
-                                    <input type="radio" name="bgm-candidate" value="${index}" ${isDefault ? 'checked' : ''}>
+                                    <input type="radio" name="bgm-candidate" value="${index}" ${isSelected ? 'checked' : ''}>
                                     <div style="flex: 1; min-width: 0;">
                                         <div style="color: #f0f4f8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                                            <span>${candidate.label || candidate.filename}</span>
+                                            <span>${escapeHtml(candidate.label || candidate.filename || '무제')}</span>
                                             ${badge}
                                         </div>
                                         <div style="color: #9ca3af; font-size: 12px;">
-                                            ${candidate.filename || ''}
+                                            ${escapeHtml(candidate.filename || '')}
                                         </div>
+                                        ${directoryHtml}
                                         <div style="color: #6b778d; font-size: 12px;">
                                             수정 시각: ${modifiedLabel}
                                         </div>
@@ -3494,6 +3652,65 @@
                 };
 
                 renderList();
+
+                if (searchInput) {
+                    searchInput.addEventListener('input', () => {
+                        filterText = searchInput.value || '';
+                        renderList();
+                    });
+                }
+
+                if (folderSelect) {
+                    folderSelect.addEventListener('change', () => {
+                        folderFilter = folderSelect.value || '';
+                        renderList();
+                    });
+                }
+
+                const browseButton = overlay.querySelector('#bgm-dialog-browse');
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = 'audio/*';
+                fileInput.style.display = 'none';
+                overlay.appendChild(fileInput);
+
+                if (browseButton) {
+                    browseButton.dataset.originalText = browseButton.textContent;
+                    browseButton.addEventListener('click', () => {
+                        fileInput.click();
+                    });
+                }
+
+                fileInput.addEventListener('change', async (event) => {
+                    const file = event.target?.files?.[0];
+                    if (!file) {
+                        return;
+                    }
+                    try {
+                        const uploadResult = await uploadBgmFile(file, { buttonEl: browseButton });
+                        const refreshedResponse = await fetch(`/api/translator/projects/${currentProject.id}/bgm/candidates`);
+                        if (refreshedResponse.ok) {
+                            const payload = await refreshedResponse.json();
+                            if (Array.isArray(payload.candidates)) {
+                                candidates.splice(0, candidates.length, ...payload.candidates);
+                                const previousFolder = folderFilter;
+                                updateFolderOptions(previousFolder);
+                                folderFilter = folderSelect ? folderSelect.value || '' : '';
+                                selectedIndex = candidates.findIndex((item) => item && item.path === uploadResult.bgm_path);
+                                if (selectedIndex < 0) {
+                                    selectedIndex = defaultIndex;
+                                }
+                                renderList();
+                            }
+                        }
+                        alert('선택한 배경음악 파일을 추가했습니다.');
+                    } catch (error) {
+                        console.error('Failed to upload BGM file:', error);
+                        alert(error?.message || '배경음악 파일 추가에 실패했습니다.');
+                    } finally {
+                        event.target.value = '';
+                    }
+                });
 
                 const cleanup = () => {
                     stopPreview();
@@ -3530,6 +3747,17 @@
                         cleanup();
                         resolve(null);
                         return;
+                    }
+                });
+
+                overlay.addEventListener('change', (event) => {
+                    const target = event.target;
+                    if (!(target instanceof HTMLInputElement)) {
+                        return;
+                    }
+                    if (target.name === 'bgm-candidate') {
+                        selectedIndex = Number(target.value);
+                        renderList();
                     }
                 });
 
