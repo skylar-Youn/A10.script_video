@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 TRANSLATOR_DIR = SHORTS_OUTPUT_DIR / "translator_projects"
 UPLOADS_DIR = SHORTS_OUTPUT_DIR / "uploads"
 DEFAULT_SEGMENT_MAX = 45.0
+MERGE_TIME_TOLERANCE = 0.1  # seconds
 
 # 음성 생성 진행률 추적을 위한 전역 딕셔너리
 _audio_generation_progress = {}
@@ -370,34 +371,85 @@ def parse_subtitle_text_and_add_to_project(
     if not new_segments:
         raise ValueError("No valid segments found in subtitle text (after speaker filtering)")
 
-    # Update target field for new segments
+    def _find_matching_segment(candidate: TranslatorSegment) -> Optional[TranslatorSegment]:
+        """Find an existing segment with nearly identical timing."""
+        best_match: Optional[TranslatorSegment] = None
+        best_score = float("inf")
+        for existing in project.segments:
+            start_diff = abs(existing.start - candidate.start)
+            end_diff = abs(existing.end - candidate.end)
+            if start_diff <= MERGE_TIME_TOLERANCE and end_diff <= MERGE_TIME_TOLERANCE:
+                score = start_diff + end_diff
+                if score < best_score:
+                    best_score = score
+                    best_match = existing
+        return best_match
+
+    added_segments: List[TranslatorSegment] = []
+    replaced_count = 0
+    removed_ids: set[str] = set()
+
     for seg in new_segments:
-        # 타겟 필드에 따라 자막 위치 설정
+        match = _find_matching_segment(seg)
+        if match:
+            # Update existing segment in place
+            if target_field == "commentary_korean":
+                match.commentary_korean = seg.source_text
+            else:
+                match.source_text = seg.source_text
+
+            # Keep speaker information in sync when provided
+            if seg.speaker_name:
+                match.speaker_name = seg.speaker_name
+
+            # Sync timing if there is a noticeable drift
+            if abs(match.start - seg.start) > MERGE_TIME_TOLERANCE / 2:
+                match.start = seg.start
+            if abs(match.end - seg.end) > MERGE_TIME_TOLERANCE / 2:
+                match.end = seg.end
+
+            # Mark other overlapping duplicates for removal (legacy duplicates 방지)
+            for existing in project.segments:
+                if existing.id == match.id:
+                    continue
+                if (
+                    abs(existing.start - seg.start) <= MERGE_TIME_TOLERANCE
+                    and abs(existing.end - seg.end) <= MERGE_TIME_TOLERANCE
+                ):
+                    removed_ids.add(existing.id)
+
+            replaced_count += 1
+            continue
+
+        # No existing segment matched – treat as a new segment
         if target_field == "commentary_korean":
-            # 재해석자막(한국어)에 추가
             seg.commentary_korean = seg.source_text
-            seg.source_text = ""  # source_text는 비워둠
-        # source_text는 기본값이므로 별도 처리 불필요
+            seg.source_text = ""
+        added_segments.append(seg)
 
-    # Add new segments to project
-    project.segments.extend(new_segments)
+    if added_segments:
+        project.segments.extend(added_segments)
 
-    # Sort all segments by start time
-    project.segments.sort(key=lambda seg: seg.start)
+    if removed_ids:
+        project.segments = [seg for seg in project.segments if seg.id not in removed_ids]
 
-    # Re-assign clip_index based on sorted order
-    for i, seg in enumerate(project.segments):
-        seg.clip_index = i
+    # Sort all segments by start time and reindex
+    if added_segments or replaced_count or removed_ids:
+        project.segments.sort(key=lambda seg: seg.start)
+        for i, seg in enumerate(project.segments):
+            seg.clip_index = i
 
-    added_count = len(new_segments)
+    added_count = len(added_segments)
     speaker_info = f" (speakers: {', '.join(selected_speakers)})" if selected_speakers else ""
 
     # 즉시 저장하여 UI 새로고침 이전에도 데이터가 유지되도록 함
     saved_project = save_project(project)
 
     logger.info(
-        "Saved %s segments to project %s in field '%s'%s",
+        "Saved %s new segments, replaced %s segments, removed %s duplicates for project %s in field '%s'%s",
         added_count,
+        replaced_count,
+        len(removed_ids),
         project_id,
         target_field,
         speaker_info,
@@ -405,7 +457,9 @@ def parse_subtitle_text_and_add_to_project(
 
     return {
         "project": saved_project,
-        "added_count": added_count
+        "added_count": added_count,
+        "replaced_count": replaced_count,
+        "removed_count": len(removed_ids),
     }
 
 
@@ -2302,10 +2356,14 @@ def generate_selected_audio_with_silence(
                     selected_seg = selected_seg_dict[segment.id]
                     segment.audio_generated_duration = selected_seg.audio_generated_duration
                     segment.audio_duration = selected_seg.audio_duration
+                    generated_duration = segment.audio_generated_duration
+                    rendered_duration = segment.audio_duration
                     logger.debug(
-                        f"Updated segment {segment.id}: audio_path={output_path_str}, "
-                        f"generated_duration={segment.audio_generated_duration:.2f}s, "
-                        f"audio_duration={segment.audio_duration:.2f}s"
+                        "Updated segment %s: audio_path=%s, generated_duration=%s, audio_duration=%s",
+                        segment.id,
+                        output_path_str,
+                        f"{generated_duration:.2f}s" if isinstance(generated_duration, (int, float)) else "N/A",
+                        f"{rendered_duration:.2f}s" if isinstance(rendered_duration, (int, float)) else "N/A",
                     )
 
                 updated_count += 1

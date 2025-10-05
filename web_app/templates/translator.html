@@ -453,12 +453,39 @@
             timelineActiveWaveformKey = null;
         }
 
+        function isAbortError(error) {
+            if (!error) {
+                return false;
+            }
+            if (error.name === 'AbortError') {
+                return true;
+            }
+            if (typeof error.message === 'string' && error.message.includes('aborted')) {
+                return true;
+            }
+            return false;
+        }
+
+        function logWaveformError(context, error, url) {
+            if (isAbortError(error)) {
+                console.debug(`${context} waveform load aborted (likely stale request).`, { url, error });
+                return;
+            }
+            console.error(`${context} waveform load error:`, error, 'URL:', url);
+        }
+
+        function getAllTimelineWaveforms() {
+            const waveforms = [];
+            if (originalTimelineWaveform) waveforms.push(originalTimelineWaveform);
+            if (translatedTimelineWaveform) waveforms.push(translatedTimelineWaveform);
+            if (window.bgmTimelineWaveform) waveforms.push(window.bgmTimelineWaveform);
+            if (window.dialogueTimelineWaveform) waveforms.push(window.dialogueTimelineWaveform);
+            if (window.dialogueMutedTimelineWaveform) waveforms.push(window.dialogueMutedTimelineWaveform);
+            return waveforms;
+        }
+
         function stopComparisonTimeline({ clearHighlight = false } = {}) {
-            ['original', 'translated'].forEach((key) => {
-                const waveform = key === 'original' ? originalTimelineWaveform : translatedTimelineWaveform;
-                if (!waveform) {
-                    return;
-                }
+            getAllTimelineWaveforms().forEach((waveform) => {
                 try {
                     if (typeof waveform.stop === 'function') {
                         waveform.stop();
@@ -487,7 +514,8 @@
                 timelineActiveWaveformKey = null;
             }
             clearSegmentHighlight();
-            if (!originalTimelineWaveform?.isPlaying?.() && !translatedTimelineWaveform?.isPlaying?.()) {
+            const anyPlaying = getAllTimelineWaveforms().some(wf => wf?.isPlaying?.());
+            if (!anyPlaying) {
                 if (timelinePauseBtn) {
                     timelinePauseBtn.disabled = true;
                 }
@@ -651,6 +679,7 @@
                     { id: 'track-checkbox-original', waveform: originalTimelineWaveform, url: originalTimelineUrl },
                     { id: 'track-checkbox-bgm', waveform: window.bgmTimelineWaveform, url: window.bgmTimelineUrl },
                     { id: 'track-checkbox-dialogue', waveform: window.dialogueTimelineWaveform, url: window.dialogueTimelineUrl },
+                    { id: 'track-checkbox-dialogue-muted', waveform: window.dialogueMutedTimelineWaveform, url: window.dialogueMutedTimelineUrl },
                     { id: 'track-checkbox-translated', waveform: translatedTimelineWaveform, url: translatedTimelineUrl }
                 ];
 
@@ -751,13 +780,8 @@
         }
 
         function pauseTimelinePlayback() {
-            if (timelineActiveWaveformKey === 'both') {
-                if (originalTimelineWaveform) {
-                    originalTimelineWaveform.pause();
-                }
-                if (translatedTimelineWaveform) {
-                    translatedTimelineWaveform.pause();
-                }
+            if (['both', 'checked'].includes(timelineActiveWaveformKey)) {
+                getAllTimelineWaveforms().forEach(waveform => waveform?.pause?.());
             } else if (timelineActiveWaveformKey === 'original' && originalTimelineWaveform) {
                 originalTimelineWaveform.pause();
             } else if (timelineActiveWaveformKey === 'translated' && translatedTimelineWaveform) {
@@ -976,7 +1000,7 @@
                 translatedTimelineWaveform.on('seek', () => handleTimelineTimeUpdate('translated', translatedTimelineWaveform.getCurrentTime()));
                 translatedTimelineWaveform.on('finish', () => handleTimelineFinish('translated'));
                 translatedTimelineWaveform.on('error', (err) => {
-                    console.error('Translated waveform load error:', err, 'URL:', translatedUrl);
+                    logWaveformError('Translated', err, translatedUrl);
                 });
                 console.log('Loading translated timeline:', translatedUrl);
                 translatedTimelineWaveform.load(translatedUrl);
@@ -1026,18 +1050,35 @@
 
             applySegmentHighlight(segmentId, { scroll: true });
 
+            const isTrimmedClip = /\/audio\/segment_/i.test(resolvedPath);
+            const segmentDuration = (segment.end || 0) - (segment.start || 0);
+            let playbackStartTime = segment.start || 0;
+            let playbackStopTime = segment.end || 0;
+
             // 세그먼트 시작 시간으로 이동하고, 끝 시간에서 멈추기
             audio.addEventListener('loadedmetadata', () => {
-                audio.currentTime = segment.start || 0;
-                console.log(`Starting playback at ${segment.start}s, will stop at ${segment.end}s`);
+                if (isTrimmedClip) {
+                    playbackStartTime = 0;
+                    playbackStopTime = isFinite(audio.duration) && !isNaN(audio.duration)
+                        ? audio.duration
+                        : Math.max(segment.audio_duration || segment.audio_generated_duration || segmentDuration, segmentDuration);
+                } else {
+                    playbackStartTime = segment.start || 0;
+                    const fallback = isFinite(audio.duration) && !isNaN(audio.duration) ? audio.duration : segment.end || playbackStartTime;
+                    playbackStopTime = Math.min(segment.end || fallback, fallback);
+                }
+
+                audio.currentTime = playbackStartTime;
+                console.log(`Starting playback at ${playbackStartTime}s, will stop at ${playbackStopTime}s (trimmed: ${isTrimmedClip})`);
             });
 
             // 재생 중 시간 업데이트 - 타임라인 바 업데이트
             audio.addEventListener('timeupdate', () => {
                 // 세그먼트 끝에 도달하면 멈추기
-                if (audio.currentTime >= segment.end) {
+                const stopThreshold = Math.max(playbackStopTime - 0.05, playbackStartTime);
+                if (audio.currentTime >= stopThreshold) {
                     audio.pause();
-                    audio.currentTime = segment.start || 0;
+                    audio.currentTime = playbackStartTime;
                     if (highlightedSegmentId === segmentId) {
                         clearSegmentHighlight();
                     }
@@ -1048,7 +1089,7 @@
                 }
 
                 // 타임라인 WaveSurfer가 있으면 위치 업데이트 (시각적 피드백)
-                if (translatedTimelineWaveform && translatedTimelineWaveform.getDuration() > 0) {
+                if (!isTrimmedClip && translatedTimelineWaveform && translatedTimelineWaveform.getDuration() > 0) {
                     const progress = audio.currentTime / translatedTimelineWaveform.getDuration();
                     translatedTimelineWaveform.seekTo(progress);
                 }
@@ -1712,7 +1753,18 @@
                         const result = await response.json();
                         const targetName = targetField === 'source_text' ? '현재 자막(한국어)' : '재해석자막 (한국어)';
                         const speakerInfo = selectedSpeakers && selectedSpeakers.length > 0 ? ` (화자: ${selectedSpeakers.join(', ')})` : '';
-                        alert(`${targetName}에 자막이 성공적으로 추가되었습니다!${speakerInfo}\n${result.added_count || 0}개의 자막 구간이 추가되었습니다.`);
+                        const addedCount = result.added_count || 0;
+                        const replacedCount = result.replaced_count || 0;
+                        const removedCount = result.removed_count || 0;
+                        const lines = [`${targetName}에 자막이 성공적으로 반영되었습니다!${speakerInfo}`];
+                        lines.push(`${addedCount}개의 자막 구간이 새로 추가되었습니다.`);
+                        if (replacedCount > 0) {
+                            lines.push(`${replacedCount}개의 기존 자막이 동일한 시간에 덮어쓰기되었습니다.`);
+                        }
+                        if (removedCount > 0) {
+                            lines.push(`${removedCount}개의 중복 자막이 정리되었습니다.`);
+                        }
+                        alert(lines.join('\n'));
 
                         // 모달 닫고 프로젝트 새로고침
                         closeSourceSelectorModal();
@@ -2048,7 +2100,8 @@
                             <span class="track-label">🎬 원본 음성</span>
                             <span class="track-duration" id="timeline-original-duration"></span>
                             <button type="button" class="btn-xs" id="btn-separate-vocal" title="vocal과 배경음악 분리">🎵 분리</button>
-                            <button type="button" class="btn-xs" id="btn-extract-dialogue" title="번역 구간 제거하여 대사만 추출">🗣️ 대사추출</button>
+                            <button type="button" class="btn-xs" id="btn-extract-dialogue" title="보컬 트랙으로 대사만 추출">🗣️ 대사추출</button>
+                            <button type="button" class="btn-xs" id="btn-extract-dialogue-muted" title="번역/해설 음성이 있는 구간을 무음으로 제거">🗣️ 번역 제외</button>
                         </div>
                         <div id="timeline-original-waveform" class="waveform"></div>
                     </div>
@@ -2067,10 +2120,20 @@
                     <div class="timeline-track" id="timeline-track-dialogue" style="display: none;">
                         <div class="timeline-track-header">
                             <input type="checkbox" id="track-checkbox-dialogue" class="track-checkbox" />
-                            <span class="track-label">🗣️ 원본 대사</span>
+                            <span class="track-label">🗣️ 원본 대사 (보컬)</span>
                             <span class="track-duration" id="timeline-dialogue-duration"></span>
                         </div>
                         <div id="timeline-dialogue-waveform" class="waveform"></div>
+                    </div>
+
+                    <!-- 번역 제외 대사 트랙 -->
+                    <div class="timeline-track" id="timeline-track-dialogue-muted" style="display: none;">
+                        <div class="timeline-track-header">
+                            <input type="checkbox" id="track-checkbox-dialogue-muted" class="track-checkbox" />
+                            <span class="track-label">🗣️ 원본 대사 (번역 제외)</span>
+                            <span class="track-duration" id="timeline-dialogue-muted-duration"></span>
+                        </div>
+                        <div id="timeline-dialogue-muted-waveform" class="waveform"></div>
                     </div>
 
                     <!-- 번역 음성 트랙 -->
@@ -2232,13 +2295,16 @@
             updateSelectionUI();
         }
 
-        function selectSegmentsBySpeakers(speakers) {
+        function selectSegmentsBySpeakers(speakers, { replace = true } = {}) {
             if (!currentProject) {
                 return;
             }
             const normalized = speakers.map(s => s.trim()).filter(Boolean);
             if (!normalized.length) {
                 return;
+            }
+            if (replace) {
+                selectedSegmentIds.clear();
             }
             currentProject.segments.forEach(seg => {
                 if (seg.speaker_name && normalized.includes(seg.speaker_name)) {
@@ -2454,16 +2520,17 @@
 
                     updateProgressUI(progress);
 
-                    if (progress.status === 'completed') {
-                        hideProgressBar();
-                        resolve(progress);
-                    } else if (progress.status === 'error') {
-                        hideProgressBar();
-                        reject(new Error(progress.message));
-                    }
-                }, 500); // 0.5초마다 폴링
-            });
-        }
+                if (progress.status === 'completed') {
+                    hideProgressBar();
+                    resolve(progress);
+                } else if (progress.status === 'error') {
+                    hideProgressBar();
+                    const errorMessage = progress.message || '알 수 없는 오류가 발생했습니다.';
+                    reject(new Error(errorMessage));
+                }
+            }, 500); // 0.5초마다 폴링
+        });
+    }
 
         async function generateSelectedAudio() {
             if (!currentProject) {
@@ -2477,6 +2544,16 @@
 
             if (!segmentIds.length) {
                 alert('선택된 세그먼트가 없습니다. 세그먼트를 선택해주세요.');
+                return;
+            }
+
+            const segmentsToGenerate = currentProject.segments.filter(seg =>
+                segmentIds.includes(seg.id) && typeof seg.translated_text === 'string' && seg.translated_text.trim().length > 0
+            );
+
+            const skippedCount = segmentIds.length - segmentsToGenerate.length;
+            if (segmentsToGenerate.length === 0) {
+                alert('선택된 세그먼트에 번역된 자막이 없습니다. 먼저 "선택 자막 번역"을 실행해주세요.');
                 return;
             }
 
@@ -2495,7 +2572,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        segment_ids: segmentIds,
+                        segment_ids: segmentsToGenerate.map(seg => seg.id),
                         voice: voice,
                         audio_format: audioFormat,
                         task_id: taskId
@@ -2518,6 +2595,13 @@
                 const projectResponse = await fetch(`/api/translator/projects/${currentProject.id}`);
                 if (projectResponse.ok) {
                     const updatedProject = await projectResponse.json();
+                    if (skippedCount > 0) {
+                        // 번역 없음으로 건너뛴 세그먼트를 선택 집합에서 제거
+                        const validIds = new Set(segmentsToGenerate.map(seg => seg.id));
+                        selectedSegmentIds.clear();
+                        segmentsToGenerate.forEach(seg => selectedSegmentIds.add(seg.id));
+                        updateSelectionUI();
+                    }
                     currentProject = updatedProject;
                     renderProject(updatedProject);
                 }
@@ -2528,7 +2612,11 @@
                     await loadTrackToTimeline(result.audio_path);
                 }
 
-                alert(`선택된 자막 음성 생성 완료!\n파일 경로: ${result.audio_path}\n\n타임라인에 자동으로 로드되었습니다.`);
+                let summaryMessage = `선택된 자막 음성 생성 완료!\n파일 경로: ${result.audio_path}\n\n타임라인에 자동으로 로드되었습니다.`;
+                if (skippedCount > 0) {
+                    summaryMessage += `\n\n참고: 선택된 ${segmentIds.length}개 중 번역이 없는 ${skippedCount}개 세그먼트는 건너뛰었습니다.`;
+                }
+                alert(summaryMessage);
             } catch (err) {
                 hideProgressBar();
                 console.error('Failed to generate selected audio:', err);
@@ -5085,6 +5173,107 @@
                 });
             }
 
+            const btnExtractDialogueMuted = document.getElementById('btn-extract-dialogue-muted');
+            if (btnExtractDialogueMuted) {
+                btnExtractDialogueMuted.addEventListener('click', async () => {
+                    if (!currentProject) {
+                        alert('프로젝트를 먼저 로드하세요.');
+                        return;
+                    }
+
+                    btnExtractDialogueMuted.disabled = true;
+
+                    let progress = 0;
+                    const progressInterval = setInterval(() => {
+                        progress = Math.min(progress + Math.random() * 15, 95);
+                        btnExtractDialogueMuted.textContent = `🔄 번역 제외... ${Math.floor(progress)}%`;
+                    }, 500);
+
+                    try {
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/extract-dialogue-muted`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+
+                        clearInterval(progressInterval);
+
+                        if (!response.ok) {
+                            const error = await response.json();
+                            throw new Error(error.detail || '추출 실패');
+                        }
+
+                        const result = await response.json();
+                        console.log('Dialogue-muted extraction result:', result);
+
+                        const dialogueTrack = document.getElementById('timeline-track-dialogue-muted');
+                        if (dialogueTrack && result.dialogue_path) {
+                            dialogueTrack.style.display = 'block';
+
+                            const waveformContainer = document.getElementById('timeline-dialogue-muted-waveform');
+                            if (waveformContainer && typeof WaveSurfer !== 'undefined') {
+                                waveformContainer.innerHTML = '';
+                                const waveform = WaveSurfer.create({
+                                    container: '#timeline-dialogue-muted-waveform',
+                                    height: 90,
+                                    waveColor: '#fda4af',
+                                    progressColor: '#fb7185',
+                                    cursorColor: '#ffd166',
+                                    normalize: true,
+                                    responsive: true
+                                });
+                                const dialogueUrlRaw = toWebAudioPath(result.dialogue_path);
+                                const dialogueUrl = `${dialogueUrlRaw}?t=${Date.now()}`;
+                                console.log('Loading dialogue-muted track:', dialogueUrl);
+                                waveform.on('error', (err) => {
+                                    console.error('Dialogue-muted waveform load error:', err);
+                                });
+                                waveform.load(dialogueUrl);
+                                waveform.on('ready', () => {
+                                    const duration = waveform.getDuration();
+                                    const durationElem = document.getElementById('timeline-dialogue-muted-duration');
+                                    if (durationElem) {
+                                        durationElem.textContent = formatDuration(duration);
+                                    }
+                                });
+                                waveform.on('audioprocess', (time) => handleTimelineTimeUpdate('dialogue-muted', time));
+                                waveform.on('finish', () => handleTimelineFinish('dialogue-muted'));
+
+                                window.dialogueMutedTimelineWaveform = waveform;
+                                window.dialogueMutedTimelineUrl = dialogueUrlRaw;
+                            }
+                        }
+
+                        if (!currentProject.extra) {
+                            currentProject.extra = {};
+                        }
+                        currentProject.extra.dialogue_muted_path = result.dialogue_path;
+                        try {
+                            await fetch(`/api/translator/projects/${currentProject.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ extra: currentProject.extra })
+                            });
+                        } catch (patchError) {
+                            console.warn('Failed to persist dialogue-muted path:', patchError);
+                        }
+
+                        btnExtractDialogueMuted.textContent = '🗣️ 번역 제외 완료';
+                        setTimeout(() => {
+                            alert(result.message || '번역 음성을 제외한 대사 추출이 완료되었습니다.');
+                        }, 300);
+                    } catch (error) {
+                        clearInterval(progressInterval);
+                        console.error('Dialogue-muted extraction error:', error);
+                        alert(`추출 실패: ${error.message}`);
+                    } finally {
+                        btnExtractDialogueMuted.disabled = false;
+                        setTimeout(() => {
+                            btnExtractDialogueMuted.textContent = '🗣️ 번역 제외';
+                        }, 1000);
+                    }
+                });
+            }
+
             // 체크한 트랙 합치기
             const btnMergeChecked = document.getElementById('timeline-merge-checked-btn');
             if (btnMergeChecked) {
@@ -5167,7 +5356,8 @@
                     // 현재 트랙 상태 수집
                     const trackState = {
                         bgm_path: window.bgmTimelineUrl ? window.bgmTimelineUrl.replace('/web-audio/', '') : null,
-                        dialogue_path: window.dialogueTimelineUrl ? window.dialogueTimelineUrl.replace('/web-audio/', '') : null
+                        dialogue_path: window.dialogueTimelineUrl ? window.dialogueTimelineUrl.replace('/web-audio/', '') : null,
+                        dialogue_muted_path: window.dialogueMutedTimelineUrl ? window.dialogueMutedTimelineUrl.replace('/web-audio/', '') : null
                     };
 
                     try {
@@ -5280,6 +5470,46 @@
                                     });
                                     window.dialogueTimelineWaveform = dialogueWaveform;
                                     window.dialogueTimelineUrl = dialogueUrl;
+                                }
+                            }
+                        }
+
+                        // 번역 제외 대사 트랙 복원
+                        if (result.dialogue_muted_path) {
+                            const dialogueMutedTrack = document.getElementById('timeline-track-dialogue-muted');
+                            if (dialogueMutedTrack) {
+                                dialogueMutedTrack.style.display = 'block';
+
+                                const dialogueMutedWaveformContainer = document.getElementById('timeline-dialogue-muted-waveform');
+                                if (dialogueMutedWaveformContainer && typeof WaveSurfer !== 'undefined') {
+                                    dialogueMutedWaveformContainer.innerHTML = '';
+                                    const dialogueMutedWaveform = WaveSurfer.create({
+                                        container: '#timeline-dialogue-muted-waveform',
+                                        height: 90,
+                                        waveColor: '#fda4af',
+                                        progressColor: '#fb7185',
+                                        cursorColor: '#ffd166',
+                                        normalize: true,
+                                        responsive: true
+                                    });
+                                    const dialogueMutedUrlRaw = toWebAudioPath(result.dialogue_muted_path);
+                                    const dialogueMutedUrl = `${dialogueMutedUrlRaw}?t=${Date.now()}`;
+                                    console.log('Loading saved dialogue-muted track:', dialogueMutedUrl);
+                                    dialogueMutedWaveform.on('error', (err) => {
+                                        console.error('Saved dialogue-muted waveform load error:', err);
+                                    });
+                                    dialogueMutedWaveform.load(dialogueMutedUrl);
+                                    dialogueMutedWaveform.on('ready', () => {
+                                        const duration = dialogueMutedWaveform.getDuration();
+                                        const durationElem = document.getElementById('timeline-dialogue-muted-duration');
+                                        if (durationElem) {
+                                            durationElem.textContent = formatDuration(duration);
+                                        }
+                                    });
+                                    dialogueMutedWaveform.on('audioprocess', (time) => handleTimelineTimeUpdate('dialogue-muted', time));
+                                    dialogueMutedWaveform.on('finish', () => handleTimelineFinish('dialogue-muted'));
+                                    window.dialogueMutedTimelineWaveform = dialogueMutedWaveform;
+                                    window.dialogueMutedTimelineUrl = dialogueMutedUrlRaw;
                                 }
                             }
                         }

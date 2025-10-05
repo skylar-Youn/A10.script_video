@@ -29,6 +29,54 @@ from ai_shorts_maker.translator import (
 router = APIRouter(prefix="/api/translator", tags=["translator"])
 
 
+def _prepare_dialogue_audio(project_id: str, project: TranslatorProject) -> "tuple[AudioSegment, Path]":
+    """Load an audio segment for dialogue extraction (prefer separated vocals)."""
+    from pathlib import Path
+    from pydub import AudioSegment
+    import subprocess
+
+    project_dir = TRANSLATOR_DIR / project_id
+
+    separated_dir = project_dir / "separated"
+    vocals_path = separated_dir / "vocals.wav"
+
+    if vocals_path.exists():
+        return AudioSegment.from_file(str(vocals_path)), project_dir
+
+    if not project.source_video:
+        raise ValueError("원본 비디오 파일이 없습니다.")
+
+    video_path = Path(project.source_video)
+    if not video_path.exists():
+        raise FileNotFoundError(f"비디오 파일을 찾을 수 없습니다: {video_path}")
+
+    temp_dir = project_dir / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    original_audio = temp_dir / "original.wav"
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(video_path),
+        "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+        str(original_audio)
+    ], check=True, capture_output=True)
+
+    audio = AudioSegment.from_file(str(original_audio))
+
+    try:
+        original_audio.unlink(missing_ok=True)  # type: ignore[arg-type]
+    except TypeError:
+        if original_audio.exists():
+            original_audio.unlink()
+
+    try:
+        if temp_dir.exists() and not any(temp_dir.iterdir()):
+            temp_dir.rmdir()
+    except OSError:
+        pass
+
+    return audio, project_dir
+
+
 def _convert_single_path(value: Optional[str], output_dir: Path, logger) -> Optional[str]:
     if value is None:
         return None
@@ -567,55 +615,19 @@ async def api_extract_dialogue(project_id: str):
         if not project:
             return None
         
-        if not project.source_video:
-            raise ValueError("원본 비디오 파일이 없습니다.")
-        
-        from pathlib import Path
-        from pydub import AudioSegment
-        import subprocess
-        
-        video_path = Path(project.source_video)
-        if not video_path.exists():
-            raise FileNotFoundError(f"비디오 파일을 찾을 수 없습니다: {video_path}")
-        
-        # 원본 음성 추출
-        project_dir = TRANSLATOR_DIR / project_id
-        temp_dir = project_dir / "temp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        
-        original_audio = temp_dir / "original.wav"
-        subprocess.run([
-            "ffmpeg", "-y", "-i", str(video_path),
-            "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
-            str(original_audio)
-        ], check=True, capture_output=True)
-        
-        # 음성 로드
-        audio = AudioSegment.from_wav(str(original_audio))
-        
-        # 번역 음성 구간을 mute
-        for segment in project.segments:
-            if segment.start is not None and segment.end is not None:
-                start_ms = int(segment.start * 1000)
-                end_ms = int(segment.end * 1000)
-                # 해당 구간을 무음으로 대체
-                silence = AudioSegment.silent(duration=end_ms - start_ms)
-                audio = audio[:start_ms] + silence + audio[end_ms:]
-        
-        # 대사 전용 파일 저장
+        audio, project_dir = _prepare_dialogue_audio(project_id, project)
+
+        # 대사 전용 파일 저장 (보컬 트랙 그대로 사용)
         dialogue_path = project_dir / "dialogue.wav"
         audio.export(str(dialogue_path), format="wav")
-        
-        # 임시 파일 삭제
-        original_audio.unlink()
-        
+
         # 웹 URL 변환
         output_dir = TRANSLATOR_DIR.parent
         dialogue_url = f"/outputs/{dialogue_path.relative_to(output_dir).as_posix()}"
-        
+
         return {
             "dialogue_path": dialogue_url,
-            "message": "대사 추출 완료 (번역 구간 제거됨)"
+            "message": "대사 추출 완료 (보컬 트랙 생성)"
         }
     
     try:
@@ -636,6 +648,68 @@ async def api_extract_dialogue(project_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"대사 추출 실패: {str(e)}"
+        )
+
+
+@router.post("/projects/{project_id}/extract-dialogue-muted")
+async def api_extract_dialogue_muted(project_id: str):
+    """번역(해설) 음성이 들어간 구간을 무음으로 치환한 대사 트랙을 생성합니다."""
+    import logging
+    from pydub import AudioSegment
+
+    logger = logging.getLogger(__name__)
+
+    def _extract():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        audio, project_dir = _prepare_dialogue_audio(project_id, project)
+
+        for segment in project.segments:
+            if segment.start is None or segment.end is None:
+                continue
+            if not segment.audio_path:
+                continue
+
+            start_ms = int(segment.start * 1000)
+            end_ms = int(segment.end * 1000)
+            if end_ms <= start_ms:
+                continue
+
+            mute_duration = end_ms - start_ms
+            silence = AudioSegment.silent(duration=mute_duration)
+            audio = audio[:start_ms] + silence + audio[end_ms:]
+
+        dialogue_path = project_dir / "dialogue_muted.wav"
+        audio.export(str(dialogue_path), format="wav")
+
+        output_dir = TRANSLATOR_DIR.parent
+        dialogue_url = f"/outputs/{dialogue_path.relative_to(output_dir).as_posix()}"
+
+        return {
+            "dialogue_path": dialogue_url,
+            "message": "번역/해설 음성을 제외한 대사 추출 완료"
+        }
+
+    try:
+        result = await run_in_threadpool(_extract)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Dialogue mute extraction failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"번역 제외 대사 추출 실패: {str(e)}"
         )
 
 
@@ -739,6 +813,7 @@ async def api_save_tracks(project_id: str, track_state: dict):
 
         project.extra['bgm_path'] = track_state.get('bgm_path')
         project.extra['dialogue_path'] = track_state.get('dialogue_path')
+        project.extra['dialogue_muted_path'] = track_state.get('dialogue_muted_path')
 
         # 프로젝트 저장
         from ai_shorts_maker.translator import save_project
@@ -747,7 +822,8 @@ async def api_save_tracks(project_id: str, track_state: dict):
         return {
             "message": "트랙 상태가 저장되었습니다.",
             "bgm_path": project.extra.get('bgm_path'),
-            "dialogue_path": project.extra.get('dialogue_path')
+            "dialogue_path": project.extra.get('dialogue_path'),
+            "dialogue_muted_path": project.extra.get('dialogue_muted_path')
         }
     except Exception as e:
         logger.error(f"Track save failed: {e}")
@@ -774,11 +850,13 @@ async def api_load_tracks(project_id: str):
         # extra 필드에서 트랙 정보 가져오기
         bgm_path = project.extra.get('bgm_path') if project.extra else None
         dialogue_path = project.extra.get('dialogue_path') if project.extra else None
+        dialogue_muted_path = project.extra.get('dialogue_muted_path') if project.extra else None
 
         return {
             "message": "트랙 정보를 불러왔습니다.",
             "bgm_path": bgm_path,
-            "dialogue_path": dialogue_path
+            "dialogue_path": dialogue_path,
+            "dialogue_muted_path": dialogue_muted_path
         }
     except Exception as e:
         logger.error(f"Track load failed: {e}")

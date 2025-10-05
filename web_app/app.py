@@ -518,6 +518,8 @@ async def api_add_subtitle_text(project_id: str, payload: Dict[str, Any] = Body(
             "project_id": project_id,
             "segments_count": len(result["project"].segments) if result["project"] else 0,
             "added_count": result.get("added_count", 0),
+            "replaced_count": result.get("replaced_count", 0),
+            "removed_count": result.get("removed_count", 0),
             "target_field": target_field,
             "selected_speakers": selected_speakers
         }
