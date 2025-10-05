@@ -2182,9 +2182,12 @@ async def api_save_tracks(project_id: str, track_state: dict):
         if project.extra is None:
             project.extra = {}
 
-        project.extra['bgm_path'] = track_state.get('bgm_path')
-        project.extra['dialogue_path'] = track_state.get('dialogue_path')
-        project.extra['dialogue_muted_path'] = track_state.get('dialogue_muted_path')
+        if 'bgm_path' in track_state:
+            project.extra['bgm_path'] = track_state.get('bgm_path')
+        if 'dialogue_path' in track_state:
+            project.extra['dialogue_path'] = track_state.get('dialogue_path')
+        if 'dialogue_muted_path' in track_state:
+            project.extra['dialogue_muted_path'] = track_state.get('dialogue_muted_path')
         if track_state.get('bgm_volume_percent') is not None:
             try:
                 project.extra['bgm_volume_percent'] = float(track_state['bgm_volume_percent'])
@@ -2209,6 +2212,9 @@ async def api_save_tracks(project_id: str, track_state: dict):
         elif not bgm_v2_path:
             project.extra.pop('bgm_v2_volume_percent', None)
 
+        if 'bgm_v2_auto_duck' in track_state:
+            project.extra['bgm_v2_auto_duck'] = bool(track_state['bgm_v2_auto_duck'])
+
         # 프로젝트 저장
         from ai_shorts_maker.translator import save_project
         save_project(project)
@@ -2223,6 +2229,7 @@ async def api_save_tracks(project_id: str, track_state: dict):
             "bgm_v2_path": project.extra.get('bgm_v2_path'),
             "bgm_v2_volume_percent": project.extra.get('bgm_v2_volume_percent'),
             "bgm_v2_cache_token": project.extra.get('bgm_v2_cache_token'),
+            "bgm_v2_auto_duck": project.extra.get('bgm_v2_auto_duck'),
         }
     except Exception as e:
         logger.error(f"Track save failed: {e}")
@@ -2256,6 +2263,7 @@ async def api_load_tracks(project_id: str):
         bgm_v2_path = extras.get('bgm_v2_path') or extras.get('bgm_custom_v2_path')
         bgm_v2_volume = extras.get('bgm_v2_volume_percent')
         bgm_v2_cache = extras.get('bgm_v2_cache_token')
+        bgm_v2_auto_duck = extras.get('bgm_v2_auto_duck')
 
         return {
             "message": "트랙 정보를 불러왔습니다.",
@@ -2267,6 +2275,7 @@ async def api_load_tracks(project_id: str):
             "bgm_v2_path": bgm_v2_path,
             "bgm_v2_volume_percent": bgm_v2_volume,
             "bgm_v2_cache_token": bgm_v2_cache,
+            "bgm_v2_auto_duck": bool(bgm_v2_auto_duck) if bgm_v2_auto_duck is not None else None,
         }
     except Exception as e:
         logger.error(f"Track load failed: {e}")

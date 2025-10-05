@@ -2626,6 +2626,34 @@ textarea:focus {
     animation: realtimePulse 1.5s ease-in-out infinite;
 }
 
+#realtime-subtitle-display .realtime-subtitle-line {
+    display: block;
+    margin: 0;
+    line-height: 1.4;
+    white-space: normal;
+}
+
+#realtime-subtitle-display .realtime-subtitle-line + .realtime-subtitle-line {
+    margin-top: 6px;
+}
+
+#realtime-subtitle-display .realtime-subtitle-main {
+    font-size: 1em;
+    font-weight: 700;
+}
+
+#realtime-subtitle-display .realtime-subtitle-translation {
+    font-size: 0.95em;
+    font-weight: 600;
+    opacity: 0.95;
+}
+
+#realtime-subtitle-display .realtime-subtitle-description {
+    font-size: 0.9em;
+    font-weight: 500;
+    opacity: 0.85;
+}
+
 /* 🖱️ 드래그 기능 스타일 */
 .hybrid-subtitle .subtitle-number {
     cursor: grab;

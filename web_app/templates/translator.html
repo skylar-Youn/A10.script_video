@@ -1925,6 +1925,47 @@
             return path;
         }
 
+        function normalizeTrackSavePath(rawPath) {
+            if (!rawPath && rawPath !== 0) {
+                return null;
+            }
+            let path = String(rawPath).trim();
+            if (!path) {
+                return null;
+            }
+
+            const hashIndex = path.indexOf('#');
+            if (hashIndex >= 0) {
+                path = path.slice(0, hashIndex);
+            }
+
+            const queryIndex = path.indexOf('?');
+            if (queryIndex >= 0) {
+                path = path.slice(0, queryIndex);
+            }
+
+            if (path.startsWith('/web-audio/')) {
+                path = path.slice('/web-audio/'.length);
+                if (!path.startsWith('/')) {
+                    path = '/' + path;
+                }
+            } else if (!path.startsWith('/') && (path.startsWith('outputs/') || path.startsWith('youtube/download/'))) {
+                path = '/' + path;
+            }
+
+            return path;
+        }
+
+        function resolveTrackStatePath(...candidates) {
+            for (const candidate of candidates) {
+                const normalized = normalizeTrackSavePath(candidate);
+                if (normalized) {
+                    return normalized;
+                }
+            }
+            return null;
+        }
+
         function updateSegmentCache(segmentId, textType, value) {
             if (!currentProject) {
                 return;
@@ -7945,12 +7986,21 @@
 
                     // 현재 트랙 상태 수집
                     const trackState = {
-                        bgm_path: (currentProject?.extra?.bgm_path) || (window.bgmTimelineUrl ? window.bgmTimelineUrl.replace('/web-audio/', '') : null),
-                        bgm_volume_percent: currentProject?.extra?.bgm_volume_percent ?? Math.round(bgmPlaybackVolume * 100),
-                        bgm_v2_path: (currentProject?.extra?.bgm_v2_path) || (currentProject?.extra?.bgm_custom_v2_path) || null,
-                        bgm_v2_volume_percent: currentProject?.extra?.bgm_v2_volume_percent ?? 100,
-                        dialogue_path: window.dialogueTimelineUrl ? window.dialogueTimelineUrl.replace('/web-audio/', '') : null,
-                        dialogue_muted_path: window.dialogueMutedTimelineUrl ? window.dialogueMutedTimelineUrl.replace('/web-audio/', '') : null
+                        bgm_path: resolveTrackStatePath(window.bgmTimelineUrl, currentProject?.extra?.bgm_path),
+                        bgm_volume_percent: Number.isFinite(bgmPlaybackVolume)
+                            ? Math.round(bgmPlaybackVolume * 100)
+                            : (currentProject?.extra?.bgm_volume_percent ?? 100),
+                        bgm_v2_path: resolveTrackStatePath(
+                            window.bgmV2TimelineUrl,
+                            currentProject?.extra?.bgm_v2_path,
+                            currentProject?.extra?.bgm_custom_v2_path
+                        ),
+                        bgm_v2_volume_percent: Number.isFinite(bgmV2PlaybackVolume)
+                            ? Math.round(bgmV2PlaybackVolume * 100)
+                            : (currentProject?.extra?.bgm_v2_volume_percent ?? 100),
+                        bgm_v2_auto_duck: Boolean(bgmV2AutoDuckEnabled),
+                        dialogue_path: resolveTrackStatePath(window.dialogueTimelineUrl, currentProject?.extra?.dialogue_path),
+                        dialogue_muted_path: resolveTrackStatePath(window.dialogueMutedTimelineUrl, currentProject?.extra?.dialogue_muted_path)
                     };
 
                     try {
@@ -7966,6 +8016,25 @@
                         }
 
                         const result = await response.json();
+
+                        if (!currentProject.extra) {
+                            currentProject.extra = {};
+                        }
+                        currentProject.extra.bgm_path = trackState.bgm_path || null;
+                        currentProject.extra.dialogue_path = trackState.dialogue_path || null;
+                        currentProject.extra.dialogue_muted_path = trackState.dialogue_muted_path || null;
+                        currentProject.extra.bgm_volume_percent = trackState.bgm_volume_percent;
+                        currentProject.extra.bgm_cache_token = result.bgm_cache_token || currentProject.extra.bgm_cache_token;
+                        currentProject.extra.bgm_v2_path = trackState.bgm_v2_path || null;
+                        if (trackState.bgm_v2_path) {
+                            currentProject.extra.bgm_custom_v2_path = trackState.bgm_v2_path;
+                        } else {
+                            delete currentProject.extra.bgm_custom_v2_path;
+                        }
+                        currentProject.extra.bgm_v2_volume_percent = trackState.bgm_v2_volume_percent;
+                        currentProject.extra.bgm_v2_cache_token = result.bgm_v2_cache_token || currentProject.extra.bgm_v2_cache_token;
+                        currentProject.extra.bgm_v2_auto_duck = trackState.bgm_v2_auto_duck;
+
                         alert(result.message || '트랙 상태가 저장되었습니다.');
                     } catch (error) {
                         console.error('Track save error:', error);
@@ -8042,7 +8111,24 @@
                             }
                         }
 
+                        if ('bgm_v2_auto_duck' in result) {
+                            bgmV2AutoDuckEnabled = Boolean(result.bgm_v2_auto_duck);
+                            currentProject.extra.bgm_v2_auto_duck = bgmV2AutoDuckEnabled;
+                        } else {
+                            bgmV2AutoDuckEnabled = false;
+                            delete currentProject.extra.bgm_v2_auto_duck;
+                        }
+                        refreshBgmV2DuckState();
+
                         // 대사 트랙 복원
+                        if ('dialogue_path' in result) {
+                            if (result.dialogue_path) {
+                                currentProject.extra.dialogue_path = result.dialogue_path;
+                            } else {
+                                delete currentProject.extra.dialogue_path;
+                            }
+                        }
+
                         if (result.dialogue_path) {
                             const dialogueTrack = document.getElementById('timeline-track-dialogue');
                             if (dialogueTrack) {
@@ -8080,6 +8166,14 @@
                         }
 
                         // 번역 제외 대사 트랙 복원
+                        if ('dialogue_muted_path' in result) {
+                            if (result.dialogue_muted_path) {
+                                currentProject.extra.dialogue_muted_path = result.dialogue_muted_path;
+                            } else {
+                                delete currentProject.extra.dialogue_muted_path;
+                            }
+                        }
+
                         if (result.dialogue_muted_path) {
                             const dialogueMutedTrack = document.getElementById('timeline-track-dialogue-muted');
                             if (dialogueMutedTrack) {

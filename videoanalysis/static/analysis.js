@@ -7451,8 +7451,17 @@ class VideoAnalysisApp {
 
         // 현재 자막 텍스트 실시간 표시
         if (currentSubtitles.length > 0) {
-            const mainSubtitle = currentSubtitles.find(s => !s.text.includes('[')) || currentSubtitles[0];
-            this.showCurrentSubtitleText(mainSubtitle.text);
+            const subtitleLines = this.buildRealtimeSubtitleLines(currentSubtitles);
+            if (subtitleLines.length > 0) {
+                this.showCurrentSubtitleText(subtitleLines);
+            } else {
+                const fallbackText = currentSubtitles[0]?.text || '';
+                if (fallbackText.trim()) {
+                    this.showCurrentSubtitleText(fallbackText);
+                } else {
+                    this.hideCurrentSubtitleText();
+                }
+            }
         } else {
             this.hideCurrentSubtitleText();
         }
@@ -7542,7 +7551,40 @@ class VideoAnalysisApp {
         });
     }
 
-    showCurrentSubtitleText(text) {
+    showCurrentSubtitleText(content) {
+        const lines = [];
+
+        const appendLine = (track, text) => {
+            if (!text) return;
+            const trimmed = String(text).trim();
+            if (!trimmed) return;
+            const normalizedTrack = this.normalizeTrackKey(track) || 'main';
+            lines.push({
+                track: normalizedTrack,
+                text: trimmed
+            });
+        };
+
+        if (Array.isArray(content)) {
+            content.forEach(item => {
+                if (!item) return;
+                if (typeof item === 'string') {
+                    appendLine('main', item);
+                } else if (typeof item === 'object') {
+                    appendLine(item.track || item.track_type || item.trackType || 'main', item.text || item.value || '');
+                }
+            });
+        } else if (typeof content === 'string') {
+            appendLine('main', content);
+        } else if (content && typeof content === 'object') {
+            appendLine(content.track || content.track_type || content.trackType || 'main', content.text || content.value || '');
+        }
+
+        if (lines.length === 0) {
+            this.hideCurrentSubtitleText();
+            return;
+        }
+
         let realtimeDisplay = document.getElementById('realtime-subtitle-display');
         if (!realtimeDisplay) {
             realtimeDisplay = document.createElement('div');
@@ -7568,7 +7610,19 @@ class VideoAnalysisApp {
             document.body.appendChild(realtimeDisplay);
         }
 
-        realtimeDisplay.textContent = text;
+        realtimeDisplay.innerHTML = '';
+
+        lines.forEach(line => {
+            const lineElement = document.createElement('div');
+            lineElement.className = 'realtime-subtitle-line';
+            if (line.track) {
+                lineElement.classList.add(`realtime-subtitle-${line.track}`);
+            }
+            lineElement.dataset.track = line.track;
+            lineElement.textContent = line.text;
+            realtimeDisplay.appendChild(lineElement);
+        });
+
         realtimeDisplay.style.display = 'block';
     }
 
@@ -7577,6 +7631,147 @@ class VideoAnalysisApp {
         if (realtimeDisplay) {
             realtimeDisplay.style.display = 'none';
         }
+    }
+
+    normalizeTrackKey(track) {
+        if (track === null || track === undefined) {
+            return null;
+        }
+        const key = String(track).trim().toLowerCase();
+        const mapping = {
+            main: 'main',
+            original: 'main',
+            primary: 'main',
+            source: 'main',
+            translation: 'translation',
+            translated: 'translation',
+            trans: 'translation',
+            dub: 'translation',
+            description: 'description',
+            desc: 'description',
+            narration: 'description',
+            sfx: 'description',
+            effect: 'description',
+            caption: 'description'
+        };
+
+        if (mapping[key]) {
+            return mapping[key];
+        }
+
+        if (key.includes('description') || key.includes('desc') || key.includes('sfx') || key.includes('effect')) {
+            return 'description';
+        }
+
+        if (key.includes('trans')) {
+            return 'translation';
+        }
+
+        return key;
+    }
+
+    getSubtitleTrackType(subtitle) {
+        if (!subtitle) {
+            return 'main';
+        }
+
+        const candidates = [
+            subtitle.trackType,
+            subtitle.track_type,
+            subtitle.assigned_track,
+            subtitle.track,
+            subtitle.detected_track,
+            subtitle.tracktype
+        ];
+
+        for (const candidate of candidates) {
+            const normalized = this.normalizeTrackKey(candidate);
+            if (normalized) {
+                if (normalized === 'description' || normalized === 'translation' || normalized === 'main') {
+                    return normalized;
+                }
+                return normalized;
+            }
+        }
+
+        if (Array.isArray(subtitle.tags)) {
+            if (subtitle.tags.some(tag => this.normalizeTrackKey(tag) === 'description')) {
+                return 'description';
+            }
+            if (subtitle.tags.some(tag => this.normalizeTrackKey(tag) === 'translation')) {
+                return 'translation';
+            }
+        }
+
+        const text = typeof subtitle.text === 'string' ? subtitle.text.trim() : '';
+        if (!text) {
+            return 'main';
+        }
+        if (text.startsWith('[') && text.endsWith(']')) {
+            return 'description';
+        }
+
+        return 'main';
+    }
+
+    isSubtitleTrackEnabled(trackType) {
+        const normalized = this.normalizeTrackKey(trackType) || 'main';
+        const checkboxMap = {
+            main: 'track-main-subtitle-enable',
+            translation: 'track-translation-subtitle-enable',
+            description: 'track-description-subtitle-enable'
+        };
+
+        const checkboxId = checkboxMap[normalized];
+        if (checkboxId) {
+            const checkbox = document.getElementById(checkboxId);
+            if (checkbox && !checkbox.checked) {
+                return false;
+            }
+        }
+
+        if (this.trackStates && this.trackStates[normalized] && this.trackStates[normalized].visible === false) {
+            return false;
+        }
+
+        return true;
+    }
+
+    buildRealtimeSubtitleLines(currentSubtitles) {
+        if (!Array.isArray(currentSubtitles) || currentSubtitles.length === 0) {
+            return [];
+        }
+
+        const trackOrder = ['main', 'translation', 'description'];
+        const trackTexts = {};
+
+        currentSubtitles.forEach(subtitle => {
+            if (!subtitle || typeof subtitle.text !== 'string') {
+                return;
+            }
+            const text = subtitle.text.trim();
+            if (!text) {
+                return;
+            }
+            const track = this.getSubtitleTrackType(subtitle);
+            const normalizedTrack = trackOrder.includes(track) ? track : 'main';
+            if (!trackTexts[normalizedTrack]) {
+                trackTexts[normalizedTrack] = text;
+            }
+        });
+
+        const lines = [];
+        trackOrder.forEach(track => {
+            if (!this.isSubtitleTrackEnabled(track)) {
+                return;
+            }
+            const text = trackTexts[track];
+            if (text) {
+                lines.push({ track, text });
+            }
+        });
+
+        return lines;
     }
 
     clearCurrentPlaybackHighlight() {
