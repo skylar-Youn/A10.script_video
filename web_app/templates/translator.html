@@ -216,11 +216,17 @@
         let bgmTrimMode = false;
         let bgmActiveRegion = null;
         let bgmRegionsPlugin = null;
-        const bgmVolumeRangeInput = document.getElementById('bgm-volume-range');
-        const bgmVolumeValueLabel = document.getElementById('bgm-volume-value');
-        const bgmVolumeApplyButton = document.getElementById('btn-bgm-apply-volume');
-        const bgmTrimToggleButton = document.getElementById('btn-bgm-trim-mode');
-        const bgmTrimDeleteButton = document.getElementById('btn-bgm-trim-delete');
+        let bgmV2PlaybackVolume = 1;
+        let bgmV2PlaybackLimit = null;
+        let bgmV2AudioProcessHandler = null;
+        let bgmVolumeRangeInput = document.getElementById('bgm-volume-range');
+        let bgmVolumeValueLabel = document.getElementById('bgm-volume-value');
+        let bgmVolumeApplyButton = document.getElementById('btn-bgm-apply-volume');
+        let bgmTrimToggleButton = document.getElementById('btn-bgm-trim-mode');
+        let bgmTrimDeleteButton = document.getElementById('btn-bgm-trim-delete');
+        let bgmV2VolumeRangeInput = document.getElementById('bgm-v2-volume-range');
+        let bgmV2VolumeValueLabel = document.getElementById('bgm-v2-volume-value');
+        let bgmV2VolumeApplyButton = document.getElementById('btn-bgm-v2-apply-volume');
 
         function clamp(value, min, max) {
             if (Number.isNaN(value)) {
@@ -282,6 +288,21 @@
             }
         }
 
+        function updateBgmV2VolumeUI(hasTrack) {
+            if (bgmV2VolumeRangeInput) {
+                bgmV2VolumeRangeInput.disabled = !hasTrack;
+                if (!hasTrack) {
+                    bgmV2VolumeRangeInput.value = '100';
+                }
+            }
+            if (bgmV2VolumeValueLabel) {
+                bgmV2VolumeValueLabel.textContent = hasTrack ? `${Math.round(bgmV2PlaybackVolume * 100)}%` : '--';
+            }
+            if (bgmV2VolumeApplyButton) {
+                bgmV2VolumeApplyButton.disabled = !hasTrack;
+            }
+        }
+
         function applyBgmPlaybackVolume(percent) {
             const clampedPercent = clamp(Number(percent) || 0, 0, 200);
             bgmPlaybackVolume = clampedPercent / 100;
@@ -295,6 +316,34 @@
                 window.bgmTimelineWaveform.setVolume(Math.min(bgmPlaybackVolume, 2));
             }
             updateBgmVolumeUI(Boolean(window.bgmTimelineWaveform));
+        }
+
+        function applyBgmV2PlaybackVolume(percent) {
+            const clampedPercent = clamp(Number(percent) || 0, 0, 200);
+            bgmV2PlaybackVolume = clampedPercent / 100;
+            if (bgmV2VolumeValueLabel) {
+                bgmV2VolumeValueLabel.textContent = `${clampedPercent}%`;
+            }
+            updateBgmV2VolumeLabel(clampedPercent);
+            if (bgmV2VolumeRangeInput && bgmV2VolumeRangeInput.value !== String(clampedPercent)) {
+                bgmV2VolumeRangeInput.value = String(clampedPercent);
+            }
+            if (window.bgmV2TimelineWaveform && typeof window.bgmV2TimelineWaveform.setVolume === 'function') {
+                window.bgmV2TimelineWaveform.setVolume(Math.min(bgmV2PlaybackVolume, 2));
+            }
+            updateBgmV2VolumeUI(Boolean(window.bgmV2TimelineWaveform));
+        }
+
+        function clearBgmV2PlaybackLimit() {
+            if (window.bgmV2TimelineWaveform && bgmV2AudioProcessHandler && typeof window.bgmV2TimelineWaveform.un === 'function') {
+                try {
+                    window.bgmV2TimelineWaveform.un('audioprocess', bgmV2AudioProcessHandler);
+                } catch (error) {
+                    console.debug('Failed to detach BGM V2 audio limit handler:', error);
+                }
+            }
+            bgmV2AudioProcessHandler = null;
+            bgmV2PlaybackLimit = null;
         }
 
         function destroyBgmWaveform() {
@@ -350,6 +399,7 @@
             if (durationTarget) {
                 updateTimelineDuration(0, durationTarget);
             }
+            clearBgmV2PlaybackLimit();
             if (window.bgmV2TimelineWaveform) {
                 try {
                     window.bgmV2TimelineWaveform.destroy();
@@ -374,6 +424,32 @@
                 clearBtn.disabled = true;
             }
             updateBgmV2VolumeLabel(null);
+            updateBgmV2VolumeUI(false);
+        }
+
+        function getComparisonBaseDuration() {
+            const candidates = [
+                () => window.bgmTimelineWaveform && typeof window.bgmTimelineWaveform.getDuration === 'function' ? window.bgmTimelineWaveform.getDuration() : null,
+                () => originalTimelineWaveform && typeof originalTimelineWaveform.getDuration === 'function' ? originalTimelineWaveform.getDuration() : null,
+                () => translatedTimelineWaveform && typeof translatedTimelineWaveform.getDuration === 'function' ? translatedTimelineWaveform.getDuration() : null,
+                () => {
+                    if (currentProject && Number.isFinite(Number(currentProject.duration))) {
+                        return Number(currentProject.duration);
+                    }
+                    return null;
+                },
+            ];
+            for (const getter of candidates) {
+                try {
+                    const value = getter();
+                    if (Number.isFinite(value) && value > 0) {
+                        return value;
+                    }
+                } catch (error) {
+                    console.debug('Failed to evaluate comparison duration candidate:', error);
+                }
+            }
+            return null;
         }
 
         async function setBgmV2Track(rawPath, options = {}) {
@@ -404,12 +480,14 @@
 
             if (!forceReload && previousPath === normalizedPath && window.bgmV2TimelineWaveform) {
                 updateBgmV2VolumeLabel(volumePercent);
+                applyBgmV2PlaybackVolume(volumePercent);
                 return;
             }
 
             destroyBgmV2Waveform();
             trackContainer.style.display = '';
             updateBgmV2VolumeLabel(volumePercent);
+            applyBgmV2PlaybackVolume(volumePercent);
 
             const clearBtn = document.getElementById('btn-bgm-v2-clear');
             if (clearBtn) {
@@ -435,9 +513,37 @@
 
             window.bgmV2TimelineWaveform.on('ready', () => {
                 window.bgmV2TimelineUrl = normalizedPath;
+                const baseDuration = getComparisonBaseDuration();
+                const trackDuration = window.bgmV2TimelineWaveform.getDuration();
+                const effectiveDuration = Number.isFinite(baseDuration) && baseDuration > 0
+                    ? Math.min(trackDuration, baseDuration)
+                    : trackDuration;
                 if (durationTarget) {
-                    updateTimelineDuration(window.bgmV2TimelineWaveform.getDuration(), durationTarget);
+                    updateTimelineDuration(effectiveDuration, durationTarget);
                 }
+                clearBgmV2PlaybackLimit();
+                if (Number.isFinite(baseDuration) && baseDuration > 0 && trackDuration > baseDuration) {
+                    bgmV2PlaybackLimit = baseDuration;
+                    bgmV2AudioProcessHandler = (time) => {
+                        if (!Number.isFinite(time) || bgmV2PlaybackLimit === null) {
+                            return;
+                        }
+                        if (time >= bgmV2PlaybackLimit - 0.01) {
+                            try {
+                                window.bgmV2TimelineWaveform.stop();
+                                window.bgmV2TimelineWaveform.setTime(bgmV2PlaybackLimit);
+                            } catch (error) {
+                                console.debug('Failed to clamp BGM V2 playback:', error);
+                            }
+                            handleTimelineFinish('bgm_v2');
+                        }
+                    };
+                    if (typeof window.bgmV2TimelineWaveform.on === 'function') {
+                        window.bgmV2TimelineWaveform.on('audioprocess', bgmV2AudioProcessHandler);
+                    }
+                }
+                applyBgmV2PlaybackVolume(volumePercent);
+                updateBgmV2VolumeUI(true);
             });
 
             window.bgmV2TimelineWaveform.on('error', (error) => {
@@ -661,6 +767,83 @@
                 if (bgmVolumeApplyButton) {
                     bgmVolumeApplyButton.disabled = !window.bgmTimelineWaveform;
                     bgmVolumeApplyButton.textContent = '🎚️ 적용';
+                }
+            }
+        }
+
+        async function commitBgmV2Volume() {
+            if (!currentProject) {
+                alert('프로젝트를 먼저 로드하세요.');
+                return;
+            }
+            if (!bgmV2VolumeRangeInput) {
+                alert('V2 볼륨 슬라이더를 찾을 수 없습니다.');
+                return;
+            }
+            const v2Path = currentProject.extra?.bgm_v2_path || currentProject.extra?.bgm_custom_v2_path;
+            if (!v2Path) {
+                alert('배경음악 V2가 준비되어 있지 않습니다.');
+                return;
+            }
+            const percent = clamp(Number(bgmV2VolumeRangeInput.value || '100'), 0, 200);
+
+            try {
+                if (bgmV2VolumeApplyButton) {
+                    bgmV2VolumeApplyButton.disabled = true;
+                    bgmV2VolumeApplyButton.textContent = '적용 중...';
+                }
+
+                const payload = {
+                    path: v2Path,
+                    kind: 'custom_v2',
+                    volume_percent: percent,
+                };
+                const baseBgmUrl = currentProject.extra?.bgm_path || currentProject.extra?.bgm_custom_path;
+                if (baseBgmUrl) {
+                    payload.base_duration = getComparisonBaseDuration() ?? null;
+                    payload.base_bgm_path = baseBgmUrl;
+                }
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/bgm/apply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    const errorPayload = await response.text();
+                    throw new Error(errorPayload || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                const appliedPercent = clamp(result.bgm_v2_volume_percent ?? percent, 0, 200);
+                const cacheToken = result.bgm_v2_cache_token || Date.now();
+                if (!currentProject.extra) {
+                    currentProject.extra = {};
+                }
+                if (result.bgm_v2_path) {
+                    currentProject.extra.bgm_v2_path = result.bgm_v2_path;
+                }
+                if (result.bgm_v2_volume_percent !== undefined) {
+                    currentProject.extra.bgm_v2_volume_percent = appliedPercent;
+                }
+                if (result.bgm_v2_cache_token !== undefined) {
+                    currentProject.extra.bgm_v2_cache_token = cacheToken;
+                }
+
+                setBgmV2Track(currentProject.extra.bgm_v2_path || currentProject.extra.bgm_custom_v2_path, {
+                    volumePercent: appliedPercent,
+                    cacheToken,
+                    force: true,
+                });
+
+                alert(`배경음악 V2 볼륨을 ${Math.round(appliedPercent)}%로 조정했습니다.`);
+            } catch (error) {
+                console.error('BGM V2 volume apply failed:', error);
+                alert(error?.message || '배경음악 V2 볼륨을 조정하지 못했습니다.');
+            } finally {
+                if (bgmV2VolumeApplyButton) {
+                    bgmV2VolumeApplyButton.disabled = !window.bgmV2TimelineWaveform;
+                    bgmV2VolumeApplyButton.textContent = '🎚️ 적용';
                 }
             }
         }
@@ -1052,18 +1235,43 @@
             }
         }
 
-        if (bgmVolumeRangeInput) {
+        if (bgmVolumeRangeInput && !bgmVolumeRangeInput.dataset.bound) {
+            bgmVolumeRangeInput.dataset.bound = '1';
             updateBgmVolumeUI(false);
-            bgmVolumeRangeInput.addEventListener('input', () => {
-                applyBgmPlaybackVolume(bgmVolumeRangeInput.value);
-            });
+            const handleBgmSlider = (event) => {
+                applyBgmPlaybackVolume(event?.target?.value ?? bgmVolumeRangeInput.value);
+            };
+            bgmVolumeRangeInput.addEventListener('input', handleBgmSlider);
+            bgmVolumeRangeInput.addEventListener('change', handleBgmSlider);
         } else if (bgmVolumeValueLabel) {
             bgmVolumeValueLabel.textContent = '--';
         }
 
-        if (bgmVolumeApplyButton) {
+        if (bgmV2VolumeRangeInput && !bgmV2VolumeRangeInput.dataset.bound) {
+            bgmV2VolumeRangeInput.dataset.bound = '1';
+            updateBgmV2VolumeUI(false);
+            const handleV2SliderInit = (event) => {
+                const value = event?.target?.value ?? bgmV2VolumeRangeInput.value;
+                applyBgmV2PlaybackVolume(Number(value));
+                updateBgmV2VolumeLabel(Number(value));
+            };
+            bgmV2VolumeRangeInput.addEventListener('input', handleV2SliderInit);
+            bgmV2VolumeRangeInput.addEventListener('change', handleV2SliderInit);
+        } else if (bgmV2VolumeValueLabel) {
+            bgmV2VolumeValueLabel.textContent = '--';
+        }
+
+        if (bgmVolumeApplyButton && !bgmVolumeApplyButton.dataset.bound) {
+            bgmVolumeApplyButton.dataset.bound = '1';
             bgmVolumeApplyButton.addEventListener('click', () => {
                 commitBgmVolume().catch((error) => console.error('Failed to commit BGM volume:', error));
+            });
+        }
+
+        if (bgmV2VolumeApplyButton && !bgmV2VolumeApplyButton.dataset.bound) {
+            bgmV2VolumeApplyButton.dataset.bound = '1';
+            bgmV2VolumeApplyButton.addEventListener('click', () => {
+                commitBgmV2Volume().catch((error) => console.error('Failed to commit BGM V2 volume:', error));
             });
         }
 
@@ -3157,9 +3365,15 @@
                                 <span class="track-label">🎵 배경음악 V2</span>
                                 <span class="track-duration" id="timeline-bgm-v2-duration"></span>
                             </div>
-                            <div class="bgm-controls" style="gap: 12px;">
+                            <div class="bgm-controls" style="gap: 12px; align-items: center; flex-wrap: wrap;">
+                                <label for="bgm-v2-volume-range" class="bgm-volume-label">
+                                    V2 볼륨
+                                    <input type="range" id="bgm-v2-volume-range" min="0" max="200" value="100" step="5">
+                                    <span id="bgm-v2-volume-value">100%</span>
+                                </label>
+                                <button type="button" class="btn-xs" id="btn-bgm-v2-apply-volume" title="현재 볼륨으로 배경음악 V2 적용" disabled>🎚️ 적용</button>
                                 <span class="bgm-volume-label" id="bgm-v2-volume-label">
-                                    볼륨 <span id="bgm-v2-volume-percent">--</span>
+                                    표시 <span id="bgm-v2-volume-percent">--</span>
                                 </span>
                                 <button type="button" class="btn-xs" id="btn-bgm-v2-clear" title="배경음악 V2 제거" disabled>❌ 제거</button>
                             </div>
@@ -3915,6 +4129,10 @@
                     }
                 } else if (originalKind.includes('custom_v2')) {
                     payloadCandidate.kind = 'custom';
+                }
+
+                if (payloadCandidate.volume_percent === undefined && selected.volume_percent !== undefined) {
+                    payloadCandidate.volume_percent = selected.volume_percent;
                 }
 
                 await applyBgmCandidate(payloadCandidate);
@@ -6736,7 +6954,49 @@
 
         // === 트랙 처리 기능 ===
         function attachTrackProcessingEventListeners() {
+            bgmVolumeRangeInput = document.getElementById('bgm-volume-range');
+            bgmVolumeValueLabel = document.getElementById('bgm-volume-value');
+            bgmVolumeApplyButton = document.getElementById('btn-bgm-apply-volume');
+            bgmTrimToggleButton = document.getElementById('btn-bgm-trim-mode');
+            bgmTrimDeleteButton = document.getElementById('btn-bgm-trim-delete');
+            bgmV2VolumeRangeInput = document.getElementById('bgm-v2-volume-range');
+            bgmV2VolumeValueLabel = document.getElementById('bgm-v2-volume-value');
+            bgmV2VolumeApplyButton = document.getElementById('btn-bgm-v2-apply-volume');
+
+            if (bgmVolumeRangeInput && !bgmVolumeRangeInput.dataset.bound) {
+                bgmVolumeRangeInput.dataset.bound = '1';
+                bgmVolumeRangeInput.addEventListener('input', (event) => {
+                    applyBgmPlaybackVolume(event.target.value);
+                });
+                bgmVolumeRangeInput.addEventListener('change', (event) => {
+                    applyBgmPlaybackVolume(event.target.value);
+                });
+            }
+            if (bgmV2VolumeRangeInput && !bgmV2VolumeRangeInput.dataset.bound) {
+                bgmV2VolumeRangeInput.dataset.bound = '1';
+                const handleV2Slider = (event) => {
+                    const value = event?.target?.value ?? bgmV2VolumeRangeInput.value;
+                    applyBgmV2PlaybackVolume(Number(value));
+                    updateBgmV2VolumeLabel(Number(value));
+                };
+                bgmV2VolumeRangeInput.addEventListener('input', handleV2Slider);
+                bgmV2VolumeRangeInput.addEventListener('change', handleV2Slider);
+            }
+            if (bgmVolumeApplyButton && !bgmVolumeApplyButton.dataset.bound) {
+                bgmVolumeApplyButton.dataset.bound = '1';
+                bgmVolumeApplyButton.addEventListener('click', () => {
+                    commitBgmVolume().catch((error) => console.error('Failed to commit BGM volume:', error));
+                });
+            }
+            if (bgmV2VolumeApplyButton && !bgmV2VolumeApplyButton.dataset.bound) {
+                bgmV2VolumeApplyButton.dataset.bound = '1';
+                bgmV2VolumeApplyButton.addEventListener('click', () => {
+                    commitBgmV2Volume().catch((error) => console.error('Failed to commit BGM V2 volume:', error));
+                });
+            }
+
             updateBgmVolumeUI(Boolean(window.bgmTimelineWaveform));
+            updateBgmV2VolumeUI(Boolean(window.bgmV2TimelineWaveform));
 
             // Vocal/배경음악 분리
             const btnSeparateVocal = document.getElementById('btn-separate-vocal');

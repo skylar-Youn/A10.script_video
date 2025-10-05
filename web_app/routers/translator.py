@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, Set
 
 import math
 import shutil
+import subprocess
 import time
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile, status
@@ -1319,6 +1320,7 @@ async def api_apply_bgm_candidate(project_id: str, payload: dict = Body(...)):
 
     kind_value = payload.get("kind")
     volume_value = payload.get("volume_percent")
+    base_duration_value = payload.get("base_duration")
 
     def _apply():
         project = translator_load_project(project_id)
@@ -1347,6 +1349,128 @@ async def api_apply_bgm_candidate(project_id: str, payload: dict = Body(...)):
         is_bgm_v2 = bool(kind_value and str(kind_value).startswith("custom_v2"))
 
         if is_bgm_v2:
+            audio_dir = TRANSLATOR_DIR / project_id / "audio"
+            audio_dir.mkdir(parents=True, exist_ok=True)
+
+            current_v2_web = extras.get("bgm_v2_path") or extras.get("bgm_custom_v2_path")
+            current_v2_path = _web_url_to_path(current_v2_web) if current_v2_web else None
+            reuse_existing_file = False
+            if current_v2_path:
+                try:
+                    reuse_existing_file = current_v2_path.resolve() == resolved
+                except OSError:
+                    reuse_existing_file = False
+
+            if not reuse_existing_file:
+                timestamp = int(time.time())
+                dest_path = audio_dir / f"bgm_custom_v2_{timestamp:010d}.wav"
+
+                def _probe_duration_seconds(path: Path) -> Optional[float]:
+                    try:
+                        result = subprocess.run(
+                            [
+                                "ffprobe",
+                                "-v",
+                                "error",
+                                "-show_entries",
+                                "format=duration",
+                                "-of",
+                                "default=noprint_wrappers=1:nokey=1",
+                                str(path),
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        if result.returncode != 0:
+                            return None
+                        value = result.stdout.strip()
+                        return float(value) if value else None
+                    except Exception as exc:  # pylint: disable=broad-except
+                        logger.debug("Failed to probe audio duration for %s: %s", path, exc)
+                        return None
+
+                target_duration_seconds: Optional[float] = None
+                if base_duration_value is not None:
+                    try:
+                        candidate = float(base_duration_value)
+                        if candidate > 0:
+                            target_duration_seconds = candidate
+                    except (TypeError, ValueError):
+                        target_duration_seconds = None
+
+                if (not target_duration_seconds or target_duration_seconds <= 0) and project.duration:
+                    try:
+                        candidate = float(project.duration)
+                        if candidate > 0:
+                            target_duration_seconds = candidate
+                    except (TypeError, ValueError):
+                        target_duration_seconds = None
+
+                if not target_duration_seconds or target_duration_seconds <= 0:
+                    base_bgm_url = payload.get("base_bgm_path") or extras.get("bgm_path") or extras.get("bgm_custom_path")
+                    base_bgm_path = _web_url_to_path(base_bgm_url) if base_bgm_url else None
+                    if base_bgm_path and base_bgm_path.exists():
+                        probed = _probe_duration_seconds(base_bgm_path)
+                        if probed and probed > 0:
+                            target_duration_seconds = probed
+
+                trimmed_successfully = False
+                if target_duration_seconds and target_duration_seconds > 0:
+                    target_seconds = max(target_duration_seconds, 0.01)
+                    ffmpeg_cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(resolved),
+                        "-t",
+                        f"{target_seconds:.3f}",
+                        "-c",
+                        "copy",
+                        str(dest_path),
+                    ]
+                    try:
+                        ffmpeg_result = subprocess.run(
+                            ffmpeg_cmd,
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        if ffmpeg_result.returncode == 0:
+                            trimmed_successfully = True
+                        else:
+                            logger.warning(
+                                "ffmpeg trim failed for %s: %s",
+                                resolved,
+                                ffmpeg_result.stderr.strip(),
+                            )
+                    except Exception as exc:  # pylint: disable=broad-except
+                        logger.warning("ffmpeg trim raised error for %s: %s", resolved, exc)
+
+                    if not trimmed_successfully:
+                        try:
+                            from pydub import AudioSegment  # pylint: disable=import-outside-toplevel
+
+                            source_audio = AudioSegment.from_file(str(resolved))
+                            trimmed_audio = source_audio[: int(target_seconds * 1000)]
+                            trimmed_audio.export(str(dest_path), format="wav")
+                            trimmed_successfully = True
+                        except ImportError:
+                            logger.warning("pydub is not available; falling back to copy for BGM V2")
+                        except Exception as exc:  # pylint: disable=broad-except
+                            logger.warning("pydub trim failed for %s: %s", resolved, exc)
+
+                if not trimmed_successfully:
+                    try:
+                        shutil.copyfile(str(resolved), str(dest_path))
+                    except Exception as exc:  # pylint: disable=broad-except
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"배경음악 V2 파일을 저장하지 못했습니다: {exc}",
+                        ) from exc
+
+                resolved = dest_path
+
             v2_web_path = _path_to_web_url(resolved)
             extras["bgm_v2_path"] = v2_web_path
             extras["bgm_custom_v2_path"] = v2_web_path
