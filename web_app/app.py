@@ -82,6 +82,8 @@ from ai_shorts_maker.translator import (
 )
 from videoanalysis.config import SAVED_RESULTS_DIR
 from youtube.ytdl import download_with_options, parse_sub_langs
+from youtube.ytcompareinspector import compare_two, compare_dir, parse_resize
+from youtube.ytcopyrightinspector import run_precheck as run_copyright_precheck
 
 
 class RenderRequest(BaseModel):
@@ -127,6 +129,10 @@ STATIC_DIR = BASE_DIR / "static"
 YTDL_SETTINGS_PATH = BASE_DIR / "ytdl_settings.json"
 YTDL_HISTORY_PATH = BASE_DIR / "ytdl_history.json"
 DEFAULT_YTDL_OUTPUT_DIR = (BASE_DIR.parent / "youtube" / "download").resolve()
+COPYRIGHT_UPLOAD_DIR = BASE_DIR / "uploads" / "copyright"
+COPYRIGHT_REPORT_DIR = BASE_DIR / "reports" / "copyright"
+SIMILARITY_SETTINGS_PATH = BASE_DIR / "similarity_settings.json"
+COPYRIGHT_SETTINGS_PATH = BASE_DIR / "copyright_settings.json"
 DEFAULT_YTDL_SETTINGS: Dict[str, Any] = {
     "output_dir": str(DEFAULT_YTDL_OUTPUT_DIR),
     "sub_langs": "ko",
@@ -135,6 +141,118 @@ DEFAULT_YTDL_SETTINGS: Dict[str, Any] = {
     "auto_subs": True,
     "dry_run": False,
 }
+
+SIMILARITY_DEFAULTS: Dict[str, Any] = {
+    "video_a": "",
+    "video_b": "",
+    "ref_dir": "",
+    "fps": "1.0",
+    "resize": "320x320",
+    "max_frames": "200",
+    "phash_th": "12",
+    "weight_phash": "0.25",
+    "weight_orb": "0.25",
+    "weight_hist": "0.25",
+    "weight_psnr": "0.25",
+    "top_n": "5",
+}
+
+
+def load_similarity_settings() -> Dict[str, Any]:
+    settings = SIMILARITY_DEFAULTS.copy()
+    if SIMILARITY_SETTINGS_PATH.exists():
+        try:
+            data = json.loads(SIMILARITY_SETTINGS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for key in settings:
+                    if key in data:
+                        value = data[key]
+                        settings[key] = "" if value is None else str(value)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to load similarity settings: %s", exc)
+    return settings
+
+
+def save_similarity_settings(values: Dict[str, Any]) -> None:
+    payload: Dict[str, Any] = {}
+    for key in SIMILARITY_DEFAULTS:
+        if key in values:
+            value = values[key]
+            payload[key] = "" if value is None else str(value)
+    try:
+        SIMILARITY_SETTINGS_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.error("Failed to save similarity settings: %s", exc)
+        raise
+
+
+def default_similarity_form() -> Dict[str, Any]:
+    return load_similarity_settings()
+
+
+COPYRIGHT_DEFAULTS: Dict[str, Any] = {
+    "reference_dir": "",
+    "fps": "1.0",
+    "hash": "phash",
+    "resize": "256x256",
+    "max_frames": "",
+    "hamming_th": "12",
+    "high_th": "0.30",
+    "med_th": "0.15",
+    "audio_only": False,
+    "report_dir": "",
+}
+
+
+def load_copyright_settings() -> Dict[str, Any]:
+    settings = COPYRIGHT_DEFAULTS.copy()
+    if COPYRIGHT_SETTINGS_PATH.exists():
+        try:
+            data = json.loads(COPYRIGHT_SETTINGS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for key, default_value in settings.items():
+                    if key not in data:
+                        continue
+                    value = data[key]
+                    if isinstance(default_value, bool):
+                        settings[key] = bool(value)
+                    else:
+                        settings[key] = "" if value is None else str(value)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to load copyright settings: %s", exc)
+    return settings
+
+
+def save_copyright_settings(values: Dict[str, Any]) -> None:
+    payload: Dict[str, Any] = {}
+    for key, default_value in COPYRIGHT_DEFAULTS.items():
+        if isinstance(default_value, bool):
+            raw = values.get(key)
+            if isinstance(raw, str):
+                payload[key] = raw.lower() in {"1", "true", "yes", "on"}
+            else:
+                payload[key] = bool(raw)
+        else:
+            if key not in values:
+                continue
+            value = values[key]
+            payload[key] = "" if value is None else str(value)
+    try:
+        COPYRIGHT_SETTINGS_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.error("Failed to save copyright settings: %s", exc)
+        raise
+
+
+def default_copyright_form() -> Dict[str, Any]:
+    return load_copyright_settings()
+
 
 LANG_OPTIONS: List[tuple[str, str]] = [
     ("ko", "한국어"),
@@ -158,6 +276,22 @@ def _path_exists(value: Optional[str]) -> bool:
         return Path(value).exists()
     except OSError:
         return False
+
+
+def ensure_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def parse_resize_form(value: str) -> Optional[tuple[int, int]]:
+    try:
+        width_str, height_str = value.lower().split("x")
+        width = int(width_str)
+        height = int(height_str)
+        if width <= 0 or height <= 0:
+            raise ValueError
+        return width, height
+    except Exception:  # pylint: disable=broad-except
+        return None
 
 
 def build_dashboard_project(summary: ProjectSummary) -> DashboardProject:
@@ -193,6 +327,8 @@ ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 (ASSETS_DIR / "broll").mkdir(exist_ok=True)
 (ASSETS_DIR / "music").mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
+COPYRIGHT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+COPYRIGHT_REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="AI Shorts Maker")
 
@@ -1447,6 +1583,7 @@ async def ytdl_index(request: Request) -> HTMLResponse:
         "result": None,
         "error": None,
         "settings_saved": False,
+        "nav_active": "ytdl",
     }
     return templates.TemplateResponse("ytdl.html", context)
 
@@ -1461,6 +1598,224 @@ async def api_get_download_history() -> List[Dict[str, Any]]:
 async def api_delete_files(file_paths: List[str] = Body(...)) -> Dict[str, Any]:
     """Delete downloaded files."""
     return delete_download_files(file_paths)
+
+
+@app.get("/api/copyright/settings")
+def api_get_copyright_settings() -> Dict[str, Any]:
+    return load_copyright_settings()
+
+
+@app.post("/api/copyright/settings")
+def api_save_copyright_settings(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        save_copyright_settings(payload)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"설정을 저장하지 못했습니다: {exc}",
+        ) from exc
+    return {"message": "저작권 검사 기본 설정을 저장했습니다."}
+
+
+
+@app.get("/copyright", response_class=HTMLResponse)
+async def copyright_index(request: Request) -> HTMLResponse:
+    context = {
+        "request": request,
+        "form_values": default_copyright_form(),
+        "result_payload": None,
+        "error": None,
+        "default_report_dir": str(COPYRIGHT_REPORT_DIR),
+        "nav_active": "copyright",
+    }
+    return templates.TemplateResponse("copyright.html", context)
+
+
+@app.post("/copyright", response_class=HTMLResponse)
+async def copyright_check(
+    request: Request,
+    video_file: UploadFile = File(...),
+    reference_dir: Optional[str] = Form(None),
+    fps: str = Form("1.0"),
+    hash_alg: str = Form("phash"),
+    resize: str = Form("256x256"),
+    max_frames: Optional[str] = Form(""),
+    hamming_th: str = Form("12"),
+    high_th: str = Form("0.30"),
+    med_th: str = Form("0.15"),
+    audio_only: Optional[str] = Form(None),
+    report_dir: Optional[str] = Form(""),
+) -> HTMLResponse:
+    form_values = default_copyright_form()
+    result_payload: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+    reference_dir_clean = (reference_dir or "").strip()
+    fps_clean = (fps or "").strip() or form_values["fps"]
+    hash_clean = (hash_alg or "").strip().lower() or form_values["hash"]
+    resize_clean = (resize or "").strip() or form_values["resize"]
+    max_frames_clean = (max_frames or "").strip()
+    hamming_th_clean = (hamming_th or "").strip() or form_values["hamming_th"]
+    high_th_clean = (high_th or "").strip() or form_values["high_th"]
+    med_th_clean = (med_th or "").strip() or form_values["med_th"]
+    report_dir_clean = (report_dir or "").strip()
+    audio_only_flag = audio_only is not None
+
+    form_values.update(
+        {
+            "reference_dir": reference_dir_clean,
+            "fps": fps_clean,
+            "hash": hash_clean,
+            "resize": resize_clean,
+            "max_frames": max_frames_clean,
+            "hamming_th": hamming_th_clean,
+            "high_th": high_th_clean,
+            "med_th": med_th_clean,
+            "audio_only": audio_only_flag,
+            "report_dir": report_dir_clean,
+        }
+    )
+
+    saved_path: Optional[Path] = None
+    reference_dir_path: Optional[Path] = None
+    report_dir_path = COPYRIGHT_REPORT_DIR
+
+    try:
+        if not video_file or not video_file.filename:
+            error = "검사할 영상을 업로드하세요."
+
+        fps_value: Optional[float] = None
+        if error is None:
+            try:
+                fps_value = float(fps_clean)
+                if fps_value <= 0:
+                    raise ValueError
+            except ValueError:
+                error = "FPS는 0보다 큰 숫자로 입력하세요."
+
+        resize_tuple: Optional[tuple[int, int]] = None
+        if error is None:
+            resize_tuple = parse_resize_form(resize_clean)
+            if resize_tuple is None:
+                error = "리사이즈는 '가로x세로' 형식으로 입력하세요."
+
+        max_frames_value: Optional[int] = None
+        if error is None and max_frames_clean:
+            try:
+                max_frames_value = int(max_frames_clean)
+                if max_frames_value <= 0:
+                    raise ValueError
+            except ValueError:
+                error = "최대 프레임 수는 1 이상의 정수로 입력하세요."
+
+        hamming_th_value: Optional[int] = None
+        if error is None:
+            try:
+                hamming_th_value = int(hamming_th_clean)
+                if hamming_th_value < 0:
+                    raise ValueError
+            except ValueError:
+                error = "해밍 임계값은 0 이상의 정수로 입력하세요."
+
+        high_th_value: Optional[float] = None
+        if error is None:
+            try:
+                high_th_value = float(high_th_clean)
+                if high_th_value < 0:
+                    raise ValueError
+            except ValueError:
+                error = "HIGH 기준은 0 이상의 숫자로 입력하세요."
+
+        med_th_value: Optional[float] = None
+        if error is None:
+            try:
+                med_th_value = float(med_th_clean)
+                if med_th_value < 0:
+                    raise ValueError
+            except ValueError:
+                error = "MED 기준은 0 이상의 숫자로 입력하세요."
+
+        if error is None:
+            if hash_clean not in {"phash", "ahash", "dhash"}:
+                error = "지원하지 않는 해시 방식입니다."
+
+        if error is None and reference_dir_clean:
+            candidate = Path(reference_dir_clean).expanduser().resolve()
+            if not candidate.exists() or not candidate.is_dir():
+                error = f"비교 기준 폴더가 존재하지 않습니다: {candidate}"
+            else:
+                reference_dir_path = candidate
+
+        if error is None:
+            if report_dir_clean:
+                report_candidate = Path(report_dir_clean).expanduser()
+            else:
+                report_candidate = COPYRIGHT_REPORT_DIR
+            try:
+                ensure_directory(report_candidate)
+                report_dir_path = report_candidate.resolve()
+            except OSError as exc:  # pragma: no cover - filesystem error
+                logger.exception("Failed to prepare copyright report directory: %s", exc)
+                error = f"리포트 저장 폴더를 사용할 수 없습니다: {exc}"
+
+        if error is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            original_suffix = Path(video_file.filename).suffix if video_file.filename else ""
+            if not original_suffix:
+                original_suffix = ".mp4"
+            filename = f"{timestamp}_{uuid4().hex[:8]}{original_suffix}"
+            saved_path = COPYRIGHT_UPLOAD_DIR / filename
+            try:
+                with saved_path.open("wb") as buffer:
+                    while True:
+                        chunk = await video_file.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        buffer.write(chunk)
+            except Exception as exc:  # pragma: no cover - I/O error path
+                logger.exception("Failed to save uploaded video for copyright check: %s", exc)
+                error = f"업로드 저장 중 오류가 발생했습니다: {exc}"
+                if saved_path.exists():
+                    try:
+                        saved_path.unlink()
+                    except OSError:
+                        pass
+
+        if error is None and saved_path is not None:
+            try:
+                result_payload = await run_in_threadpool(
+                    run_copyright_precheck,
+                    saved_path,
+                    reference_dir_path,
+                    fps=fps_value or 1.0,
+                    hash_name=hash_clean,
+                    hamming_th=hamming_th_value or int(form_values["hamming_th"]),
+                    resize=resize_tuple or parse_resize_form(form_values["resize"]),
+                    max_frames=max_frames_value,
+                    high_th=high_th_value or float(form_values["high_th"]),
+                    med_th=med_th_value or float(form_values["med_th"]),
+                    audio_only=audio_only_flag,
+                    report_dir=report_dir_path,
+                    show_progress=False,
+                )
+                if result_payload is not None:
+                    result_payload["uploaded_filename"] = video_file.filename or saved_path.name
+                    result_payload["saved_video_path"] = str(saved_path)
+            except Exception as exc:  # pragma: no cover - runtime failure
+                logger.exception("Copyright precheck failed: %s", exc)
+                error = f"저작권 검사 중 오류가 발생했습니다: {exc}"
+    finally:
+        await video_file.close()
+
+    context = {
+        "request": request,
+        "form_values": form_values,
+        "result_payload": result_payload,
+        "error": error,
+        "default_report_dir": str(COPYRIGHT_REPORT_DIR),
+        "nav_active": "copyright",
+    }
+    return templates.TemplateResponse("copyright.html", context)
 
 
 @app.post("/ytdl", response_class=HTMLResponse)
@@ -1538,8 +1893,248 @@ async def ytdl_download(
         "error": error,
         "result": result,
         "settings_saved": settings_saved,
+        "nav_active": "ytdl",
     }
     return templates.TemplateResponse("ytdl.html", context)
+
+
+
+
+
+
+
+@app.get("/api/similarity/settings")
+def api_get_similarity_settings() -> Dict[str, Any]:
+    return load_similarity_settings()
+
+
+@app.post("/api/similarity/settings")
+def api_save_similarity_settings(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        save_similarity_settings(payload)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"설정을 저장하지 못했습니다: {exc}",
+        ) from exc
+    return {"message": "영상 유사도 기본 설정을 저장했습니다."}
+
+
+
+@app.get("/similarity", response_class=HTMLResponse)
+async def similarity_index(request: Request) -> HTMLResponse:
+    context = {
+        "request": request,
+        "form_values": default_similarity_form(),
+        "result": None,
+        "error": None,
+        "nav_active": "similarity",
+    }
+    return templates.TemplateResponse("similarity.html", context)
+
+
+@app.post("/similarity", response_class=HTMLResponse)
+async def similarity_check(
+    request: Request,
+    video_a: str = Form(""),
+    video_b: Optional[str] = Form(None),
+    ref_dir: Optional[str] = Form(None),
+    fps: str = Form("1.0"),
+    resize: str = Form("320x320"),
+    max_frames: Optional[str] = Form("200"),
+    phash_th: str = Form("12"),
+    weight_phash: str = Form("0.25"),
+    weight_orb: str = Form("0.25"),
+    weight_hist: str = Form("0.25"),
+    weight_psnr: str = Form("0.25"),
+    top_n: str = Form("5"),
+) -> HTMLResponse:
+    video_a_clean = video_a.strip()
+    video_b_clean = (video_b or "").strip()
+    ref_dir_clean = (ref_dir or "").strip()
+    fps_clean = (fps or "").strip() or SIMILARITY_DEFAULTS["fps"]
+    resize_clean = (resize or "").strip() or SIMILARITY_DEFAULTS["resize"]
+    max_frames_clean = (max_frames or "").strip() or SIMILARITY_DEFAULTS["max_frames"]
+    phash_th_clean = (phash_th or "").strip() or SIMILARITY_DEFAULTS["phash_th"]
+    weight_phash_clean = (weight_phash or "").strip() or SIMILARITY_DEFAULTS["weight_phash"]
+    weight_orb_clean = (weight_orb or "").strip() or SIMILARITY_DEFAULTS["weight_orb"]
+    weight_hist_clean = (weight_hist or "").strip() or SIMILARITY_DEFAULTS["weight_hist"]
+    weight_psnr_clean = (weight_psnr or "").strip() or SIMILARITY_DEFAULTS["weight_psnr"]
+    top_n_clean = (top_n or "").strip() or SIMILARITY_DEFAULTS["top_n"]
+
+    form_values = {
+        "video_a": video_a_clean,
+        "video_b": video_b_clean,
+        "ref_dir": ref_dir_clean,
+        "fps": fps_clean,
+        "resize": resize_clean,
+        "max_frames": max_frames_clean,
+        "phash_th": phash_th_clean,
+        "weight_phash": weight_phash_clean,
+        "weight_orb": weight_orb_clean,
+        "weight_hist": weight_hist_clean,
+        "weight_psnr": weight_psnr_clean,
+        "top_n": top_n_clean,
+    }
+
+    error: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+
+    a_path: Optional[Path] = None
+    b_path: Optional[Path] = None
+    dir_path: Optional[Path] = None
+
+    if not video_a_clean:
+        error = "기준 영상 경로를 입력하세요."
+    else:
+        candidate = Path(video_a_clean).expanduser().resolve()
+        if not candidate.exists() or not candidate.is_file():
+            error = f"파일이 존재하지 않습니다: {candidate}"
+        else:
+            a_path = candidate
+
+    fps_value: Optional[float] = None
+    if error is None:
+        try:
+            fps_value = float(fps_clean)
+            if fps_value <= 0:
+                raise ValueError
+        except ValueError:
+            error = "FPS는 숫자로 입력하세요."
+
+    resize_tuple: Optional[Tuple[int, int]] = None
+    if error is None:
+        resize_tuple = parse_resize(resize_clean)
+
+    max_frames_value: Optional[int] = None
+    if error is None and max_frames_clean:
+        try:
+            max_frames_value = int(max_frames_clean)
+            if max_frames_value <= 0:
+                raise ValueError
+        except ValueError:
+            error = "최대 프레임 수는 1 이상의 정수로 입력하세요."
+
+    phash_th_value: Optional[int] = None
+    if error is None:
+        try:
+            phash_th_value = int(phash_th_clean)
+            if phash_th_value < 0:
+                raise ValueError
+        except ValueError:
+            error = "pHash 임계값은 0 이상의 정수로 입력하세요."
+
+    weights_tuple: Optional[Tuple[float, float, float, float]] = None
+    if error is None:
+        try:
+            weights_tuple = (
+                float(weight_phash_clean),
+                float(weight_orb_clean),
+                float(weight_hist_clean),
+                float(weight_psnr_clean),
+            )
+        except ValueError:
+            error = "가중치는 숫자로 입력하세요."
+
+    top_n_value = 5
+    if error is None:
+        try:
+            top_n_value = int(top_n_clean)
+            if top_n_value <= 0:
+                top_n_value = 5
+                form_values["top_n"] = str(top_n_value)
+        except ValueError:
+            error = "상위 출력 개수는 정수로 입력하세요."
+
+    mode: Optional[str] = None
+    if error is None and a_path is not None:
+        if video_b_clean and ref_dir_clean:
+            error = "비교 영상과 폴더 중 하나만 지정하세요."
+        elif video_b_clean:
+            candidate = Path(video_b_clean).expanduser().resolve()
+            if not candidate.exists() or not candidate.is_file():
+                error = f"비교 영상이 존재하지 않습니다: {candidate}"
+            else:
+                b_path = candidate
+                mode = "pair"
+        elif ref_dir_clean:
+            candidate = Path(ref_dir_clean).expanduser().resolve()
+            if not candidate.exists() or not candidate.is_dir():
+                error = f"폴더가 존재하지 않습니다: {candidate}"
+            else:
+                dir_path = candidate
+                mode = "dir"
+        else:
+            error = "비교할 영상 또는 폴더를 입력하세요."
+
+    if error is None and mode == "pair" and a_path and b_path:
+        try:
+            scores = await run_in_threadpool(
+                compare_two,
+                a_path,
+                b_path,
+                fps_value or 1.0,
+                resize_tuple,
+                max_frames_value,
+                phash_th_value or 12,
+                weights_tuple or (0.25, 0.25, 0.25, 0.25),
+            )
+            result = {
+                "mode": "pair",
+                "a_path": str(a_path),
+                "b_path": str(b_path),
+                "scores": scores,
+            }
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Video similarity check failed (pair): %s", exc)
+            error = str(exc)
+
+    if error is None and mode == "dir" and a_path and dir_path:
+        try:
+            results = await run_in_threadpool(
+                compare_dir,
+                a_path,
+                dir_path,
+                fps_value or 1.0,
+                resize_tuple,
+                max_frames_value,
+                phash_th_value or 12,
+                weights_tuple or (0.25, 0.25, 0.25, 0.25),
+            )
+            entries: List[Dict[str, Any]] = []
+            for rank, (name, data) in enumerate(results[:top_n_value], start=1):
+                if isinstance(data, dict) and "error" in data:
+                    entries.append({
+                        "rank": rank,
+                        "name": name,
+                        "error": data.get("error"),
+                    })
+                else:
+                    entries.append({
+                        "rank": rank,
+                        "name": name,
+                        "scores": data,
+                    })
+            result = {
+                "mode": "dir",
+                "a_path": str(a_path),
+                "dir_path": str(dir_path),
+                "entries": entries,
+                "total": len(results),
+                "top_n": top_n_value,
+            }
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Video similarity check failed (directory): %s", exc)
+            error = str(exc)
+
+    context = {
+        "request": request,
+        "form_values": form_values,
+        "result": result,
+        "error": error,
+        "nav_active": "similarity",
+    }
+    return templates.TemplateResponse("similarity.html", context)
 
 
 @app.get("/api/dashboard/projects", response_model=List[DashboardProject])

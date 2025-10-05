@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>유튜브 쇼츠 저작권 사전 검사</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <h1>유튜브 쇼츠 저작권 사전 검사</h1>
+        <nav class="nav-links">
+            <a href="/ytdl" class="nav-link {% if nav_active == 'ytdl' %}active{% endif %}">⬇️ 다운로드 도구</a>
+            <a href="/analysis" class="nav-link">📊 분석 도구</a>
+            <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
+            <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
+            <a href="/copyright" class="nav-link {% if nav_active == 'copyright' %}active{% endif %}">🛡️ 저작권 검사</a>
+        </nav>
+    </header>
+
+    <section class="panel">
+        <h2>검사 설정</h2>
+        <form method="post" action="/copyright" enctype="multipart/form-data" class="copyright-form">
+            <div class="field">
+                <label for="video_file">쇼츠 영상 업로드</label>
+                <input type="file" id="video_file" name="video_file" accept="video/*" required>
+            </div>
+            <div class="field">
+                <label for="reference_dir">비교 기준 폴더 (선택)</label>
+                <input type="text" id="reference_dir" name="reference_dir" value="{{ form_values.reference_dir }}" placeholder="/path/to/reference_videos">
+                <span class="hint-text">폴더 내의 mp4/mov/mkv/webm 파일과 유사도를 비교합니다.</span>
+            </div>
+            <div class="field inline">
+                <label for="fps">샘플 FPS</label>
+                <input type="number" step="0.1" min="0.1" id="fps" name="fps" value="{{ form_values.fps }}">
+                <label for="hash">해시 방식</label>
+                <select id="hash" name="hash">
+                    {% for option in ['phash','ahash','dhash'] %}
+                    <option value="{{ option }}" {% if form_values.hash == option %}selected{% endif %}>{{ option|upper }}</option>
+                    {% endfor %}
+                </select>
+                <label for="resize">리사이즈</label>
+                <input type="text" id="resize" name="resize" value="{{ form_values.resize }}" placeholder="256x256">
+                <label for="max_frames">최대 프레임</label>
+                <input type="number" min="1" id="max_frames" name="max_frames" value="{{ form_values.max_frames }}" placeholder="무제한">
+            </div>
+            <div class="field inline">
+                <label for="hamming_th">해밍 임계값</label>
+                <input type="number" min="0" id="hamming_th" name="hamming_th" value="{{ form_values.hamming_th }}">
+                <label for="high_th">HIGH 기준</label>
+                <input type="number" step="0.01" min="0" id="high_th" name="high_th" value="{{ form_values.high_th }}">
+                <label for="med_th">MED 기준</label>
+                <input type="number" step="0.01" min="0" id="med_th" name="med_th" value="{{ form_values.med_th }}">
+            </div>
+            <div class="field inline">
+                <label><input type="checkbox" name="audio_only" {% if form_values.audio_only %}checked{% endif %}> 오디오만 검사</label>
+                <label for="report_dir">리포트 저장 폴더</label>
+                <input type="text" id="report_dir" name="report_dir" value="{{ form_values.report_dir }}" placeholder="기본: {{ default_report_dir }}">
+            </div>
+            <div class="form-actions">
+                <button type="button" id="copyright-save-settings" class="btn-secondary">설정 저장</button>
+                <button type="submit">검사 실행</button>
+            </div>
+        </form>
+    </section>
+
+    {% if error %}
+    <div class="alert error">
+        <strong>오류:</strong> {{ error }}
+    </div>
+    {% endif %}
+
+    {% if result_payload %}
+    <section class="panel result-panel">
+        <h2>검사 결과</h2>
+        <div class="result-summary">
+            <span class="risk-badge risk-{{ result_payload.result.risk | lower }}">{{ result_payload.result.risk }}</span>
+            <div class="result-meta">
+                <p><strong>업로드 파일:</strong> {{ result_payload.uploaded_filename }}</p>
+                <p><strong>생성 시각:</strong> {{ result_payload.result.created_at }}</p>
+            </div>
+        </div>
+
+        <div class="result-grid">
+            <section>
+                <h3>오디오 검사</h3>
+                {% set audio = result_payload.result.audio %}
+                {% if audio.hit %}
+                <p>🔐 ACRCloud 감지 결과 <strong>HIT</strong></p>
+                <ul>
+                    <li><strong>곡명:</strong> {{ audio.title }}</li>
+                    <li><strong>아티스트:</strong> {{ audio.artists or '알 수 없음' }}</li>
+                    <li><strong>점수:</strong> {{ audio.score }}</li>
+                    <li><strong>ACRID:</strong> {{ audio.acrid }}</li>
+                </ul>
+                {% elif audio.error %}
+                <p>⚠️ 오디오 추출 실패: {{ audio.error }}</p>
+                {% else %}
+                <p>✅ 일치하는 음악이 발견되지 않았습니다.</p>
+                {% endif %}
+            </section>
+            <section>
+                <h3>영상 검사</h3>
+                {% set video = result_payload.result.reference_compare %}
+                {% if video.best_match %}
+                <p>최고 유사도: <strong>{{ '%.4f'|format(result_payload.match_ratio) }}</strong></p>
+                <p>파일: {{ video.best_match.ref or '없음' }}</p>
+                <p>대상 폴더: {{ video.total_refs }}개 비교</p>
+                {% elif video.note %}
+                <p>{{ video.note }}</p>
+                {% else %}
+                <p>영상 비교 결과가 없습니다.</p>
+                {% endif %}
+                {% if result_payload.result.video_hash.error %}
+                <p>⚠️ 프레임 해싱 오류: {{ result_payload.result.video_hash.error }}</p>
+                {% elif result_payload.result.video_hash.frames %}
+                <p>샘플링 프레임 수: {{ result_payload.result.video_hash.frames }}</p>
+                {% endif %}
+            </section>
+        </div>
+
+        <details class="advanced">
+            <summary>입력 파라미터 확인</summary>
+            <table class="params-table">
+                <tbody>
+                {% for key, value in result_payload.result.params.items() %}
+                    <tr>
+                        <th scope="row">{{ key }}</th>
+                        <td>{{ value }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </details>
+    </section>
+
+    <section class="panel">
+        <h2>결과 파일</h2>
+        <ul class="file-list">
+            <li><strong>JSON 리포트</strong>: <code>{{ result_payload.report_json }}</code></li>
+            {% if result_payload.matches_csv %}
+            <li><strong>CSV 매칭 로그</strong>: <code>{{ result_payload.matches_csv }}</code></li>
+            {% endif %}
+            {% if result_payload.temp_audio %}
+            <li><strong>추출 WAV</strong>: <code>{{ result_payload.temp_audio }}</code></li>
+            {% endif %}
+        </ul>
+    </section>
+    {% endif %}
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.querySelector('.copyright-form');
+    const saveButton = document.getElementById('copyright-save-settings');
+    if (!form || !saveButton) {
+        return;
+    }
+
+    saveButton.addEventListener('click', async () => {
+        const formData = new FormData(form);
+        const payload = {};
+
+        formData.forEach((value, key) => {
+            if (key === 'video_file') {
+                return;
+            }
+            if (key === 'audio_only') {
+                payload.audio_only = true;
+            } else {
+                payload[key] = value;
+            }
+        });
+
+        if (!Object.prototype.hasOwnProperty.call(payload, 'audio_only')) {
+            payload.audio_only = false;
+        }
+
+        saveButton.disabled = true;
+        const originalText = saveButton.textContent;
+        saveButton.textContent = '저장 중...';
+
+        try {
+            const response = await fetch('/api/copyright/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({}));
+                const detail = errorPayload.detail || response.statusText || '알 수 없는 오류';
+                throw new Error(detail);
+            }
+
+            const result = await response.json().catch(() => ({}));
+            alert(result.message || '기본 설정을 저장했습니다.');
+        } catch (error) {
+            console.error('Failed to save copyright settings:', error);
+            alert(`설정을 저장하지 못했습니다: ${error.message}`);
+        } finally {
+            saveButton.disabled = false;
+            saveButton.textContent = originalText;
+        }
+    });
+});
+</script>
+
+<style>
+.form-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-end;
+}
+</style>
+</body>
+</html>

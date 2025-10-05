@@ -208,6 +208,545 @@
         let timelineStatusElem = null;
         let timelineOriginalDurationElem = null;
         let timelineTranslatedDurationElem = null;
+        let translatedMuteBtn = null;
+        let translatedTrimBtn = null;
+        let translatedTimelineMuted = false;
+        let bgmPlaybackVolume = 1;
+        let bgmTrimMode = false;
+        let bgmActiveRegion = null;
+        let bgmRegionsPlugin = null;
+        const bgmVolumeRangeInput = document.getElementById('bgm-volume-range');
+        const bgmVolumeValueLabel = document.getElementById('bgm-volume-value');
+        const bgmVolumeApplyButton = document.getElementById('btn-bgm-apply-volume');
+        const bgmTrimToggleButton = document.getElementById('btn-bgm-trim-mode');
+        const bgmTrimDeleteButton = document.getElementById('btn-bgm-trim-delete');
+
+        function clamp(value, min, max) {
+            if (Number.isNaN(value)) {
+                return min;
+            }
+            return Math.min(Math.max(value, min), max);
+        }
+
+        function clearBgmRegion() {
+            if (bgmActiveRegion) {
+                try {
+                    bgmActiveRegion.remove();
+                } catch (error) {
+                    console.debug('Failed to remove BGM region:', error);
+                }
+            }
+            bgmActiveRegion = null;
+            if (bgmTrimDeleteButton) {
+                bgmTrimDeleteButton.disabled = true;
+            }
+        }
+
+        function updateBgmVolumeUI(hasTrack) {
+            if (!bgmVolumeRangeInput || !bgmVolumeValueLabel) {
+                return;
+            }
+            if (hasTrack) {
+                const percent = Math.round(bgmPlaybackVolume * 100);
+                bgmVolumeRangeInput.disabled = false;
+                bgmVolumeRangeInput.value = String(percent);
+                bgmVolumeValueLabel.textContent = `${percent}%`;
+                const inlineBgmBtn = document.getElementById('btn-bgm-load');
+                if (inlineBgmBtn) {
+                    inlineBgmBtn.disabled = false;
+                }
+            } else {
+                bgmVolumeRangeInput.disabled = true;
+                bgmVolumeRangeInput.value = '100';
+                bgmVolumeValueLabel.textContent = '--';
+                const inlineBgmBtn = document.getElementById('btn-bgm-load');
+                if (inlineBgmBtn) {
+                    inlineBgmBtn.disabled = true;
+                }
+            }
+            if (bgmVolumeApplyButton) {
+                bgmVolumeApplyButton.disabled = !hasTrack;
+            }
+            if (bgmTrimToggleButton) {
+                if (!hasTrack) {
+                    bgmTrimMode = false;
+                    bgmTrimToggleButton.classList.remove('active');
+                    bgmTrimToggleButton.textContent = '✂️ 자르기';
+                    clearBgmRegion();
+                }
+                bgmTrimToggleButton.disabled = !hasTrack;
+            }
+            if (bgmTrimDeleteButton) {
+                bgmTrimDeleteButton.disabled = !hasTrack || !bgmActiveRegion;
+            }
+        }
+
+        function applyBgmPlaybackVolume(percent) {
+            const clampedPercent = clamp(Number(percent) || 0, 0, 200);
+            bgmPlaybackVolume = clampedPercent / 100;
+            if (bgmVolumeValueLabel) {
+                bgmVolumeValueLabel.textContent = `${clampedPercent}%`;
+            }
+            if (bgmVolumeRangeInput && bgmVolumeRangeInput.value !== String(clampedPercent)) {
+                bgmVolumeRangeInput.value = String(clampedPercent);
+            }
+            if (window.bgmTimelineWaveform && typeof window.bgmTimelineWaveform.setVolume === 'function') {
+                window.bgmTimelineWaveform.setVolume(Math.min(bgmPlaybackVolume, 2));
+            }
+        }
+
+        function destroyBgmWaveform() {
+            if (bgmRegionsPlugin) {
+                try {
+                    bgmRegionsPlugin.clearRegions();
+                } catch (error) {
+                    console.debug('Failed to clear BGM regions:', error);
+                }
+                if (typeof bgmRegionsPlugin.destroy === 'function') {
+                    try {
+                        bgmRegionsPlugin.destroy();
+                    } catch (error) {
+                        console.debug('Failed to destroy BGM regions plugin:', error);
+                    }
+                }
+            }
+            bgmRegionsPlugin = null;
+            bgmActiveRegion = null;
+            if (window.bgmTimelineWaveform) {
+                try {
+                    window.bgmTimelineWaveform.destroy();
+                } catch (error) {
+                    console.debug('Failed to destroy BGM waveform:', error);
+                }
+            }
+            window.bgmTimelineWaveform = null;
+            window.bgmTimelineUrl = '';
+            const inlineBgmBtn = document.getElementById('btn-bgm-load');
+            if (inlineBgmBtn) {
+                inlineBgmBtn.disabled = true;
+            }
+        }
+
+        function setBgmTrack(rawPath, options = {}) {
+            const trackContainer = document.getElementById('timeline-track-bgm');
+            const waveformContainer = document.getElementById('timeline-bgm-waveform');
+            const hasRawPath = typeof rawPath === 'string' && rawPath.trim().length > 0;
+
+            if (!trackContainer || !waveformContainer) {
+                return;
+            }
+
+            if (!hasRawPath) {
+                destroyBgmWaveform();
+                trackContainer.style.display = 'none';
+                updateBgmVolumeUI(false);
+                clearBgmRegion();
+                return;
+            }
+
+            const normalizedPath = toWebAudioPath(rawPath).trim();
+            const previousPath = window.bgmTimelineUrl || '';
+            const forceReload = Boolean(options.force);
+            const initialPercent = clamp(
+                Number.isFinite(Number(options.volumePercent)) ? Number(options.volumePercent) : Math.round(bgmPlaybackVolume * 100),
+                0,
+                200,
+            );
+            const cacheToken = options.cacheToken || Date.now();
+            const separator = normalizedPath.includes('?') ? '&' : '?';
+            const cacheBustedUrl = `${normalizedPath}${separator}v=${cacheToken}`;
+
+            const previousTrimMode = bgmTrimMode;
+            bgmTrimMode = false;
+            if (bgmTrimToggleButton) {
+                bgmTrimToggleButton.classList.remove('active');
+                bgmTrimToggleButton.textContent = '✂️ 자르기';
+            }
+            clearBgmRegion();
+
+            if (!forceReload && previousPath === normalizedPath && window.bgmTimelineWaveform) {
+                bgmPlaybackVolume = initialPercent / 100;
+                applyBgmPlaybackVolume(initialPercent);
+                updateBgmVolumeUI(true);
+                return;
+            }
+
+            destroyBgmWaveform();
+            trackContainer.style.display = '';
+
+            if (typeof WaveSurfer === 'undefined') {
+                console.warn('WaveSurfer is not loaded; cannot render BGM track.');
+                updateBgmVolumeUI(true);
+                return;
+            }
+
+            if (window.WaveSurfer && window.WaveSurfer.Regions) {
+                try {
+                    bgmRegionsPlugin = window.WaveSurfer.Regions.create({
+                        dragSelection: bgmTrimMode
+                            ? { color: 'rgba(255, 214, 0, 0.28)' }
+                            : false,
+                    });
+                } catch (error) {
+                    console.debug('Failed to create BGM regions plugin:', error);
+                    bgmRegionsPlugin = null;
+                }
+            }
+
+            window.bgmTimelineWaveform = WaveSurfer.create({
+                container: '#timeline-bgm-waveform',
+                height: 90,
+                waveColor: '#ffd166',
+                progressColor: '#f4a261',
+                cursorColor: '#ffffff',
+                normalize: true,
+                responsive: true,
+                plugins: bgmRegionsPlugin ? [bgmRegionsPlugin] : [],
+            });
+
+            if (bgmRegionsPlugin) {
+                bgmRegionsPlugin.on('region-created', (region) => {
+                    if (bgmActiveRegion && bgmActiveRegion.id !== region.id) {
+                        try {
+                            bgmActiveRegion.remove();
+                        } catch (error) {
+                            console.debug('Failed to remove previous BGM region:', error);
+                        }
+                    }
+                    region.color = 'rgba(255, 214, 0, 0.32)';
+                    bgmActiveRegion = region;
+                    if (bgmTrimDeleteButton) {
+                        bgmTrimDeleteButton.disabled = false;
+                    }
+                    region.on('click', () => {
+                        bgmActiveRegion = region;
+                        if (bgmTrimDeleteButton) {
+                            bgmTrimDeleteButton.disabled = false;
+                        }
+                    });
+                    region.on('remove', () => {
+                        if (bgmActiveRegion === region) {
+                            bgmActiveRegion = null;
+                            if (bgmTrimDeleteButton) {
+                                bgmTrimDeleteButton.disabled = true;
+                            }
+                        }
+                    });
+                });
+            }
+
+            window.bgmTimelineWaveform.on('ready', () => {
+                window.bgmTimelineUrl = normalizedPath;
+                bgmPlaybackVolume = initialPercent / 100;
+                applyBgmPlaybackVolume(initialPercent);
+                updateBgmVolumeUI(true);
+                if (bgmRegionsPlugin) {
+                    if (previousTrimMode && typeof bgmRegionsPlugin.enableDragSelection === 'function') {
+                        bgmTrimMode = true;
+                        bgmRegionsPlugin.enableDragSelection({ color: 'rgba(255, 214, 0, 0.28)' });
+                        if (bgmTrimToggleButton) {
+                            bgmTrimToggleButton.classList.add('active');
+                            bgmTrimToggleButton.textContent = '✂️ 자르기 종료';
+                        }
+                    } else if (typeof bgmRegionsPlugin.disableDragSelection === 'function') {
+                        bgmRegionsPlugin.disableDragSelection();
+                    }
+                }
+            });
+
+            window.bgmTimelineWaveform.on('error', (error) => {
+                console.error('BGM waveform load error:', error, cacheBustedUrl);
+            });
+
+            window.bgmTimelineWaveform.load(cacheBustedUrl);
+        }
+
+        async function commitBgmVolume() {
+            if (!currentProject) {
+                alert('프로젝트를 먼저 로드하세요.');
+                return;
+            }
+            if (!bgmVolumeRangeInput) {
+                alert('볼륨 조절 슬라이더를 찾을 수 없습니다.');
+                return;
+            }
+            if (!window.bgmTimelineWaveform) {
+                alert('배경음악 트랙이 준비되어 있지 않습니다.');
+                return;
+            }
+
+            const percent = clamp(Number(bgmVolumeRangeInput.value || '100'), 0, 200);
+
+            try {
+                if (bgmVolumeApplyButton) {
+                    bgmVolumeApplyButton.disabled = true;
+                    bgmVolumeApplyButton.textContent = '적용 중...';
+                }
+
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/bgm/volume`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ percent }),
+                });
+
+                if (!response.ok) {
+                    let detail = '배경음악 볼륨을 조정하지 못했습니다.';
+                    try {
+                        const errorPayload = await response.json();
+                        if (errorPayload?.detail) {
+                            detail = errorPayload.detail;
+                        }
+                    } catch (error) {
+                        console.debug('Failed to parse BGM volume error payload:', error);
+                    }
+                    throw new Error(detail);
+                }
+
+                const result = await response.json();
+                const appliedPercent = clamp(result.bgm_volume_percent ?? percent, 0, 200);
+                const cacheToken = result.cache_token || Date.now();
+
+                if (!currentProject.extra) {
+                    currentProject.extra = {};
+                }
+                currentProject.extra.bgm_path = result.bgm_path;
+                currentProject.extra.bgm_volume_percent = appliedPercent;
+                currentProject.extra.bgm_cache_token = cacheToken;
+
+                setBgmTrack(result.bgm_path, {
+                    volumePercent: appliedPercent,
+                    cacheToken,
+                    force: true,
+                });
+
+                alert(`배경음악 볼륨을 ${Math.round(appliedPercent)}%로 조정했습니다.`);
+            } catch (error) {
+                console.error('BGM volume apply failed:', error);
+                alert(error?.message || '배경음악 볼륨을 조정하지 못했습니다.');
+            } finally {
+                if (bgmVolumeApplyButton) {
+                    bgmVolumeApplyButton.disabled = !window.bgmTimelineWaveform;
+                    bgmVolumeApplyButton.textContent = '🎚️ 적용';
+                }
+            }
+        }
+
+        function setBgmTrimMode(enabled) {
+            if (!window.bgmTimelineWaveform || !bgmRegionsPlugin) {
+                alert('배경음악 트랙을 먼저 준비하세요.');
+                return;
+            }
+
+            bgmTrimMode = Boolean(enabled);
+            if (bgmTrimToggleButton) {
+                bgmTrimToggleButton.classList.toggle('active', bgmTrimMode);
+                bgmTrimToggleButton.textContent = bgmTrimMode ? '✂️ 자르기 종료' : '✂️ 자르기';
+            }
+
+            if (bgmRegionsPlugin) {
+                if (bgmTrimMode && typeof bgmRegionsPlugin.enableDragSelection === 'function') {
+                    bgmRegionsPlugin.enableDragSelection({ color: 'rgba(255, 214, 0, 0.28)' });
+                } else if (typeof bgmRegionsPlugin.disableDragSelection === 'function') {
+                    bgmRegionsPlugin.disableDragSelection();
+                    clearBgmRegion();
+                }
+            }
+        }
+
+        async function deleteSelectedBgmRegion() {
+            if (!currentProject) {
+                alert('프로젝트를 먼저 로드하세요.');
+                return;
+            }
+            if (!bgmActiveRegion) {
+                alert('삭제할 구간을 먼저 선택하세요.');
+                return;
+            }
+
+            const start = clamp(Number(bgmActiveRegion.start || 0), 0, Number.POSITIVE_INFINITY);
+            const end = clamp(Number(bgmActiveRegion.end || 0), 0, Number.POSITIVE_INFINITY);
+
+            if (end - start < 0.05) {
+                alert('0.05초 이상 선택해야 삭제할 수 있습니다.');
+                return;
+            }
+
+            if (!window.confirm('선택한 구간의 배경음악을 삭제할까요?')) {
+                return;
+            }
+
+            try {
+                if (bgmTrimDeleteButton) {
+                    bgmTrimDeleteButton.disabled = true;
+                    bgmTrimDeleteButton.textContent = '삭제 중...';
+                }
+
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/bgm/cut`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start,
+                        end,
+                        mode: 'remove',
+                    }),
+                });
+
+                if (!response.ok) {
+                    let detail = '선택 구간을 삭제하지 못했습니다.';
+                    try {
+                        const errorPayload = await response.json();
+                        if (errorPayload?.detail) {
+                            detail = errorPayload.detail;
+                        }
+                    } catch (error) {
+                        console.debug('Failed to parse BGM cut error payload:', error);
+                    }
+                    throw new Error(detail);
+                }
+
+                const result = await response.json();
+                const appliedPercent = clamp(result.bgm_volume_percent ?? (currentProject.extra?.bgm_volume_percent ?? 100), 0, 200);
+                const cacheToken = result.cache_token || Date.now();
+
+                if (!currentProject.extra) {
+                    currentProject.extra = {};
+                }
+                currentProject.extra.bgm_path = result.bgm_path;
+                currentProject.extra.bgm_volume_percent = appliedPercent;
+                currentProject.extra.bgm_cache_token = cacheToken;
+
+                clearBgmRegion();
+                setBgmTrack(result.bgm_path, {
+                    volumePercent: appliedPercent,
+                    cacheToken,
+                    force: true,
+                });
+
+                alert('선택한 구간을 삭제했습니다.');
+            } catch (error) {
+                console.error('BGM trim delete failed:', error);
+                alert(error?.message || '선택 구간을 삭제하지 못했습니다.');
+            } finally {
+                if (bgmTrimDeleteButton) {
+                    bgmTrimDeleteButton.disabled = !bgmActiveRegion;
+                    bgmTrimDeleteButton.textContent = '🗑️ 버리기';
+                }
+            }
+        }
+
+        if (bgmVolumeRangeInput) {
+            updateBgmVolumeUI(false);
+            bgmVolumeRangeInput.addEventListener('input', () => {
+                applyBgmPlaybackVolume(bgmVolumeRangeInput.value);
+            });
+        } else if (bgmVolumeValueLabel) {
+            bgmVolumeValueLabel.textContent = '--';
+        }
+
+        if (bgmVolumeApplyButton) {
+            bgmVolumeApplyButton.addEventListener('click', () => {
+                commitBgmVolume().catch((error) => console.error('Failed to commit BGM volume:', error));
+            });
+        }
+
+        if (bgmTrimToggleButton) {
+            bgmTrimToggleButton.addEventListener('click', () => {
+                if (!window.bgmTimelineWaveform || !bgmRegionsPlugin) {
+                    alert('배경음악 트랙이 준비된 후에 사용해 주세요.');
+                    return;
+                }
+                setBgmTrimMode(!bgmTrimMode);
+            });
+        }
+
+        if (bgmTrimDeleteButton) {
+            bgmTrimDeleteButton.addEventListener('click', () => {
+                deleteSelectedBgmRegion().catch((error) => console.error('Failed to delete BGM region:', error));
+            });
+        }
+
+        function updateTranslatedMuteButton(hasTrack) {
+            if (!translatedMuteBtn) {
+                return;
+            }
+
+            const label = translatedTimelineMuted ? '🔊 번역구간 유음' : '🔇 번역구간 무음';
+            translatedMuteBtn.textContent = label;
+            translatedMuteBtn.title = translatedTimelineMuted
+                ? '번역 음성 트랙을 다시 들리게 합니다'
+                : '번역 음성 트랙을 무음 처리합니다';
+            translatedMuteBtn.disabled = !hasTrack;
+        }
+
+        function applyTranslatedMuteState() {
+            const hasTrack = Boolean(translatedTimelineWaveform);
+            if (translatedTimelineWaveform && typeof translatedTimelineWaveform.setVolume === 'function') {
+                translatedTimelineWaveform.setVolume(translatedTimelineMuted ? 0 : 1);
+            }
+            updateTranslatedMuteButton(hasTrack);
+        }
+
+        function handleTranslatedMuteClick() {
+            if (!translatedTimelineWaveform) {
+                return;
+            }
+            translatedTimelineMuted = !translatedTimelineMuted;
+            applyTranslatedMuteState();
+        }
+
+        async function handleTranslatedTrimClick() {
+            if (!currentProject?.id) {
+                alert('프로젝트를 먼저 불러오세요.');
+                return;
+            }
+            if (!translatedTrimBtn) {
+                return;
+            }
+
+            const originalLabel = translatedTrimBtn.textContent;
+            translatedTrimBtn.dataset.originalText = originalLabel;
+            translatedTrimBtn.disabled = true;
+            translatedTrimBtn.textContent = '✂️ 자르는 중...';
+            translatedTrimBtn.dataset.locked = '1';
+
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/trim-translated`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    let errorMessage = `HTTP ${response.status}`;
+                    try {
+                        const payload = await response.json();
+                        errorMessage = payload.detail || payload.message || errorMessage;
+                    } catch (parseError) {
+                        const text = await response.text();
+                        if (text) {
+                            errorMessage = text;
+                        }
+                    }
+                    throw new Error(errorMessage);
+                }
+
+                const data = await response.json();
+                if (data && data.message) {
+                    alert(data.message);
+                } else {
+                    alert('번역 음성 길이를 조정했습니다.');
+                }
+
+                // 서버 상태와 동기화
+                loadProject(currentProject.id);
+            } catch (error) {
+                console.error('Trim translated audio failed:', error);
+                alert((error && error.message) || '번역 음성 자르기에 실패했습니다.');
+            } finally {
+                translatedTrimBtn.disabled = false;
+                translatedTrimBtn.textContent = translatedTrimBtn.dataset.originalText || '✂️ 원본음성보다 긴 것 자르기';
+                delete translatedTrimBtn.dataset.originalText;
+                delete translatedTrimBtn.dataset.locked;
+            }
+        }
 
         if (openSourceSelectorBtn) {
             openSourceSelectorBtn.style.display = 'none';
@@ -451,6 +990,7 @@
                 translatedTimelineWaveform = null;
             }
             timelineActiveWaveformKey = null;
+            updateTranslatedMuteButton(false);
         }
 
         function isAbortError(error) {
@@ -669,6 +1209,7 @@
         function playTimelineTrack(trackKey) {
             stopSingleAudioPlayback({ clearHighlight: false });
             stopAllAudio({ clearHighlight: false });
+            applyTranslatedMuteState();
 
             // 체크된 트랙만 재생 모드
             if (trackKey === 'checked') {
@@ -804,6 +1345,19 @@
             timelineStopBtn = panel.querySelector('#timeline-stop-btn');
             timelineOriginalDurationElem = panel.querySelector('#timeline-original-duration');
             timelineTranslatedDurationElem = panel.querySelector('#timeline-translated-duration');
+            translatedMuteBtn = panel.querySelector('#btn-translated-mute');
+            translatedTrimBtn = panel.querySelector('#btn-translated-trim');
+
+            if (translatedMuteBtn && !translatedMuteBtn.dataset.boundMute) {
+                translatedMuteBtn.addEventListener('click', handleTranslatedMuteClick);
+                translatedMuteBtn.dataset.boundMute = '1';
+            }
+            if (translatedTrimBtn && !translatedTrimBtn.dataset.boundTrim) {
+                translatedTrimBtn.addEventListener('click', handleTranslatedTrimClick);
+                translatedTrimBtn.dataset.boundTrim = '1';
+            }
+
+            updateTranslatedMuteButton(Boolean(translatedTimelineWaveform));
 
             const originalTrackContainer = panel.querySelector('#timeline-track-original');
             const translatedTrackContainer = panel.querySelector('#timeline-track-translated');
@@ -822,10 +1376,32 @@
                 return;
             }
 
+            const extras = currentProject?.extra || {};
+            const storedBgmPath = extras.bgm_path || extras.bgm_custom_path || '';
+            const storedBgmPercent = Number.isFinite(Number(extras.bgm_volume_percent))
+                ? Number(extras.bgm_volume_percent)
+                : 100;
+            const storedBgmCache = extras.bgm_cache_token || Date.now();
+            if (storedBgmPath) {
+                setBgmTrack(storedBgmPath, {
+                    volumePercent: storedBgmPercent,
+                    cacheToken: storedBgmCache,
+                });
+            } else {
+                setBgmTrack('', { force: true });
+            }
+
             const rawOriginalUrl = getOriginalTimelineAudioUrl();
             const rawTranslatedUrl = getTranslatedTimelineAudioUrl();
             const originalUrl = rawOriginalUrl ? toWebAudioPath(rawOriginalUrl) : '';
             const translatedUrl = rawTranslatedUrl ? toWebAudioPath(rawTranslatedUrl) : '';
+
+            updateTranslatedMuteButton(Boolean(translatedUrl));
+            if (translatedTrimBtn) {
+                if (!translatedTrimBtn.dataset.locked) {
+                    translatedTrimBtn.disabled = !translatedUrl;
+                }
+            }
 
             // 항상 두 트랙 컨테이너를 표시
             if (originalTrackContainer) {
@@ -995,6 +1571,7 @@
                             });
                         });
                     }
+                    applyTranslatedMuteState();
                 });
                 translatedTimelineWaveform.on('audioprocess', (time) => handleTimelineTimeUpdate('translated', time));
                 translatedTimelineWaveform.on('seek', () => handleTimelineTimeUpdate('translated', translatedTimelineWaveform.getCurrentTime()));
@@ -1024,6 +1601,7 @@
                     `;
                 }
                 updateTimelineDuration(0, timelineTranslatedDurationElem);
+                updateTranslatedMuteButton(false);
             }
         }
 
@@ -2086,9 +2664,10 @@
                 <div class="comparison-timeline-panel" id="comparison-timeline-panel">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="timeline-title">타임 트랙 비교</h3>
-                        <div>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
                             <button type="button" class="btn-xs" id="btn-save-tracks" title="현재 트랙 상태 저장">💾 트랙 저장</button>
                             <button type="button" class="btn-xs" id="btn-load-tracks" title="저장된 트랙 불러오기">📂 트랙 불러오기</button>
+                            <button type="button" class="btn-xs" id="btn-load-bgm-v2" title="배경음악 V2 불러오기">🎵 배경음악 V2 불러오기</button>
                         </div>
                     </div>
                     <div id="timeline-status" class="timeline-status">원본 및 번역 음성을 준비 중입니다...</div>
@@ -2108,10 +2687,23 @@
 
                     <!-- 배경음악 트랙 (vocal 분리 후) -->
                     <div class="timeline-track" id="timeline-track-bgm" style="display: none;">
-                        <div class="timeline-track-header">
-                            <input type="checkbox" id="track-checkbox-bgm" class="track-checkbox" />
-                            <span class="track-label">🎵 배경음악</span>
-                            <span class="track-duration" id="timeline-bgm-duration"></span>
+                        <div class="timeline-track-header" style="gap: 8px; flex-wrap: wrap; align-items: center;">
+                            <div style="display: inline-flex; align-items: center; gap: 6px;">
+                                <input type="checkbox" id="track-checkbox-bgm" class="track-checkbox" />
+                                <span class="track-label">🎵 배경음악</span>
+                                <span class="track-duration" id="timeline-bgm-duration"></span>
+                            </div>
+                            <div class="bgm-controls">
+                                <label for="bgm-volume-range" class="bgm-volume-label">
+                                    전체 볼륨
+                                    <input type="range" id="bgm-volume-range" min="0" max="200" value="100" step="5">
+                                    <span id="bgm-volume-value">100%</span>
+                                </label>
+                                <button type="button" class="btn-xs" id="btn-bgm-apply-volume" title="현재 볼륨으로 배경음악 적용" disabled>🎚️ 적용</button>
+                                <button type="button" class="btn-xs" id="btn-bgm-trim-mode" title="드래그로 자를 구간 선택" disabled>✂️ 자르기</button>
+                                <button type="button" class="btn-xs" id="btn-bgm-trim-delete" title="선택 구간 삭제" disabled>🗑️ 버리기</button>
+                                <button type="button" class="btn-xs" id="btn-bgm-load" title="배경음악 불러오기" disabled>🎵 불러오기</button>
+                            </div>
                         </div>
                         <div id="timeline-bgm-waveform" class="waveform"></div>
                     </div>
@@ -2142,6 +2734,8 @@
                             <input type="checkbox" id="track-checkbox-translated" class="track-checkbox" />
                             <span class="track-label">🗣️ 번역 음성</span>
                             <span class="track-duration" id="timeline-translated-duration"></span>
+                            <button type="button" class="btn-xs" id="btn-translated-mute" title="번역 음성 트랙을 무음 처리하거나 복원">🔇 번역구간 무음</button>
+                            <button type="button" class="btn-xs" id="btn-translated-trim" title="번역 음성이 원본보다 길면 잘라냅니다">✂️ 원본음성보다 긴 것 자르기</button>
                         </div>
                         <div id="timeline-translated-waveform" class="waveform"></div>
                     </div>
@@ -2223,6 +2817,7 @@
             const saveSelectedAudioBtn = container.querySelector('#save-selected-audio-btn');
             const generateAllAudioBtn = container.querySelector('#generate-all-audio-btn');
             const loadGeneratedTracksBtn = container.querySelector('#load-generated-tracks-btn');
+            const loadBgmV2Btn = container.querySelector('#btn-load-bgm-v2');
             const playAllAudioBtn = container.querySelector('#play-all-audio-btn');
             const saveAllAudioBtn = container.querySelector('#save-all-audio-btn');
 
@@ -2249,6 +2844,9 @@
             }
             if (loadGeneratedTracksBtn) {
                 loadGeneratedTracksBtn.addEventListener('click', loadGeneratedTracks);
+            }
+            if (loadBgmV2Btn) {
+                loadBgmV2Btn.addEventListener('click', () => loadBgmFromCandidates());
             }
             if (playAllAudioBtn) {
                 playAllAudioBtn.addEventListener('click', playAllAudio);
@@ -2726,6 +3324,275 @@
                 console.error('Failed to load generated tracks:', err);
                 alert('음성 트랙 불러오기에 실패했습니다: ' + err.message);
             }
+        }
+
+        async function loadBgmFromCandidates() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const loadBtn = document.getElementById('btn-load-bgm-v2');
+            const originalLabel = loadBtn ? loadBtn.textContent : '';
+
+            try {
+                if (loadBtn) {
+                    loadBtn.disabled = true;
+                    loadBtn.textContent = '불러오는 중...';
+                }
+
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/bgm/candidates`);
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+                if (candidates.length === 0) {
+                    alert('불러올 배경음악 후보가 없습니다. 먼저 분리 또는 커스텀 음원을 준비하세요.');
+                    return;
+                }
+
+                let defaultIndex = candidates.findIndex((item) => String(item.kind || '').includes('custom_v2'));
+                if (defaultIndex < 0) {
+                    defaultIndex = candidates.findIndex((item) => item.kind === 'current');
+                }
+                if (defaultIndex < 0) {
+                    defaultIndex = 0;
+                }
+
+                let selected = candidates[defaultIndex];
+                if (candidates.length > 1) {
+                    const dialogSelection = await showBgmSelectionDialog(candidates, defaultIndex);
+                    if (!dialogSelection) {
+                        return;
+                    }
+                    selected = dialogSelection;
+                }
+
+                await applyBgmCandidate(selected);
+                alert('배경음악을 타임라인에 불러왔습니다.');
+            } catch (err) {
+                console.error('Failed to load BGM candidate:', err);
+                alert('배경음악을 불러오지 못했습니다: ' + err.message);
+            } finally {
+                if (loadBtn) {
+                    loadBtn.disabled = false;
+                    loadBtn.textContent = originalLabel || '🎵 배경음악 V2 불러오기';
+                }
+            }
+        }
+
+        function showBgmSelectionDialog(candidates, defaultIndex = 0) {
+            return new Promise((resolve) => {
+                let currentAudio = null;
+
+                const overlay = document.createElement('div');
+                overlay.id = 'bgm-selection-dialog';
+                overlay.style.position = 'fixed';
+                overlay.style.top = '0';
+                overlay.style.left = '0';
+                overlay.style.right = '0';
+                overlay.style.bottom = '0';
+                overlay.style.background = 'rgba(0, 0, 0, 0.72)';
+                overlay.style.display = 'flex';
+                overlay.style.alignItems = 'center';
+                overlay.style.justifyContent = 'center';
+                overlay.style.zIndex = '10000';
+
+                overlay.innerHTML = `
+                    <div style="
+                        background: #1a2332;
+                        border-radius: 12px;
+                        padding: 24px;
+                        width: min(640px, 92vw);
+                        max-height: 80vh;
+                        overflow-y: auto;
+                        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                            <h3 style="margin: 0; color: #f0f4f8; font-size: 20px;">배경음악 선택</h3>
+                            <button type="button" class="btn-sm" id="bgm-dialog-close" style="background: #6c757d;">닫기</button>
+                        </div>
+                        <div id="bgm-candidate-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
+                            <button type="button" class="btn-sm" id="bgm-dialog-cancel" style="background: #6c757d;">취소</button>
+                            <button type="button" class="btn-primary btn-sm" id="bgm-dialog-confirm">확인</button>
+                        </div>
+                    </div>
+                `;
+
+                document.body.appendChild(overlay);
+
+                const listElem = overlay.querySelector('#bgm-candidate-list');
+
+                const stopPreview = () => {
+                    if (currentAudio) {
+                        try {
+                            currentAudio.pause();
+                        } catch (error) {
+                            console.debug('Failed to pause preview audio:', error);
+                        }
+                        currentAudio = null;
+                    }
+                };
+
+                const playPreview = (candidate) => {
+                    stopPreview();
+                    currentAudio = new Audio(candidate.path);
+                    currentAudio.play().catch((error) => {
+                        console.error('Failed to preview BGM:', error);
+                        alert('미리듣기에 실패했습니다: ' + error.message);
+                    });
+                    setTimeout(stopPreview, 15000);
+                };
+
+                const renderList = () => {
+                    if (!listElem) {
+                        return;
+                    }
+                    listElem.innerHTML = candidates.map((candidate, index) => {
+                        const modifiedLabel = candidate.modified_at
+                            ? new Date(candidate.modified_at * 1000).toLocaleString('ko-KR')
+                            : '알 수 없음';
+                        const isDefault = index === defaultIndex;
+                        const badge = candidate.kind && String(candidate.kind).includes('custom_v2')
+                            ? '<span style="margin-left: 6px; color: #4bd4ff; font-size: 12px;">V2</span>'
+                            : '';
+                        return `
+                            <label style="
+                                display: flex;
+                                flex-direction: column;
+                                gap: 6px;
+                                padding: 12px;
+                                border-radius: 10px;
+                                border: 2px solid ${isDefault ? '#4bd4ff' : 'rgba(255, 255, 255, 0.1)'};
+                                background: ${isDefault ? 'rgba(75, 212, 255, 0.08)' : 'rgba(13, 21, 32, 0.9)'};
+                                transition: border-color 0.2s ease;
+                                cursor: pointer;
+                            " data-bgm-index="${index}">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="radio" name="bgm-candidate" value="${index}" ${isDefault ? 'checked' : ''}>
+                                    <div style="flex: 1; min-width: 0;">
+                                        <div style="color: #f0f4f8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                            <span>${candidate.label || candidate.filename}</span>
+                                            ${badge}
+                                        </div>
+                                        <div style="color: #9ca3af; font-size: 12px;">
+                                            ${candidate.filename || ''}
+                                        </div>
+                                        <div style="color: #6b778d; font-size: 12px;">
+                                            수정 시각: ${modifiedLabel}
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-sm" data-bgm-preview="${index}" style="background: #4bd4ff; color: #04142e;">▶️ 미리듣기</button>
+                                </div>
+                            </label>
+                        `;
+                    }).join('');
+                };
+
+                renderList();
+
+                const cleanup = () => {
+                    stopPreview();
+                    document.body.removeChild(overlay);
+                    document.removeEventListener('keydown', onKeyDown);
+                };
+
+                const onKeyDown = (event) => {
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cleanup();
+                        resolve(null);
+                    }
+                };
+
+                document.addEventListener('keydown', onKeyDown);
+
+                overlay.addEventListener('click', (event) => {
+                    const target = event.target;
+                    if (!(target instanceof HTMLElement)) {
+                        return;
+                    }
+                    if (target.dataset && target.dataset.bgmPreview !== undefined) {
+                        event.preventDefault();
+                        const index = Number(target.dataset.bgmPreview);
+                        const candidate = candidates[index];
+                        if (candidate) {
+                            playPreview(candidate);
+                        }
+                        return;
+                    }
+                    if (target.id === 'bgm-dialog-close') {
+                        event.preventDefault();
+                        cleanup();
+                        resolve(null);
+                        return;
+                    }
+                });
+
+                const cancelBtn = overlay.querySelector('#bgm-dialog-cancel');
+                const confirmBtn = overlay.querySelector('#bgm-dialog-confirm');
+
+                cancelBtn?.addEventListener('click', () => {
+                    cleanup();
+                    resolve(null);
+                });
+
+                confirmBtn?.addEventListener('click', () => {
+                    const selectedRadio = overlay.querySelector('input[name="bgm-candidate"]:checked');
+                    if (!selectedRadio) {
+                        cleanup();
+                        resolve(null);
+                        return;
+                    }
+                    const index = Number(selectedRadio.value);
+                    const candidate = candidates[index];
+                    cleanup();
+                    resolve(candidate);
+                });
+            });
+        }
+
+        async function applyBgmCandidate(candidate) {
+            if (!candidate || !candidate.path) {
+                throw new Error('선택된 배경음악 정보가 올바르지 않습니다.');
+            }
+
+            const payload = {
+                path: candidate.path,
+                kind: candidate.kind || null,
+            };
+            if (typeof candidate.volume_percent !== 'undefined') {
+                payload.volume_percent = candidate.volume_percent;
+            }
+
+            const response = await fetch(`/api/translator/projects/${currentProject.id}/bgm/apply`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(text || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            if (!currentProject.extra) {
+                currentProject.extra = {};
+            }
+            currentProject.extra.bgm_path = result.bgm_path;
+            currentProject.extra.bgm_volume_percent = result.bgm_volume_percent;
+            currentProject.extra.bgm_cache_token = result.bgm_cache_token;
+            if (candidate.kind && String(candidate.kind).startsWith('custom')) {
+                currentProject.extra.bgm_custom_path = result.bgm_path;
+            }
+
+            await updateComparisonTimeline();
         }
 
         function showTrackSelectionDialog(tracks) {
@@ -4999,6 +5866,8 @@
 
         // === 트랙 처리 기능 ===
         function attachTrackProcessingEventListeners() {
+            updateBgmVolumeUI(Boolean(window.bgmTimelineWaveform));
+
             // Vocal/배경음악 분리
             const btnSeparateVocal = document.getElementById('btn-separate-vocal');
             if (btnSeparateVocal) {
@@ -5033,41 +5902,17 @@
                         const result = await response.json();
                         console.log('Vocal separation result:', result);
 
-                        // BGM 트랙 표시
-                        const bgmTrack = document.getElementById('timeline-track-bgm');
-                        if (bgmTrack && result.bgm_path) {
-                            bgmTrack.style.display = 'block';
-
-                            // WaveSurfer로 BGM 파형 표시
-                            const bgmWaveformContainer = document.getElementById('timeline-bgm-waveform');
-                            if (bgmWaveformContainer && typeof WaveSurfer !== 'undefined') {
-                                bgmWaveformContainer.innerHTML = '';
-                                const bgmWaveform = WaveSurfer.create({
-                                    container: '#timeline-bgm-waveform',
-                                    height: 90,
-                                    waveColor: '#ff9f1c',
-                                    progressColor: '#ff7c43',
-                                    cursorColor: '#ffd166',
-                                    normalize: true,
-                                    responsive: true
-                                });
-                                const bgmUrl = toWebAudioPath(result.bgm_path);
-                                console.log('Loading BGM track:', bgmUrl);
-                                bgmWaveform.on('error', (err) => {
-                                    console.error('BGM waveform load error:', err);
-                                });
-                                bgmWaveform.load(bgmUrl);
-                                bgmWaveform.on('ready', () => {
-                                    const duration = bgmWaveform.getDuration();
-                                    const durationElem = document.getElementById('timeline-bgm-duration');
-                                    if (durationElem) {
-                                        durationElem.textContent = formatDuration(duration);
-                                    }
-                                });
-                                window.bgmTimelineWaveform = bgmWaveform;
-                                window.bgmTimelineUrl = bgmUrl;
-                            }
+                        if (!currentProject.extra) {
+                            currentProject.extra = {};
                         }
+                        currentProject.extra.bgm_path = result.bgm_path;
+                        currentProject.extra.bgm_volume_percent = 100;
+                        currentProject.extra.bgm_cache_token = Date.now();
+                        setBgmTrack(result.bgm_path, {
+                            volumePercent: 100,
+                            cacheToken: currentProject.extra.bgm_cache_token,
+                            force: true,
+                        });
 
                         btnSeparateVocal.textContent = '🔄 완료 100%';
                         setTimeout(() => {
@@ -5355,7 +6200,8 @@
 
                     // 현재 트랙 상태 수집
                     const trackState = {
-                        bgm_path: window.bgmTimelineUrl ? window.bgmTimelineUrl.replace('/web-audio/', '') : null,
+                        bgm_path: (currentProject?.extra?.bgm_path) || (window.bgmTimelineUrl ? window.bgmTimelineUrl.replace('/web-audio/', '') : null),
+                        bgm_volume_percent: currentProject?.extra?.bgm_volume_percent ?? Math.round(bgmPlaybackVolume * 100),
                         dialogue_path: window.dialogueTimelineUrl ? window.dialogueTimelineUrl.replace('/web-audio/', '') : null,
                         dialogue_muted_path: window.dialogueMutedTimelineUrl ? window.dialogueMutedTimelineUrl.replace('/web-audio/', '') : null
                     };
@@ -5400,41 +6246,26 @@
 
                         const result = await response.json();
 
-                        // BGM 트랙 복원
+                        if (!currentProject.extra) {
+                            currentProject.extra = {};
+                        }
                         if (result.bgm_path) {
-                            const bgmTrack = document.getElementById('timeline-track-bgm');
-                            if (bgmTrack) {
-                                bgmTrack.style.display = 'block';
-
-                                const bgmWaveformContainer = document.getElementById('timeline-bgm-waveform');
-                                if (bgmWaveformContainer && typeof WaveSurfer !== 'undefined') {
-                                    bgmWaveformContainer.innerHTML = '';
-                                    const bgmWaveform = WaveSurfer.create({
-                                        container: '#timeline-bgm-waveform',
-                                        height: 90,
-                                        waveColor: '#ff9f1c',
-                                        progressColor: '#ff7c43',
-                                        cursorColor: '#ffd166',
-                                        normalize: true,
-                                        responsive: true
-                                    });
-                                    const bgmUrl = toWebAudioPath(result.bgm_path);
-                                    console.log('Loading saved BGM track:', bgmUrl);
-                                    bgmWaveform.on('error', (err) => {
-                                        console.error('Saved BGM waveform load error:', err);
-                                    });
-                                    bgmWaveform.load(bgmUrl);
-                                    bgmWaveform.on('ready', () => {
-                                        const duration = bgmWaveform.getDuration();
-                                        const durationElem = document.getElementById('timeline-bgm-duration');
-                                        if (durationElem) {
-                                            durationElem.textContent = formatDuration(duration);
-                                        }
-                                    });
-                                    window.bgmTimelineWaveform = bgmWaveform;
-                                    window.bgmTimelineUrl = bgmUrl;
-                                }
-                            }
+                            currentProject.extra.bgm_path = result.bgm_path;
+                        }
+                        if (typeof result.bgm_volume_percent !== 'undefined') {
+                            currentProject.extra.bgm_volume_percent = result.bgm_volume_percent;
+                        }
+                        if (typeof result.bgm_cache_token !== 'undefined') {
+                            currentProject.extra.bgm_cache_token = result.bgm_cache_token;
+                        }
+                        if (result.bgm_path) {
+                            setBgmTrack(result.bgm_path, {
+                                volumePercent: currentProject.extra.bgm_volume_percent ?? 100,
+                                cacheToken: result.bgm_cache_token || Date.now(),
+                                force: true,
+                            });
+                        } else {
+                            setBgmTrack('', { force: true });
                         }
 
                         // 대사 트랙 복원

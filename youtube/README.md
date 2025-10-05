@@ -1,4 +1,49 @@
-# ytdl.py 사용법
+# YouTube Toolkit
+
+## Video Similarity Checker (CLI)
+두 영상 또는 **영상 vs 폴더(여러 영상)** 간 유사도를 계산하는 경량 프로그램입니다.
+학습 모델 없이도 잘 동작하는 지표들을 조합하여 점수를 냅니다.
+
+### 지원 지표
+- **pHash 매칭률**: 프레임 퍼셉추얼 해시(Hamming ≤ 임계값) 기반 유사도
+- **ORB 특징 매칭률**: 키포인트 특징 매칭 수 기반 유사도
+- **컬러 히스토그램 상관계수**: 색 분포 유사도
+- **PSNR 평균**: 프레임 MSE로부터 PSNR(고를수록 유사)
+
+> 기본 종합 점수는 `(pHash + ORB + Hist + PSNR_norm) / 4` 로 계산합니다. 가중치는 옵션으로 조정 가능합니다.
+
+### 설치
+```bash
+python -m venv .venv
+source .venv/bin/activate               # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+- 독립 실행이 필요하면 `youtube/requirements.txt`를 사용해 가상환경에서 필요한 최소 패키지를 설치하세요.
+- OpenCV가 FFmpeg backend를 필요로 할 수 있으므로, 시스템에 FFmpeg가 설치되어 있는지 확인합니다.
+
+### 사용법
+`ytinspector.py`는 두 가지 모드(쌍 비교 / 폴더 랭킹)를 제공합니다. 공통 옵션은 `--fps`, `--resize`, `--max-frames`, `--phash-th`, `--weights` 등이며 `--help`로 상세 확인이 가능합니다.
+
+- **쌍 비교:** 개별 두 영상을 비교하고 JSON 리포트를 선택적으로 저장합니다.
+```bash
+python ytinspector.py --a /path/to/videoA.mp4 --b /path/to/videoB.mp4 \
+  --fps 1.0 --resize 320x320 --max-frames 200 --out results/similarity.json
+```
+
+- **폴더 랭킹:** 기준 영상과 폴더 내 모든 영상을 비교해 가중 점수 기준으로 내림차순 정렬합니다.
+```bash
+python ytinspector.py --a /path/to/main.mp4 --dir ./reference_videos --csv ranking.csv
+```
+
+#### 주요 출력 항목
+- `pHash`, `ORB`, `Hist`, `PSNR`: 0~1 범위의 정규화 점수
+- `PSNR_db`: 평균 PSNR(dB)
+- `weighted`: 가중 평균 점수
+- `frames_used`: 분석에 사용된 프레임 수
+
+에러가 발생하면 메시지가 결과에 포함되어 CSV/콘솔에서 확인할 수 있습니다.
+
+## ytdl.py 사용법
 
 ytdl.py는 yt-dlp를 감싼 간단한 CLI 스크립트로, 유튜브 영상과 자막을 한 번에 내려받을 수 있습니다.
 
@@ -51,3 +96,4 @@ python3 ytdl.py "https://www.youtube.com/shorts/4y6uaG2UZ9E" --sub-langs ko
 ## 웹 UI 활용
 - FastAPI 앱(`uvicorn web_app.app:app --reload --port 8001` 또는 `python -m web_app`)을 실행하면 `/ytdl` 경로에서 간단한 폼 기반 UI로 영상/자막 다운로드를 제어할 수 있습니다.
 - 한 번에 여러 URL을 줄바꿈으로 넣고, 자막 언어·드라이런 여부 등을 체크박스와 입력란으로 지정할 수 있습니다.
+

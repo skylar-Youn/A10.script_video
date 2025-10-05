@@ -10,9 +10,11 @@
     <header class="header">
         <h1>유튜브 다운로드 도구</h1>
         <nav class="nav-links">
-            <a href="/ytdl" class="nav-link active">⬇️ 다운로드 도구</a>
+            <a href="/ytdl" class="nav-link {% if nav_active == 'ytdl' %}active{% endif %}">⬇️ 다운로드 도구</a>
             <a href="/analysis" class="nav-link">📊 분석 도구</a>
             <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
+            <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
+            <a href="/copyright" class="nav-link {% if nav_active == 'copyright' %}active{% endif %}">🛡️ 저작권 검사</a>
         </nav>
     </header>
 
@@ -85,6 +87,7 @@
             <li>`자막 언어`에 `ko,en`처럼 콤마로 구분하면 여러 언어를 받을 수 있습니다.</li>
             <li>영상 없이 자막만 확인하려면 `드라이런`을 체크하세요.</li>
             <li>`자동 생성 자막 포함`을 해제하면 업로드된 자막만 내려받습니다.</li>
+            <li>상단의 '영상 유사도 검사' 탭에서 폴더 전체 비교와 상세 지표를 확인할 수 있습니다.</li>
         </ul>
     </section>
 </div>
@@ -233,6 +236,8 @@ document.addEventListener('DOMContentLoaded', loadDownloadHistory);
     font-style: italic;
     padding: 20px;
 }
+
+
 </style>
 
 </body>

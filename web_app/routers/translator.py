@@ -1,9 +1,13 @@
 """Translator project routes."""
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple, Set
 
-from fastapi import APIRouter, HTTPException, status
+import math
+import shutil
+import time
+
+from fastapi import APIRouter, HTTPException, status, Body
 from starlette.concurrency import run_in_threadpool
 
 from pathlib import Path
@@ -24,9 +28,91 @@ from ai_shorts_maker.translator import (
     generate_selected_audio_with_silence,
     generate_all_audio,
     TRANSLATOR_DIR,
+    save_project,
 )
 
 router = APIRouter(prefix="/api/translator", tags=["translator"])
+OUTPUT_ROOT = TRANSLATOR_DIR.parent
+
+
+def _path_to_web_url(path: Path) -> str:
+    return f"/outputs/{path.relative_to(OUTPUT_ROOT).as_posix()}"
+
+
+def _web_url_to_path(url: Optional[str]) -> Optional[Path]:
+    if not url:
+        return None
+    if url.startswith("/outputs/"):
+        return (OUTPUT_ROOT / url[len("/outputs/"):]).resolve()
+    return Path(url).resolve()
+
+
+def _apply_bgm_volume(audio, percent: float):
+    if percent <= 0.0:
+        from pydub import AudioSegment
+        return AudioSegment.silent(duration=len(audio))
+    if abs(percent - 100.0) < 1e-6:
+        return audio
+    gain_db = 20.0 * math.log10(max(percent, 1e-4) / 100.0)
+    return audio.apply_gain(gain_db)
+
+
+def _ensure_bgm_files(project_id: str, project: TranslatorProject) -> Tuple[Path, Path]:
+    audio_dir = TRANSLATOR_DIR / project_id / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    reference_path = audio_dir / "bgm_reference.wav"
+    working_path = audio_dir / "bgm_working.wav"
+
+    extras = project.extra or {}
+    base_candidates = [
+        extras.get("bgm_custom_path"),
+        extras.get("bgm_path"),
+        extras.get("bgm_source_path"),
+    ]
+
+    base_path: Optional[Path] = None
+    for candidate in base_candidates:
+        path = _web_url_to_path(candidate)
+        if path and path.exists():
+            base_path = path
+            break
+
+    if not reference_path.exists():
+        if base_path and base_path.exists():
+            shutil.copyfile(str(base_path), str(reference_path))
+        else:
+            raise FileNotFoundError("배경음악 트랙을 찾을 수 없습니다.")
+
+    if not working_path.exists():
+        shutil.copyfile(str(reference_path), str(working_path))
+
+    extras.setdefault("bgm_source_path", _path_to_web_url(reference_path))
+    extras["bgm_path"] = _path_to_web_url(working_path)
+    extras.setdefault("bgm_volume_percent", 100.0)
+    extras.setdefault("bgm_cache_token", int(time.time()))
+    project.extra = extras
+    save_project(project)
+
+    return reference_path, working_path
+
+
+def _label_bgm_candidate(path: Path) -> Tuple[str, str]:
+    """Return a user-facing label and kind identifier for a BGM candidate."""
+    name = path.stem.lower()
+    if "v2" in name and "source" in name:
+        return "배경음악 V2 (원본)", "custom_v2_source"
+    if "v2" in name:
+        return "배경음악 V2", "custom_v2"
+    if "custom" in name and "source" in name:
+        return "배경음악 커스텀 (원본)", "custom_source"
+    if "custom" in name:
+        return "배경음악 커스텀", "custom"
+    if "working" in name or "mix" in name:
+        return "배경음악 작업본", "working"
+    if "reference" in name:
+        return "배경음악 원본", "reference"
+    return "배경음악", "bgm"
 
 
 def _prepare_dialogue_audio(project_id: str, project: TranslatorProject) -> "tuple[AudioSegment, Path]":
@@ -145,6 +231,100 @@ def _convert_audio_paths_to_urls(project: TranslatorProject) -> TranslatorProjec
         logger.error(f"Failed to convert audio paths: {e}")
 
     return project
+
+
+def _resolve_audio_path(path_str: Optional[str]) -> Optional[Path]:
+    """Resolve a stored audio path (absolute or /outputs/) to a filesystem Path."""
+    if not path_str:
+        return None
+
+    try:
+        normalized = str(path_str).strip()
+    except Exception:
+        return None
+
+    if not normalized:
+        return None
+
+    candidates = []
+
+    try:
+        candidates.append(Path(normalized))
+    except Exception:
+        pass
+
+    if normalized.startswith("/outputs/"):
+        candidates.append(OUTPUT_ROOT / normalized[len("/outputs/"):])
+    elif normalized.startswith("/youtube/download/"):
+        candidates.append(OUTPUT_ROOT / normalized.lstrip("/"))
+
+    stripped = normalized.lstrip("/")
+    candidates.append(OUTPUT_ROOT / stripped)
+    candidates.append(TRANSLATOR_DIR / stripped)
+
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists():
+            return resolved
+
+    return None
+
+
+def _path_to_web(path: Path) -> str:
+    try:
+        relative = path.resolve().relative_to(OUTPUT_ROOT)
+        return f"/outputs/{relative.as_posix()}"
+    except Exception:
+        return str(path)
+
+
+def _locate_translated_audio(project: TranslatorProject) -> Tuple[Optional[Path], List[str]]:
+    """Find the translated audio file path and references that need updating."""
+    entries = []
+    extras = project.extra or {}
+
+    def add_entry(priority: int, ref: str, path_candidate: Optional[str]) -> None:
+        resolved = _resolve_audio_path(path_candidate)
+        if resolved is not None:
+            entries.append((priority, ref, resolved))
+
+    add_entry(0, "extra.voice_path", extras.get("voice_path"))
+
+    audio_files = extras.get("audio_files")
+    if isinstance(audio_files, dict):
+        priority_keys = [
+            "combined",
+            "merged",
+            "translated",
+            "timeline",
+            "voice",
+        ]
+        handled = set()
+        for key in priority_keys:
+            add_entry(1, f"extra.audio_files.{key}", audio_files.get(key))
+            handled.add(key)
+        for key, value in audio_files.items():
+            if key in handled:
+                continue
+            add_entry(2, f"extra.audio_files.{key}", value)
+
+    for segment in project.segments:
+        add_entry(3, f"segment.{segment.id}", getattr(segment, "audio_path", None))
+
+    if not entries:
+        return None, []
+
+    entries.sort(key=lambda item: item[0])
+    target_path = entries[0][2]
+    refs = sorted({ref for _, ref, resolved in entries if resolved == target_path})
+    return target_path, refs
 
 
 @router.get("/projects")
@@ -713,6 +893,462 @@ async def api_extract_dialogue_muted(project_id: str):
         )
 
 
+@router.post("/projects/{project_id}/bgm/volume")
+async def api_adjust_bgm_volume(project_id: str, payload: dict = Body(...)):
+    """Adjust the master volume for the background music track."""
+    import logging
+    from pydub import AudioSegment
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        percent_value = float(payload.get("percent", 100.0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="percent 값은 숫자여야 합니다.")
+
+    percent_value = max(0.0, min(percent_value, 200.0))
+
+    def _adjust():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        try:
+            reference_path, working_path = _ensure_bgm_files(project_id, project)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+        reference_audio = AudioSegment.from_file(str(reference_path))
+        if len(reference_audio) == 0:
+            raise ValueError("배경음악 오디오 길이가 0입니다.")
+
+        processed_audio = _apply_bgm_volume(reference_audio, percent_value)
+        processed_audio.export(str(working_path), format="wav")
+
+        extras = project.extra or {}
+        extras["bgm_path"] = _path_to_web_url(working_path)
+        extras["bgm_volume_percent"] = percent_value
+        extras["bgm_cache_token"] = int(time.time())
+        project.extra = extras
+        save_project(project)
+
+        return {
+            "bgm_path": extras["bgm_path"],
+            "bgm_volume_percent": percent_value,
+            "cache_token": extras["bgm_cache_token"],
+        }
+
+    try:
+        result = await run_in_threadpool(_adjust)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("BGM volume adjustment failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"배경음악 볼륨 조정 실패: {exc}"
+        )
+
+
+@router.get("/projects/{project_id}/bgm/candidates")
+async def api_list_bgm_candidates(project_id: str):
+    """Return available background music files (including custom V2 variants)."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    def _collect_candidates() -> Optional[List[Dict[str, object]]]:
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        extras = project.extra or {}
+        project_dir = TRANSLATOR_DIR / project_id
+        audio_dir = project_dir / "audio"
+        separated_dir = project_dir / "separated"
+
+        added: Set[Path] = set()
+        candidates: List[Dict[str, object]] = []
+
+        def add_candidate(path: Optional[Path], *, label: str, kind: str,
+                          volume: Optional[float] = None,
+                          cache_token: Optional[int] = None) -> None:
+            if not path:
+                return
+            try:
+                resolved = path.resolve()
+            except OSError:
+                logger.debug("Failed to resolve BGM path: %s", path)
+                return
+            if not resolved.exists() or resolved in added:
+                return
+
+            added.add(resolved)
+            web_path = _path_to_web_url(resolved)
+            stat = resolved.stat()
+            candidate: Dict[str, object] = {
+                "label": label,
+                "kind": kind,
+                "path": web_path,
+                "filename": resolved.name,
+                "modified_at": stat.st_mtime,
+                "size": stat.st_size,
+            }
+            if volume is not None:
+                candidate["volume_percent"] = volume
+            if cache_token is not None:
+                candidate["cache_token"] = cache_token
+            candidates.append(candidate)
+
+        # Extras-defined paths (current selections)
+        extras_path = _web_url_to_path(extras.get("bgm_path"))
+        if extras_path:
+            add_candidate(
+                extras_path,
+                label="현재 배경음악",
+                kind="current",
+                volume=extras.get("bgm_volume_percent"),
+                cache_token=extras.get("bgm_cache_token"),
+            )
+
+        custom_path = _web_url_to_path(extras.get("bgm_custom_path"))
+        if custom_path:
+            add_candidate(custom_path, label="배경음악 커스텀", kind="custom")
+
+        source_path = _web_url_to_path(extras.get("bgm_source_path"))
+        if source_path:
+            add_candidate(source_path, label="배경음악 원본", kind="reference")
+
+        # Files inside audio directory (bgm_custom*, bgm_working, etc.)
+        if audio_dir.exists():
+            for path in sorted(audio_dir.glob("bgm*.*")):
+                label, kind = _label_bgm_candidate(path)
+                add_candidate(path, label=label, kind=kind)
+
+        # Separated-directory BGM (result of vocal separation)
+        if separated_dir.exists():
+            separated_bgm = separated_dir / "bgm.wav"
+            if separated_bgm.exists():
+                add_candidate(separated_bgm, label="배경음악 (분리본)", kind="separated")
+
+        priority_map = {
+            "custom_v2": 0,
+            "custom_v2_source": 1,
+            "current": 2,
+            "custom": 3,
+            "working": 4,
+            "reference": 5,
+            "bgm": 6,
+            "separated": 7,
+        }
+        candidates.sort(
+            key=lambda item: (
+                priority_map.get(str(item.get("kind")), 99),
+                -float(item.get("modified_at", 0.0)),
+            )
+        )
+
+        return candidates
+
+    try:
+        candidates = await run_in_threadpool(_collect_candidates)
+        if candidates is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return {"candidates": candidates}
+    except HTTPException:
+        raise
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Failed to list BGM candidates: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"배경음악 목록을 불러오지 못했습니다: {exc}"
+        ) from exc
+
+
+@router.post("/projects/{project_id}/bgm/apply")
+async def api_apply_bgm_candidate(project_id: str, payload: dict = Body(...)):
+    """Apply a chosen background music file as the working BGM."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    path_value = payload.get("path")
+    if not path_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="path is required",
+        )
+
+    kind_value = payload.get("kind")
+    volume_value = payload.get("volume_percent")
+
+    def _apply():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        path = _web_url_to_path(path_value)
+        if path is None:
+            path = Path(path_value)
+        try:
+            resolved = path.resolve()
+        except OSError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        if not resolved.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"배경음악 파일을 찾을 수 없습니다: {resolved}",
+            )
+
+        extras = project.extra or {}
+        extras["bgm_path"] = _path_to_web_url(resolved)
+
+        if volume_value is not None:
+            try:
+                extras["bgm_volume_percent"] = float(volume_value)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        else:
+            extras.setdefault("bgm_volume_percent", 100.0)
+
+        extras["bgm_cache_token"] = int(time.time())
+
+        if kind_value and str(kind_value).startswith("custom"):
+            extras["bgm_custom_path"] = extras["bgm_path"]
+
+        project.extra = extras
+        save_project(project)
+
+        return {
+            "bgm_path": extras["bgm_path"],
+            "bgm_volume_percent": extras.get("bgm_volume_percent", 100.0),
+            "bgm_cache_token": extras["bgm_cache_token"],
+        }
+
+    try:
+        result = await run_in_threadpool(_apply)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return {"message": "배경음악을 적용했습니다.", **result}
+    except HTTPException:
+        raise
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Failed to apply BGM: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"배경음악 적용 실패: {exc}"
+        ) from exc
+
+
+@router.post("/projects/{project_id}/bgm/cut")
+async def api_cut_bgm_segment(project_id: str, payload: dict = Body(...)):
+    """Remove or mute a selected segment from the background music track."""
+    import logging
+    from pydub import AudioSegment
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        start_value = float(payload.get("start", 0.0))
+        end_value = float(payload.get("end", 0.0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="시작/종료 시간을 숫자로 입력하세요.")
+
+    if end_value <= start_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="종료 시간은 시작 시간보다 커야 합니다.")
+
+    mode = (payload.get("mode") or "remove").lower()
+
+    def _cut():
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        try:
+            reference_path, working_path = _ensure_bgm_files(project_id, project)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+        reference_audio = AudioSegment.from_file(str(reference_path))
+        duration_ms = len(reference_audio)
+        if duration_ms == 0:
+            raise ValueError("배경음악 오디오 길이가 0입니다.")
+
+        start_ms = max(0, int(start_value * 1000))
+        end_ms = min(int(end_value * 1000), duration_ms)
+        if end_ms <= start_ms:
+            raise ValueError("선택 구간이 너무 짧습니다.")
+
+        before = reference_audio[:start_ms]
+        after = reference_audio[end_ms:]
+
+        if mode == "mute":
+            muted_section = AudioSegment.silent(duration=end_ms - start_ms)
+            updated_reference = before + muted_section + after
+        else:
+            updated_reference = before + after
+
+        updated_reference.export(str(reference_path), format="wav")
+
+        extras = project.extra or {}
+        volume_percent = float(extras.get("bgm_volume_percent", 100.0))
+        processed_audio = _apply_bgm_volume(updated_reference, volume_percent)
+        processed_audio.export(str(working_path), format="wav")
+
+        extras["bgm_path"] = _path_to_web_url(working_path)
+        extras["bgm_cache_token"] = int(time.time())
+        extras["bgm_volume_percent"] = volume_percent
+        project.extra = extras
+        save_project(project)
+
+        return {
+            "bgm_path": extras["bgm_path"],
+            "bgm_volume_percent": volume_percent,
+            "cache_token": extras["bgm_cache_token"],
+        }
+
+    try:
+        result = await run_in_threadpool(_cut)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("BGM segment cut failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"배경음악 구간 삭제 실패: {exc}"
+        )
+
+
+@router.post("/projects/{project_id}/trim-translated")
+async def api_trim_translated_audio(project_id: str):
+    """Trim translated audio so it does not exceed the original segment duration."""
+    import logging
+    from pydub import AudioSegment
+    from ai_shorts_maker.translator import save_project
+
+    logger = logging.getLogger(__name__)
+
+    def _trim() -> Optional[dict]:
+        project = translator_load_project(project_id)
+        if not project:
+            return None
+
+        audio_path, refs = _locate_translated_audio(project)
+        if audio_path is None:
+            raise FileNotFoundError("번역 음성 파일을 찾을 수 없습니다.")
+
+        max_end = max((seg.end or 0.0) for seg in project.segments) if project.segments else 0.0
+        if max_end <= 0:
+            raise ValueError("세그먼트 종료 시간이 없어 길이를 계산할 수 없습니다.")
+
+        audio = AudioSegment.from_file(str(audio_path))
+        current_ms = len(audio)
+        target_ms = int(max_end * 1000)
+
+        if current_ms <= target_ms:
+            return {
+                "trimmed": False,
+                "message": "번역 음성이 원본 길이보다 길지 않아 자르지 않았습니다.",
+                "web_path": _path_to_web(audio_path),
+                "current_ms": current_ms,
+                "target_ms": target_ms,
+                "updated_refs": refs,
+            }
+
+        trimmed_audio = audio[:target_ms]
+        suffix = audio_path.suffix.lstrip('.') or 'wav'
+        trimmed_path = audio_path.with_name(f"{audio_path.stem}_trimmed.{suffix}")
+        trimmed_audio.export(str(trimmed_path), format=suffix)
+
+        extras = project.extra or {}
+        updated_refs: List[str] = []
+
+        if "extra.voice_path" in refs:
+            extras["voice_path"] = str(trimmed_path)
+            updated_refs.append("extra.voice_path")
+
+        audio_files = extras.get("audio_files")
+        if isinstance(audio_files, dict):
+            for ref in refs:
+                if ref.startswith("extra.audio_files."):
+                    key = ref.split(".", 2)[-1]
+                    audio_files[key] = str(trimmed_path)
+                    updated_refs.append(ref)
+
+        for ref in refs:
+            if not ref.startswith("segment."):
+                continue
+            segment_id = ref.split(".", 1)[-1]
+            for segment in project.segments:
+                if segment.id == segment_id:
+                    segment.audio_path = str(trimmed_path)
+                    updated_refs.append(ref)
+                    break
+
+        project.extra = extras
+        save_project(project)
+
+        unique_refs = sorted(set(updated_refs))
+
+        return {
+            "trimmed": True,
+            "message": "번역 음성을 원본 길이에 맞춰 잘랐습니다.",
+            "web_path": _path_to_web(trimmed_path),
+            "current_ms": current_ms,
+            "target_ms": target_ms,
+            "updated_refs": unique_refs,
+        }
+
+    try:
+        result = await run_in_threadpool(_trim)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Translator project '{project_id}' not found."
+            )
+        return result
+    except FileNotFoundError as exc:
+        logger.error("Trim translated audio failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc)
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error while trimming translated audio: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"번역 음성 자르기에 실패했습니다: {exc}"
+        )
+
+
 @router.post("/projects/{project_id}/merge-tracks")
 async def api_merge_tracks(project_id: str, payload: dict):
     """선택한 트랙들을 합칩니다."""
@@ -814,6 +1450,12 @@ async def api_save_tracks(project_id: str, track_state: dict):
         project.extra['bgm_path'] = track_state.get('bgm_path')
         project.extra['dialogue_path'] = track_state.get('dialogue_path')
         project.extra['dialogue_muted_path'] = track_state.get('dialogue_muted_path')
+        if track_state.get('bgm_volume_percent') is not None:
+            try:
+                project.extra['bgm_volume_percent'] = float(track_state['bgm_volume_percent'])
+            except (TypeError, ValueError):
+                pass
+        project.extra['bgm_cache_token'] = int(time.time())
 
         # 프로젝트 저장
         from ai_shorts_maker.translator import save_project
@@ -823,7 +1465,9 @@ async def api_save_tracks(project_id: str, track_state: dict):
             "message": "트랙 상태가 저장되었습니다.",
             "bgm_path": project.extra.get('bgm_path'),
             "dialogue_path": project.extra.get('dialogue_path'),
-            "dialogue_muted_path": project.extra.get('dialogue_muted_path')
+            "dialogue_muted_path": project.extra.get('dialogue_muted_path'),
+            "bgm_volume_percent": project.extra.get('bgm_volume_percent'),
+            "bgm_cache_token": project.extra.get('bgm_cache_token'),
         }
     except Exception as e:
         logger.error(f"Track save failed: {e}")
@@ -848,15 +1492,20 @@ async def api_load_tracks(project_id: str):
             )
 
         # extra 필드에서 트랙 정보 가져오기
-        bgm_path = project.extra.get('bgm_path') if project.extra else None
-        dialogue_path = project.extra.get('dialogue_path') if project.extra else None
-        dialogue_muted_path = project.extra.get('dialogue_muted_path') if project.extra else None
+        extras = project.extra or {}
+        bgm_path = extras.get('bgm_path')
+        dialogue_path = extras.get('dialogue_path')
+        dialogue_muted_path = extras.get('dialogue_muted_path')
+        bgm_volume = extras.get('bgm_volume_percent')
+        bgm_cache = extras.get('bgm_cache_token')
 
         return {
             "message": "트랙 정보를 불러왔습니다.",
             "bgm_path": bgm_path,
             "dialogue_path": dialogue_path,
-            "dialogue_muted_path": dialogue_muted_path
+            "dialogue_muted_path": dialogue_muted_path,
+            "bgm_volume_percent": bgm_volume,
+            "bgm_cache_token": bgm_cache,
         }
     except Exception as e:
         logger.error(f"Track load failed: {e}")

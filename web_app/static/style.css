@@ -111,6 +111,10 @@ button.danger {
     background: linear-gradient(120deg, #ff6d6d, #ff3d7f);
     color: #fff6f6;
 }
+
+.nav-link.active {
+    text-decoration: underline;
+}
 summary {
     cursor: pointer;
     font-weight: 600;
@@ -185,6 +189,95 @@ summary {
     display: inline-block;
     font-size: 0.92rem;
     word-break: break-all;
+}
+
+.hint-text {
+    font-size: 0.85rem;
+    color: #90a4bf;
+}
+
+.result-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+
+.result-meta p {
+    margin: 4px 0;
+    color: #cbd7ea;
+}
+
+.risk-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    min-width: 96px;
+}
+
+.risk-high {
+    background: linear-gradient(120deg, #ff5f6d, #ffc371);
+    color: #2a0303;
+}
+
+.risk-medium {
+    background: linear-gradient(120deg, #ffd966, #ff8f5c);
+    color: #3b2202;
+}
+
+.risk-low {
+    background: linear-gradient(120deg, #4bd4ff, #73f5c4);
+    color: #062227;
+}
+
+.bgm-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bgm-volume-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: #e5e7eb;
+}
+
+.btn-xs.active {
+    background: rgba(255, 214, 0, 0.25);
+    color: #ffe7a0;
+}
+
+.result-grid {
+    display: grid;
+    gap: 18px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.params-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+}
+
+.params-table th,
+.params-table td {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 6px 8px;
+    text-align: left;
+    font-size: 0.92rem;
+}
+
+.params-table th {
+    width: 28%;
+    color: #88a6d1;
 }
 
 .links {

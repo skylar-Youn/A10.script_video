@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>영상 유사도 검사</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <h1>영상 유사도 검사</h1>
+        <nav class="nav-links">
+            <a href="/ytdl" class="nav-link {% if nav_active == 'ytdl' %}active{% endif %}">⬇️ 다운로드 도구</a>
+            <a href="/analysis" class="nav-link">📊 분석 도구</a>
+            <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
+            <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
+            <a href="/copyright" class="nav-link {% if nav_active == 'copyright' %}active{% endif %}">🛡️ 저작권 검사</a>
+        </nav>
+    </header>
+
+    <section class="panel">
+        <h2>비교 설정</h2>
+        <p class="panel-sub">기준 영상을 선택하고 비교 영상 또는 비교 폴더를 지정하면, pHash·ORB·히스토그램·PSNR 지표를 조합해 유사도를 계산합니다.</p>
+        <form method="post" action="/similarity" class="similarity-form">
+            <div class="field">
+                <label for="sim-video-a">기준 영상 경로</label>
+                <input type="text" id="sim-video-a" name="video_a" value="{{ form_values.video_a }}" placeholder="/path/to/videoA.mp4" required>
+            </div>
+            <div class="field">
+                <label for="sim-video-b">비교 영상 경로</label>
+                <input type="text" id="sim-video-b" name="video_b" value="{{ form_values.video_b }}" placeholder="다른 영상 파일 경로">
+            </div>
+            <div class="field">
+                <label for="sim-ref-dir">비교 폴더 경로</label>
+                <input type="text" id="sim-ref-dir" name="ref_dir" value="{{ form_values.ref_dir }}" placeholder="폴더 전체를 랭킹하려면 입력">
+                <span class="hint-text">* 비교 영상 또는 비교 폴더 중 하나만 입력하세요.</span>
+            </div>
+            <div class="field inline">
+                <label for="sim-fps">FPS</label>
+                <input type="number" step="0.1" min="0.1" id="sim-fps" name="fps" value="{{ form_values.fps }}">
+                <label for="sim-resize">리사이즈</label>
+                <input type="text" id="sim-resize" name="resize" value="{{ form_values.resize }}" placeholder="예: 320x320">
+                <label for="sim-max-frames">최대 프레임 (기본 200)</label>
+                <input type="number" min="1" id="sim-max-frames" name="max_frames" value="{{ form_values.max_frames }}">
+                <label for="sim-phash-th">pHash 임계값</label>
+                <input type="number" min="0" id="sim-phash-th" name="phash_th" value="{{ form_values.phash_th }}">
+            </div>
+            <div class="field inline weights-row">
+                <span class="weights-title">가중치</span>
+                <label for="sim-weight-phash">pHash</label>
+                <input type="number" step="0.05" id="sim-weight-phash" name="weight_phash" value="{{ form_values.weight_phash }}">
+                <label for="sim-weight-orb">ORB</label>
+                <input type="number" step="0.05" id="sim-weight-orb" name="weight_orb" value="{{ form_values.weight_orb }}">
+                <label for="sim-weight-hist">Hist</label>
+                <input type="number" step="0.05" id="sim-weight-hist" name="weight_hist" value="{{ form_values.weight_hist }}">
+                <label for="sim-weight-psnr">PSNR</label>
+                <input type="number" step="0.05" id="sim-weight-psnr" name="weight_psnr" value="{{ form_values.weight_psnr }}">
+                <label for="sim-top-n">상위 개수 (표시)</label>
+                <input type="number" min="1" id="sim-top-n" name="top_n" value="{{ form_values.top_n }}">
+            </div>
+            <div class="form-actions">
+                <button type="button" id="sim-save-settings" class="btn-secondary">설정 저장</button>
+                <button type="submit">유사도 계산</button>
+            </div>
+        </form>
+    </section>
+
+    {% if error %}
+    <div class="alert error">
+        <strong>오류:</strong> {{ error }}
+    </div>
+    {% endif %}
+
+    {% if result %}
+        {% if result.mode == "pair" %}
+        <section class="panel result-panel">
+            <h2>쌍 비교 결과</h2>
+            <p><strong>{{ result.a_path }}</strong> ↔ <strong>{{ result.b_path }}</strong></p>
+            <table class="similarity-table">
+                <tbody>
+                    <tr><th scope="row">가중합</th><td>{{ "%.4f"|format(result.scores.weighted) }}</td></tr>
+                    <tr><th scope="row">pHash</th><td>{{ "%.4f"|format(result.scores.phash) }}</td></tr>
+                    <tr><th scope="row">ORB</th><td>{{ "%.4f"|format(result.scores.orb) }}</td></tr>
+                    <tr><th scope="row">Hist</th><td>{{ "%.4f"|format(result.scores.hist) }}</td></tr>
+                    <tr><th scope="row">PSNR (정규화)</th><td>{{ "%.4f"|format(result.scores.psnr) }}</td></tr>
+                    <tr><th scope="row">PSNR (dB)</th><td>{{ "%.2f"|format(result.scores.psnr_db) }}</td></tr>
+                    <tr><th scope="row">사용한 프레임</th><td>{{ result.scores.frames_used }}</td></tr>
+                </tbody>
+            </table>
+        </section>
+        {% elif result.mode == "dir" %}
+        <section class="panel result-panel">
+            <h2>폴더 랭킹 결과</h2>
+            <p><strong>{{ result.a_path }}</strong> 기준, <strong>{{ result.dir_path }}</strong> 내 {{ result.total }}개 중 상위 {{ result.top_n }}개</p>
+            <div class="table-wrapper">
+                <table class="similarity-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">#</th>
+                            <th scope="col">영상</th>
+                            <th scope="col">가중합</th>
+                            <th scope="col">pHash</th>
+                            <th scope="col">ORB</th>
+                            <th scope="col">Hist</th>
+                            <th scope="col">PSNR</th>
+                            <th scope="col">PSNR dB</th>
+                            <th scope="col">프레임</th>
+                            <th scope="col">비고</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in result.entries %}
+                            {% if entry.error %}
+                            <tr class="error-row">
+                                <td>{{ entry.rank }}</td>
+                                <td>{{ entry.name }}</td>
+                                <td colspan="7">오류: {{ entry.error }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td>{{ entry.rank }}</td>
+                                <td>{{ entry.name }}</td>
+                                <td>{{ "%.4f"|format(entry.scores.weighted) }}</td>
+                                <td>{{ "%.4f"|format(entry.scores.phash) }}</td>
+                                <td>{{ "%.4f"|format(entry.scores.orb) }}</td>
+                                <td>{{ "%.4f"|format(entry.scores.hist) }}</td>
+                                <td>{{ "%.4f"|format(entry.scores.psnr) }}</td>
+                                <td>{{ "%.2f"|format(entry.scores.psnr_db) }}</td>
+                                <td>{{ entry.scores.frames_used }}</td>
+                                <td></td>
+                            </tr>
+                            {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+    {% endif %}
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.querySelector('.similarity-form');
+    const saveButton = document.getElementById('sim-save-settings');
+    if (!form || !saveButton) {
+        return;
+    }
+
+    saveButton.addEventListener('click', async () => {
+        const formData = new FormData(form);
+        const payload = {};
+        formData.forEach((value, key) => {
+            payload[key] = value;
+        });
+
+        saveButton.disabled = true;
+        const originalText = saveButton.textContent;
+        saveButton.textContent = '저장 중...';
+
+        try {
+            const response = await fetch('/api/similarity/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({}));
+                const detail = errorPayload.detail || response.statusText || '알 수 없는 오류';
+                throw new Error(detail);
+            }
+
+            const result = await response.json().catch(() => ({}));
+            alert(result.message || '기본 설정을 저장했습니다.');
+        } catch (error) {
+            console.error('Failed to save similarity settings:', error);
+            alert(`설정을 저장하지 못했습니다: ${error.message}`);
+        } finally {
+            saveButton.disabled = false;
+            saveButton.textContent = originalText;
+        }
+    });
+});
+</script>
+
+<style>
+.form-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.panel-sub {
+    margin: 0;
+    color: #c8d8e8;
+    font-size: 0.95rem;
+}
+
+.weights-row {
+    align-items: flex-end;
+}
+
+.weights-row .weights-title {
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.similarity-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: rgba(0, 0, 0, 0.28);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.similarity-table th,
+.similarity-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.95rem;
+}
+
+.similarity-table th {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.similarity-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.error-row {
+    background: rgba(255, 80, 80, 0.15);
+}
+
+.result-panel p {
+    margin: 0;
+    color: #c8def8;
+}
+
+.result-panel strong {
+    color: #ffffff;
+}
+</style>
+
+</body>
+</html>
