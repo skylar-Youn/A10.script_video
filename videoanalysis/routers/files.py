@@ -29,10 +29,13 @@ async def get_files(
 
 
 @router.get("/folder-tree")
-async def get_folder_tree(path: str = Query(str(DOWNLOAD_DIR))):
+async def get_folder_tree(
+    path: str = Query(str(DOWNLOAD_DIR)),
+    depth: int = Query(3, ge=1, le=10)
+):
     """폴더 구조를 트리 형태로 반환"""
     try:
-        return build_folder_tree(Path(path))
+        return build_folder_tree(Path(path), max_depth=depth)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -7484,7 +7484,13 @@
         if (videoAnalysisBtn && !videoAnalysisBtn.dataset.bound) {
             videoAnalysisBtn.dataset.bound = '1';
             videoAnalysisBtn.addEventListener('click', () => {
-                window.location.href = 'http://127.0.0.1:8002/';
+                let targetUrl = 'http://127.0.0.1:8002/';
+                const projectFolderId = (currentProject && currentProject.id) || projectId || selectedProjectId;
+                if (projectFolderId) {
+                    const projectPath = `ai_shorts_maker/outputs/translator_projects/${projectFolderId}`;
+                    targetUrl += `?path=${encodeURIComponent(projectPath)}`;
+                }
+                window.open(targetUrl, '_blank');
             });
         }
 

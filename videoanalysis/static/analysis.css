@@ -161,6 +161,11 @@ body {
     background: rgba(74, 158, 255, 0.2);
 }
 
+.tree-node.active {
+    background: rgba(74, 158, 255, 0.15);
+    font-weight: 600;
+}
+
 .node-toggle {
     cursor: pointer;
     user-select: none;

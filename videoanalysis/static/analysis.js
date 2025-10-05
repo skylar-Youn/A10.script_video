@@ -28,6 +28,7 @@ class VideoAnalysisApp {
         this.commentaryAudioObjectUrl = null;
         this.commentaryAudioLocalFile = null;
         this.videoMuteState = false;
+        this.requestedFolderPath = null;
 
         // 하이브리드 자막 트랙 시스템 설정
         this.trackStates = {
@@ -415,9 +416,11 @@ class VideoAnalysisApp {
 
             let url = `/api/files?filter_type=${filterType}`;
             if (pathParam) {
-                // 절대 경로로 변환
-                const fullPath = `/home/sk/ws/youtubeanalysis/${pathParam}`;
-                url += `&path=${encodeURIComponent(fullPath)}`;
+                const sanitizedParam = pathParam.replace(/^\/+/g, '').replace(/\.\./g, '');
+                if (sanitizedParam) {
+                    const fullPath = `/home/sk/ws/youtubeanalysis/${sanitizedParam}`;
+                    url += `&path=${encodeURIComponent(fullPath)}`;
+                }
             }
 
             const response = await fetch(url);
@@ -441,16 +444,30 @@ class VideoAnalysisApp {
         try {
             this.showLoadingState('folder-tree', '📁 폴더 구조를 불러오는 중...');
 
-            // URL에서 path 파라미터 읽기
             const urlParams = new URLSearchParams(window.location.search);
             const pathParam = urlParams.get('path');
+            const params = new URLSearchParams();
 
-            let url = '/api/folder-tree';
             if (pathParam) {
-                // 절대 경로로 변환
-                const fullPath = `/home/sk/ws/youtubeanalysis/${pathParam}`;
-                url += `?path=${encodeURIComponent(fullPath)}`;
+                const sanitizedParam = pathParam.replace(/^\/+/g, '').replace(/\.\./g, '');
+                if (sanitizedParam) {
+                    const fullPath = `/home/sk/ws/youtubeanalysis/${sanitizedParam}`;
+                    params.set('path', fullPath);
+                    params.set('depth', '6');
+                    this.requestedFolderPath = fullPath;
+                } else {
+                    this.requestedFolderPath = null;
+                }
+            } else {
+                this.requestedFolderPath = null;
             }
+
+            if (!params.has('depth')) {
+                params.set('depth', '3');
+            }
+
+            const queryString = params.toString();
+            const url = queryString ? `/api/folder-tree?${queryString}` : '/api/folder-tree';
 
             const response = await fetch(url);
             const data = await response.json();
@@ -555,9 +572,16 @@ class VideoAnalysisApp {
 
     renderFolderTree(tree) {
         const container = document.getElementById('folder-tree');
+        if (!container) {
+            return;
+        }
+
         container.innerHTML = this.createTreeNode(tree);
 
-        // 트리 노드 클릭 이벤트 추가
+        if (this.requestedFolderPath) {
+            this.expandFolderTreeToPath(this.requestedFolderPath);
+        }
+
         container.querySelectorAll('.tree-node').forEach(node => {
             node.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -570,6 +594,55 @@ class VideoAnalysisApp {
                 }
             });
         });
+    }
+
+    expandFolderTreeToPath(targetPath) {
+        const container = document.getElementById('folder-tree');
+        if (!container || !targetPath) {
+            return;
+        }
+
+        container.querySelectorAll('.tree-node.active').forEach(node => {
+            node.classList.remove('active');
+        });
+
+        const nodes = Array.from(container.querySelectorAll('.tree-node'));
+        const targetNode = nodes.find((node) => node.dataset.path === targetPath);
+
+        if (!targetNode) {
+            return;
+        }
+
+        targetNode.classList.add('active');
+
+        let currentNode = targetNode;
+        while (currentNode) {
+            const children = currentNode.nextElementSibling;
+            if (children && children.classList.contains('tree-children')) {
+                children.style.display = 'block';
+                currentNode.classList.add('expanded');
+            }
+
+            const parentChildren = currentNode.parentElement;
+            if (parentChildren && parentChildren.classList.contains('tree-children')) {
+                parentChildren.style.display = 'block';
+                const parentNode = parentChildren.previousElementSibling;
+                if (parentNode && parentNode.classList.contains('tree-node')) {
+                    parentNode.classList.add('expanded');
+                    currentNode = parentNode;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        setTimeout(() => {
+            try {
+                targetNode.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            } catch (error) {
+                // scrollIntoView가 실패해도 동작에 영향을 주지 않음
+            }
+        }, 200);
     }
 
     createTreeNode(node, level = 0) {
