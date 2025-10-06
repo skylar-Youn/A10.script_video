@@ -42,6 +42,7 @@ class VideoAnalysisApp {
 
     init() {
         this.setupEventListeners();
+        this.setupSubtitleDrag();
         this.loadFileList();
         this.loadFolderTree();
         this.updateUI();
@@ -323,6 +324,158 @@ class VideoAnalysisApp {
 
         // 음성 분리 기능 설정
         this.setupVocalSeparation();
+    }
+
+    setupSubtitleDrag() {
+        const subtitleEl = document.getElementById('current-subtitle');
+        if (!subtitleEl) {
+            return;
+        }
+
+        const wrapper = subtitleEl.closest('.video-subtitle-wrapper');
+        if (!wrapper) {
+            return;
+        }
+
+        const videoContainer = wrapper.querySelector('.video-player-container');
+        const videoEl = wrapper.querySelector('#video-player');
+
+        let manualPosition = false;
+        let dragging = false;
+        let startX = 0;
+        let startY = 0;
+        let startLeft = 0;
+        let startTop = 0;
+
+        const ensureAbsolutePosition = () => {
+            if (subtitleEl.style.position !== 'absolute') {
+                subtitleEl.style.position = 'absolute';
+            }
+            subtitleEl.style.transform = 'none';
+        };
+
+        const clampPosition = (left, top) => {
+            const availableWidth = Math.max(wrapper.clientWidth - subtitleEl.offsetWidth, 0);
+            const availableHeight = Math.max(wrapper.clientHeight - subtitleEl.offsetHeight, 0);
+            const clampedLeft = Math.min(Math.max(left, 0), availableWidth);
+            const clampedTop = Math.min(Math.max(top, 0), availableHeight);
+            return { left: clampedLeft, top: clampedTop };
+        };
+
+        const placeBelowVideo = () => {
+            if (manualPosition) {
+                return;
+            }
+
+            ensureAbsolutePosition();
+
+            const containerBottom = videoContainer
+                ? videoContainer.offsetTop + videoContainer.offsetHeight
+                : 0;
+
+            const centeredLeft = (wrapper.clientWidth - subtitleEl.offsetWidth) / 2;
+            const desiredTop = containerBottom + 16;
+            const { left, top } = clampPosition(centeredLeft, desiredTop);
+
+            subtitleEl.style.left = `${left}px`;
+            subtitleEl.style.top = `${top}px`;
+        };
+
+        const ensureWithinBounds = () => {
+            const currentLeft = parseFloat(subtitleEl.style.left) || 0;
+            const currentTop = parseFloat(subtitleEl.style.top) || 0;
+            const { left, top } = clampPosition(currentLeft, currentTop);
+            subtitleEl.style.left = `${left}px`;
+            subtitleEl.style.top = `${top}px`;
+        };
+
+        const handleResize = () => {
+            if (!subtitleEl.isConnected) {
+                window.removeEventListener('resize', handleResize);
+                return;
+            }
+
+            ensureAbsolutePosition();
+
+            if (manualPosition) {
+                ensureWithinBounds();
+            } else {
+                placeBelowVideo();
+            }
+        };
+
+        subtitleEl.addEventListener('pointerdown', (event) => {
+            ensureAbsolutePosition();
+
+            manualPosition = true;
+            dragging = true;
+            startX = event.clientX;
+            startY = event.clientY;
+            startLeft = parseFloat(subtitleEl.style.left) || 0;
+            startTop = parseFloat(subtitleEl.style.top) || 0;
+
+            subtitleEl.classList.add('dragging');
+            if (typeof subtitleEl.setPointerCapture === 'function' && event.pointerId !== undefined) {
+                subtitleEl.setPointerCapture(event.pointerId);
+            }
+            event.preventDefault();
+        });
+
+        subtitleEl.addEventListener('pointermove', (event) => {
+            if (!dragging) {
+                return;
+            }
+
+            const deltaX = event.clientX - startX;
+            const deltaY = event.clientY - startY;
+
+            const targetLeft = startLeft + deltaX;
+            const targetTop = startTop + deltaY;
+            const { left, top } = clampPosition(targetLeft, targetTop);
+
+            subtitleEl.style.left = `${left}px`;
+            subtitleEl.style.top = `${top}px`;
+        });
+
+        const finishDrag = (event) => {
+            if (!dragging) {
+                return;
+            }
+
+            dragging = false;
+            subtitleEl.classList.remove('dragging');
+
+            if (
+                event &&
+                event.pointerId !== undefined &&
+                typeof subtitleEl.hasPointerCapture === 'function' &&
+                subtitleEl.hasPointerCapture(event.pointerId) &&
+                typeof subtitleEl.releasePointerCapture === 'function'
+            ) {
+                subtitleEl.releasePointerCapture(event.pointerId);
+            }
+
+            ensureWithinBounds();
+        };
+
+        subtitleEl.addEventListener('pointerup', finishDrag);
+        subtitleEl.addEventListener('pointercancel', finishDrag);
+
+        window.addEventListener('resize', handleResize);
+
+        if (videoEl) {
+            videoEl.addEventListener('loadedmetadata', () => {
+                if (!manualPosition) {
+                    placeBelowVideo();
+                } else {
+                    ensureWithinBounds();
+                }
+            });
+        }
+
+        requestAnimationFrame(() => {
+            placeBelowVideo();
+        });
     }
 
     setupTimelineEditor() {
@@ -4501,8 +4654,10 @@ class VideoAnalysisApp {
         const stopBtn = document.getElementById('stop-btn');
         const rewindBtn = document.getElementById('rewind-btn');
         const forwardBtn = document.getElementById('forward-btn');
+        const skipToStartBtn = document.getElementById('skip-to-start-btn');
+        const skipToEndBtn = document.getElementById('skip-to-end-btn');
 
-        console.log('버튼 요소들:', { playPauseBtn, stopBtn, rewindBtn, forwardBtn });
+        console.log('버튼 요소들:', { playPauseBtn, stopBtn, rewindBtn, forwardBtn, skipToStartBtn, skipToEndBtn });
 
         if (playPauseBtn) {
             playPauseBtn.addEventListener('click', () => {
@@ -4542,6 +4697,26 @@ class VideoAnalysisApp {
             console.log('빨리감기 버튼 이벤트 등록 완료');
         } else {
             console.log('빨리감기 버튼을 찾을 수 없음');
+        }
+
+        if (skipToStartBtn) {
+            skipToStartBtn.addEventListener('click', () => {
+                console.log('맨 처음으로 버튼 클릭됨');
+                this.skipToStart();
+            });
+            console.log('맨 처음으로 버튼 이벤트 등록 완료');
+        } else {
+            console.log('맨 처음으로 버튼을 찾을 수 없음');
+        }
+
+        if (skipToEndBtn) {
+            skipToEndBtn.addEventListener('click', () => {
+                console.log('맨 끝으로 버튼 클릭됨');
+                this.skipToEnd();
+            });
+            console.log('맨 끝으로 버튼 이벤트 등록 완료');
+        } else {
+            console.log('맨 끝으로 버튼을 찾을 수 없음');
         }
 
         // 줌 컨트롤
@@ -7647,6 +7822,9 @@ class VideoAnalysisApp {
             translated: 'translation',
             trans: 'translation',
             dub: 'translation',
+            explanation: 'description',
+            explanatory: 'description',
+            explain: 'description',
             description: 'description',
             desc: 'description',
             narration: 'description',
@@ -7659,7 +7837,7 @@ class VideoAnalysisApp {
             return mapping[key];
         }
 
-        if (key.includes('description') || key.includes('desc') || key.includes('sfx') || key.includes('effect')) {
+        if (key.includes('description') || key.includes('desc') || key.includes('sfx') || key.includes('effect') || key.includes('explan')) {
             return 'description';
         }
 
@@ -7742,7 +7920,7 @@ class VideoAnalysisApp {
             return [];
         }
 
-        const trackOrder = ['main', 'translation', 'description'];
+        const trackOrder = ['main', 'description', 'translation'];
         const trackTexts = {};
 
         currentSubtitles.forEach(subtitle => {
@@ -9175,7 +9353,8 @@ class VideoAnalysisApp {
         if (currentSubtitle) {
             if (currentSubtitleEl) {
                 currentSubtitleEl.textContent = currentSubtitle.text;
-                currentSubtitleEl.className = 'subtitle-display';
+                currentSubtitleEl.classList.add('subtitle-display');
+                currentSubtitleEl.classList.remove('no-subtitle');
             }
 
             // 해당 자막 블록 하이라이트
@@ -9189,7 +9368,8 @@ class VideoAnalysisApp {
         } else {
             if (currentSubtitleEl) {
                 currentSubtitleEl.textContent = '자막이 없습니다';
-                currentSubtitleEl.className = 'subtitle-display no-subtitle';
+                currentSubtitleEl.classList.add('subtitle-display');
+                currentSubtitleEl.classList.add('no-subtitle');
             }
 
             // 모든 선택 해제
