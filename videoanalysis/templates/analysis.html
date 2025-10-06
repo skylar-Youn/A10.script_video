@@ -471,7 +471,134 @@
             <div class="tab-content" id="video-edit-tab">
                 <div class="video-edit-controls">
                     <div class="control-section">
-                        <h4>🎥 고급 영상 편집기</h4>
+                        <div class="video-editor-heading">
+                            <h4>🎥 고급 영상 편집기</h4>
+                            <div class="video-title-controls">
+                                <div class="title-input-group">
+                                    <label for="video-title-input">제목</label>
+                                    <input type="text" id="video-title-input" placeholder="영상 제목을 입력하세요">
+                                </div>
+                                <div class="title-size-control">
+                                    <label for="video-title-size">크기</label>
+                                    <input type="range" id="video-title-size" min="24" max="120" value="48" step="2">
+                                    <span class="title-size-value" id="video-title-size-display">48px</span>
+                                </div>
+                                <div class="title-color-control">
+                                    <label for="video-title-color">색상</label>
+                                    <input type="color" id="video-title-color" value="#ffffff">
+                                </div>
+                                <div class="title-motion-control">
+                                    <label for="video-title-motion">모션</label>
+                                    <select id="video-title-motion">
+                                        <option value="none">효과 없음</option>
+                                        <option value="fade">페이드 인</option>
+                                        <option value="slide-up">슬라이드 업</option>
+                                        <option value="slide-down">슬라이드 다운</option>
+                                        <option value="slide-left">슬라이드 좌</option>
+                                        <option value="slide-right">슬라이드 우</option>
+                                        <option value="zoom-in">줌 인</option>
+                                        <option value="zoom-out">줌 아웃</option>
+                                        <option value="bounce">바운스</option>
+                                        <option value="rotate">회전</option>
+                                        <option value="pulse">펄스</option>
+                                    </select>
+                                </div>
+                                <div class="title-effect-group">
+                                    <span class="effect-label">🎨 텍스트 효과</span>
+                                    <label class="effect-option">
+                                        <input type="checkbox" id="video-title-outline" checked>
+                                        <span>정적 효과 (외곽선)</span>
+                                    </label>
+                                    <label class="effect-option">
+                                        <input type="checkbox" id="video-title-dynamic">
+                                        <span>동적 효과 (모션)</span>
+                                    </label>
+                                </div>
+                        </div>
+                    </div>
+
+                        <!-- 부제목 & 텍스트 옵션 -->
+                        <div class="title-subtitle-controls">
+                            <div class="subtitle-controls-group">
+                                <h5>🎬 부제목 설정</h5>
+                                <div class="subtitle-input-group">
+                                    <label for="video-subtitle-input">부제목</label>
+                                    <input type="text" id="video-subtitle-input" placeholder="부제목을 입력하세요">
+                                </div>
+                                <div class="subtitle-size-control">
+                                    <label for="video-subtitle-size">크기</label>
+                                    <input type="range" id="video-subtitle-size" min="20" max="96" value="32" step="2">
+                                    <span class="subtitle-size-value" id="video-subtitle-size-display">32px</span>
+                                </div>
+                                <div class="subtitle-color-control">
+                                    <label for="video-subtitle-color">색상</label>
+                                    <input type="color" id="video-subtitle-color" value="#ffe14d">
+                                </div>
+                                <div class="subtitle-motion-control">
+                                    <label for="video-subtitle-motion">모션</label>
+                                    <select id="video-subtitle-motion">
+                                        <option value="none">효과 없음</option>
+                                        <option value="fade">페이드 인</option>
+                                        <option value="slide-up">슬라이드 업</option>
+                                        <option value="slide-down">슬라이드 다운</option>
+                                        <option value="slide-left">슬라이드 좌</option>
+                                        <option value="slide-right">슬라이드 우</option>
+                                        <option value="zoom-in">줌 인</option>
+                                        <option value="zoom-out">줌 아웃</option>
+                                        <option value="bounce">바운스</option>
+                                        <option value="rotate">회전</option>
+                                        <option value="pulse">펄스</option>
+                                    </select>
+                                </div>
+                                <div class="subtitle-effect-group">
+                                    <span class="effect-label">🎨 텍스트 효과</span>
+                                    <label class="effect-option">
+                                        <input type="checkbox" id="video-subtitle-outline" checked>
+                                        <span>정적 효과 (외곽선)</span>
+                                    </label>
+                                    <label class="effect-option">
+                                        <input type="checkbox" id="video-subtitle-dynamic">
+                                        <span>동적 효과 (모션)</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="text-effects-control">
+                                <h4 class="area-title">🎨 텍스트 효과</h4>
+                                <div class="effects-controls">
+                                    <div class="control-group">
+                                        <label class="control-label" for="static-effect">정적 효과 (스타일)</label>
+                                        <select id="static-effect" class="control-select">
+                                            <option value="none">없음</option>
+                                            <option value="outline">외곽선</option>
+                                            <option value="shadow">그림자</option>
+                                            <option value="glow">글로우</option>
+                                            <option value="gradient">그라데이션</option>
+                                            <option value="neon">네온</option>
+                                        </select>
+                                    </div>
+                                    <div class="control-group">
+                                        <label class="control-label" for="dynamic-effect">동적 효과 (모션)</label>
+                                        <select id="dynamic-effect" class="control-select">
+                                            <option value="none">없음</option>
+                                            <option value="typewriter">타이핑</option>
+                                            <option value="wave">웨이브</option>
+                                            <option value="pulse">펄스</option>
+                                            <option value="shake">떨림</option>
+                                            <option value="fade">페이드</option>
+                                            <option value="bounce">바운스</option>
+                                            <option value="flip">플립</option>
+                                            <option value="slide">슬라이드</option>
+                                            <option value="zoom">줌</option>
+                                            <option value="rotate">회전</option>
+                                            <option value="glitch">글리치</option>
+                                            <option value="matrix">매트릭스</option>
+                                            <option value="fire">불꽃</option>
+                                            <option value="rainbow">무지개</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
                         <!-- 비디오 플레이어 -->
                         <div class="video-subtitle-wrapper">
@@ -481,6 +608,14 @@
                                     <source src="" type="video/mp4">
                                     비디오를 불러올 수 없습니다.
                                 </video>
+                            </div>
+
+                            <div class="video-title-overlay video-text-overlay empty" id="video-title-overlay">
+                                영상 제목
+                            </div>
+
+                            <div class="video-subtitle-overlay video-text-overlay empty" id="video-subtitle-overlay">
+                                영상 부제목
                             </div>
 
                             <div class="subtitle-display no-subtitle" id="current-subtitle">

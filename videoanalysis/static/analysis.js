@@ -5,6 +5,44 @@
 
 class VideoAnalysisApp {
     constructor() {
+        this.staticEffectClasses = [
+            'static-none',
+            'static-outline',
+            'static-shadow',
+            'static-glow',
+            'static-gradient',
+            'static-neon'
+        ];
+        this.dynamicEffectClasses = [
+            'dynamic-none',
+            'dynamic-typewriter',
+            'dynamic-wave',
+            'dynamic-pulse',
+            'dynamic-shake',
+            'dynamic-fade',
+            'dynamic-bounce',
+            'dynamic-flip',
+            'dynamic-slide',
+            'dynamic-zoom',
+            'dynamic-rotate',
+            'dynamic-glitch',
+            'dynamic-matrix',
+            'dynamic-fire',
+            'dynamic-rainbow'
+        ];
+        this.textMotionClasses = [
+            'motion-none',
+            'motion-fade',
+            'motion-slide-up',
+            'motion-slide-down',
+            'motion-slide-left',
+            'motion-slide-right',
+            'motion-zoom-in',
+            'motion-zoom-out',
+            'motion-bounce',
+            'motion-rotate',
+            'motion-pulse'
+        ];
         this.selectedFiles = new Set();
         this.hiddenFiles = new Set();
         this.lastHiddenFiles = new Set(); // 전체보기 전 숨긴 파일 백업
@@ -43,6 +81,9 @@ class VideoAnalysisApp {
     init() {
         this.setupEventListeners();
         this.setupSubtitleDrag();
+        this.setupTitleOverlay();
+        this.setupSubtitleOverlay();
+        this.setupGlobalTextEffects();
         this.loadFileList();
         this.loadFolderTree();
         this.updateUI();
@@ -82,6 +123,15 @@ class VideoAnalysisApp {
         setTimeout(() => {
             this.updatePlayPauseButton();
         }, 100);
+    }
+
+    getTextOverlays() {
+        const overlays = [];
+        const titleOverlay = document.getElementById('video-title-overlay');
+        if (titleOverlay) overlays.push(titleOverlay);
+        const subtitleOverlay = document.getElementById('video-subtitle-overlay');
+        if (subtitleOverlay) overlays.push(subtitleOverlay);
+        return overlays;
     }
 
     setupEventListeners() {
@@ -326,21 +376,26 @@ class VideoAnalysisApp {
         this.setupVocalSeparation();
     }
 
-    setupSubtitleDrag() {
-        const subtitleEl = document.getElementById('current-subtitle');
-        if (!subtitleEl) {
+    makeOverlayDraggable(element, options = {}) {
+        if (!element) {
             return;
         }
 
-        const wrapper = subtitleEl.closest('.video-subtitle-wrapper');
+        const wrapper = options.wrapper || element.closest('.video-subtitle-wrapper');
         if (!wrapper) {
             return;
         }
 
-        const videoContainer = wrapper.querySelector('.video-player-container');
-        const videoEl = wrapper.querySelector('#video-player');
+        const manualAttr = options.manualAttr || 'manualPosition';
+        const autoHookName = options.autoHookName || '__applyAutoPosition';
+        const ensureHookName = options.ensureHookName || '__ensureWithinBounds';
+        const positionMode = options.positionMode || 'top-left';
 
-        let manualPosition = subtitleEl.dataset.manualPosition === 'true';
+        if (element.dataset[manualAttr] === undefined) {
+            element.dataset[manualAttr] = 'false';
+        }
+
+        let manualPosition = element.dataset[manualAttr] === 'true';
         let dragging = false;
         let startX = 0;
         let startY = 0;
@@ -348,95 +403,99 @@ class VideoAnalysisApp {
         let startTop = 0;
 
         const ensureAbsolutePosition = () => {
-            if (subtitleEl.style.position !== 'absolute') {
-                subtitleEl.style.position = 'absolute';
+            if (element.style.position !== 'absolute') {
+                element.style.position = 'absolute';
             }
-            subtitleEl.style.transform = 'none';
         };
 
         const clampPosition = (left, top) => {
-            const availableWidth = Math.max(wrapper.clientWidth - subtitleEl.offsetWidth, 0);
-            const availableHeight = Math.max(wrapper.clientHeight - subtitleEl.offsetHeight, 0);
-            const clampedLeft = Math.min(Math.max(left, 0), availableWidth);
-            const clampedTop = Math.min(Math.max(top, 0), availableHeight);
+            if (typeof options.clampPosition === 'function') {
+                return options.clampPosition({ left, top, wrapper, element });
+            }
+
+            const wrapperWidth = wrapper.clientWidth || 0;
+            const wrapperHeight = wrapper.clientHeight || 0;
+            const elementWidth = element.offsetWidth || 0;
+            const elementHeight = element.offsetHeight || 0;
+
+            let minLeft = 0;
+            let maxLeft = Math.max(wrapperWidth - elementWidth, 0);
+
+            if (positionMode === 'center-x') {
+                const halfWidth = elementWidth / 2;
+                minLeft = halfWidth;
+                maxLeft = Math.max(wrapperWidth - halfWidth, halfWidth);
+            }
+
+            if (typeof options.horizontalBounds === 'function') {
+                const hb = options.horizontalBounds({ wrapper, element }) || {};
+                if (Number.isFinite(hb.min)) {
+                    minLeft = hb.min;
+                }
+                if (Number.isFinite(hb.max)) {
+                    maxLeft = hb.max;
+                }
+            }
+
+            const clampedLeft = Math.min(Math.max(left, minLeft), maxLeft);
+
+            let minTop = 0;
+            let maxTop = Math.max(wrapperHeight - elementHeight, 0);
+            if (typeof options.verticalBounds === 'function') {
+                const vb = options.verticalBounds({ wrapper, element }) || {};
+                if (Number.isFinite(vb.min)) {
+                    minTop = vb.min;
+                }
+                if (Number.isFinite(vb.max)) {
+                    maxTop = vb.max;
+                }
+            }
+
+            const clampedTop = Math.min(Math.max(top, minTop), maxTop);
             return { left: clampedLeft, top: clampedTop };
         };
 
-        const placeBelowVideo = () => {
-            if (manualPosition) {
-                return;
-            }
-
-            ensureAbsolutePosition();
-
-            const containerBottom = videoContainer
-                ? videoContainer.offsetTop + videoContainer.offsetHeight
-                : 0;
-
-            const centeredLeft = (wrapper.clientWidth - subtitleEl.offsetWidth) / 2;
-            const desiredTop = containerBottom + 16;
-            const { left, top } = clampPosition(centeredLeft, desiredTop);
-
-            subtitleEl.style.left = `${left}px`;
-            subtitleEl.style.top = `${top}px`;
-        };
-
         const ensureWithinBounds = () => {
-            const currentLeft = parseFloat(subtitleEl.style.left) || 0;
-            const currentTop = parseFloat(subtitleEl.style.top) || 0;
-            const { left, top } = clampPosition(currentLeft, currentTop);
-            subtitleEl.style.left = `${left}px`;
-            subtitleEl.style.top = `${top}px`;
+            ensureAbsolutePosition();
+            const currentLeft = parseFloat(element.style.left) || 0;
+            const currentTop = parseFloat(element.style.top) || 0;
+            const clamped = clampPosition(currentLeft, currentTop);
+            element.style.left = `${clamped.left}px`;
+            element.style.top = `${clamped.top}px`;
         };
 
-        const handleResize = () => {
-            if (!subtitleEl.isConnected) {
-                window.removeEventListener('resize', handleResize);
-                return;
-            }
-
-            ensureAbsolutePosition();
-
-            if (manualPosition) {
+        const applyAutoPosition = (ignoreManual = false) => {
+            manualPosition = element.dataset[manualAttr] === 'true';
+            if (manualPosition && !ignoreManual) {
                 ensureWithinBounds();
-            } else {
-                placeBelowVideo();
-            }
-        };
-
-        subtitleEl.addEventListener('pointerdown', (event) => {
-            ensureAbsolutePosition();
-
-            manualPosition = true;
-            subtitleEl.dataset.manualPosition = 'true';
-            dragging = true;
-            startX = event.clientX;
-            startY = event.clientY;
-            startLeft = parseFloat(subtitleEl.style.left) || 0;
-            startTop = parseFloat(subtitleEl.style.top) || 0;
-
-            subtitleEl.classList.add('dragging');
-            if (typeof subtitleEl.setPointerCapture === 'function' && event.pointerId !== undefined) {
-                subtitleEl.setPointerCapture(event.pointerId);
-            }
-            event.preventDefault();
-        });
-
-        subtitleEl.addEventListener('pointermove', (event) => {
-            if (!dragging) {
                 return;
             }
 
-            const deltaX = event.clientX - startX;
-            const deltaY = event.clientY - startY;
+            ensureAbsolutePosition();
 
-            const targetLeft = startLeft + deltaX;
-            const targetTop = startTop + deltaY;
+            const context = {
+                wrapper,
+                element,
+                manual: manualPosition
+            };
+
+            let targetLeft = parseFloat(element.style.left) || 0;
+            let targetTop = parseFloat(element.style.top) || 0;
+
+            if (typeof options.autoPosition === 'function') {
+                const result = options.autoPosition(context) || {};
+                if (Number.isFinite(result.left)) {
+                    targetLeft = result.left;
+                }
+                if (Number.isFinite(result.top)) {
+                    targetTop = result.top;
+                }
+            }
+
             const { left, top } = clampPosition(targetLeft, targetTop);
-
-            subtitleEl.style.left = `${left}px`;
-            subtitleEl.style.top = `${top}px`;
-        });
+            element.style.left = `${left}px`;
+            element.style.top = `${top}px`;
+        };
 
         const finishDrag = (event) => {
             if (!dragging) {
@@ -444,49 +503,475 @@ class VideoAnalysisApp {
             }
 
             dragging = false;
-            subtitleEl.classList.remove('dragging');
+            element.classList.remove('dragging');
 
             if (
                 event &&
                 event.pointerId !== undefined &&
-                typeof subtitleEl.hasPointerCapture === 'function' &&
-                subtitleEl.hasPointerCapture(event.pointerId) &&
-                typeof subtitleEl.releasePointerCapture === 'function'
+                typeof element.hasPointerCapture === 'function' &&
+                element.hasPointerCapture(event.pointerId) &&
+                typeof element.releasePointerCapture === 'function'
             ) {
-                subtitleEl.releasePointerCapture(event.pointerId);
+                element.releasePointerCapture(event.pointerId);
             }
 
             ensureWithinBounds();
         };
 
-        subtitleEl.addEventListener('pointerup', finishDrag);
-        subtitleEl.addEventListener('pointercancel', finishDrag);
+        element.addEventListener('pointerdown', (event) => {
+            ensureAbsolutePosition();
+
+            manualPosition = true;
+            element.dataset[manualAttr] = 'true';
+            dragging = true;
+            startX = event.clientX;
+            startY = event.clientY;
+            startLeft = parseFloat(element.style.left) || 0;
+            startTop = parseFloat(element.style.top) || 0;
+
+            element.classList.add('dragging');
+
+            if (typeof element.setPointerCapture === 'function' && event.pointerId !== undefined) {
+                element.setPointerCapture(event.pointerId);
+            }
+
+            event.preventDefault();
+        });
+
+        element.addEventListener('pointermove', (event) => {
+            if (!dragging) {
+                return;
+            }
+
+            const deltaX = event.clientX - startX;
+            const deltaY = event.clientY - startY;
+
+            let targetLeft = startLeft + deltaX;
+            let targetTop = startTop + deltaY;
+
+            if (typeof options.onDrag === 'function') {
+                const result = options.onDrag({
+                    left: targetLeft,
+                    top: targetTop,
+                    wrapper,
+                    element
+                }) || {};
+                if (Number.isFinite(result.left)) {
+                    targetLeft = result.left;
+                }
+                if (Number.isFinite(result.top)) {
+                    targetTop = result.top;
+                }
+            }
+
+            const { left, top } = clampPosition(targetLeft, targetTop);
+            element.style.left = `${left}px`;
+            element.style.top = `${top}px`;
+        });
+
+        element.addEventListener('pointerup', finishDrag);
+        element.addEventListener('pointercancel', finishDrag);
+
+        const handleResize = () => {
+            if (!element.isConnected) {
+                window.removeEventListener('resize', handleResize);
+                return;
+            }
+
+            manualPosition = element.dataset[manualAttr] === 'true';
+            if (manualPosition) {
+                ensureWithinBounds();
+            } else {
+                applyAutoPosition(true);
+            }
+        };
 
         window.addEventListener('resize', handleResize);
 
+        element[autoHookName] = (ignoreManual = false) => {
+            applyAutoPosition(ignoreManual);
+        };
+        element[ensureHookName] = () => {
+            ensureWithinBounds();
+        };
+
+        requestAnimationFrame(() => {
+            applyAutoPosition(true);
+        });
+    }
+
+    refreshOverlayAnimation(overlay) {
+        if (!overlay) return;
+        overlay.style.animation = 'none';
+        void overlay.offsetWidth; // reflow to restart animation
+        overlay.style.animation = '';
+    }
+
+    applyOverlayMotion(overlay, motionValue) {
+        if (!overlay) return;
+        const target = motionValue || 'none';
+        const normalized = `motion-${target}`;
+        this.textMotionClasses.forEach(cls => overlay.classList.remove(cls));
+        const appliedClass = this.textMotionClasses.includes(normalized) ? normalized : 'motion-none';
+        overlay.classList.add(appliedClass);
+        overlay.dataset.motion = target;
+        this.refreshOverlayAnimation(overlay);
+    }
+
+    applyOverlayStaticEffect(overlay, effectValue) {
+        if (!overlay) return;
+        const effect = effectValue || 'none';
+        const normalized = `static-${effect}`;
+        this.staticEffectClasses.forEach(cls => overlay.classList.remove(cls));
+        const appliedClass = this.staticEffectClasses.includes(normalized) ? normalized : 'static-none';
+        overlay.classList.add(appliedClass);
+        overlay.dataset.staticEffect = effect;
+        this.refreshOverlayAnimation(overlay);
+    }
+
+    applyOverlayDynamicEffect(overlay, effectValue) {
+        if (!overlay) return;
+        const effect = effectValue || 'none';
+        const normalized = `dynamic-${effect}`;
+        this.dynamicEffectClasses.forEach(cls => overlay.classList.remove(cls));
+        const appliedClass = this.dynamicEffectClasses.includes(normalized) ? normalized : 'dynamic-none';
+        overlay.classList.add(appliedClass);
+        overlay.dataset.dynamicEffect = effect;
+        this.refreshOverlayAnimation(overlay);
+    }
+
+    setupSubtitleDrag() {
+        const subtitleEl = document.getElementById('current-subtitle');
+        if (!subtitleEl) {
+            return;
+        }
+
+        this.makeOverlayDraggable(subtitleEl, {
+            manualAttr: 'manualPosition',
+            autoHookName: '__autoPlaceSubtitle',
+            ensureHookName: '__ensureSubtitleWithinBounds',
+            positionMode: 'center-x',
+            autoPosition: ({ wrapper, element }) => {
+                const videoContainer = wrapper.querySelector('.video-player-container');
+                const containerBottom = videoContainer
+                    ? videoContainer.offsetTop + videoContainer.offsetHeight
+                    : 0;
+                return {
+                    left: wrapper.clientWidth / 2,
+                    top: containerBottom + 16
+                };
+            }
+        });
+
+        const videoEl = document.getElementById('video-player');
         if (videoEl) {
             videoEl.addEventListener('loadedmetadata', () => {
-                if (!manualPosition) {
-                    placeBelowVideo();
-                } else {
-                    ensureWithinBounds();
+                if (subtitleEl.dataset.manualPosition !== 'true' && typeof subtitleEl.__autoPlaceSubtitle === 'function') {
+                    subtitleEl.__autoPlaceSubtitle();
+                } else if (typeof subtitleEl.__ensureSubtitleWithinBounds === 'function') {
+                    subtitleEl.__ensureSubtitleWithinBounds();
+                }
+            });
+        }
+    }
+
+    setupTitleOverlay() {
+        const overlay = document.getElementById('video-title-overlay');
+        if (!overlay) {
+            return;
+        }
+
+        this.makeOverlayDraggable(overlay, {
+            manualAttr: 'manualTitlePosition',
+            autoHookName: '__autoPlaceTitleOverlay',
+            ensureHookName: '__ensureTitleWithinBounds',
+            positionMode: 'top-left',
+            autoPosition: ({ wrapper, element }) => {
+                const videoContainer = wrapper.querySelector('.video-player-container');
+                const containerTop = videoContainer ? videoContainer.offsetTop : 0;
+                const containerHeight = videoContainer ? videoContainer.offsetHeight : 0;
+                const baseTop = containerTop + Math.max(containerHeight * 0.15, 24);
+                const centeredLeft = Math.max((wrapper.clientWidth - element.offsetWidth) / 2, 0);
+                return {
+                    left: centeredLeft,
+                    top: Math.max(baseTop, 12)
+                };
+            }
+        });
+
+        const videoEl = document.getElementById('video-player');
+        if (videoEl) {
+            videoEl.addEventListener('loadedmetadata', () => {
+                if (overlay.dataset.manualTitlePosition !== 'true' && typeof overlay.__autoPlaceTitleOverlay === 'function') {
+                    overlay.__autoPlaceTitleOverlay();
+                } else if (typeof overlay.__ensureTitleWithinBounds === 'function') {
+                    overlay.__ensureTitleWithinBounds();
                 }
             });
         }
 
-        requestAnimationFrame(() => {
-            placeBelowVideo();
+        overlay.classList.add('motion-none', 'static-none', 'dynamic-none');
+
+        const titleInput = document.getElementById('video-title-input');
+        const sizeInput = document.getElementById('video-title-size');
+        const sizeDisplay = document.getElementById('video-title-size-display');
+        const colorInput = document.getElementById('video-title-color');
+        const motionSelect = document.getElementById('video-title-motion');
+        const outlineCheckbox = document.getElementById('video-title-outline');
+        const dynamicCheckbox = document.getElementById('video-title-dynamic');
+        const globalStaticSelect = document.getElementById('static-effect');
+        const globalDynamicSelect = document.getElementById('dynamic-effect');
+
+        const updatePositionIfAuto = () => {
+            if (overlay.dataset.manualTitlePosition !== 'true' && typeof overlay.__autoPlaceTitleOverlay === 'function') {
+                requestAnimationFrame(() => overlay.__autoPlaceTitleOverlay());
+            } else if (typeof overlay.__ensureTitleWithinBounds === 'function') {
+                overlay.__ensureTitleWithinBounds();
+            }
+        };
+
+        const updateText = () => {
+            const raw = titleInput ? titleInput.value : '';
+            const text = raw.trim();
+            overlay.textContent = text || '영상 제목';
+            overlay.classList.toggle('empty', text.length === 0);
+            requestAnimationFrame(updatePositionIfAuto);
+            this.refreshOverlayAnimation(overlay);
+        };
+
+        if (titleInput) {
+            titleInput.addEventListener('input', updateText);
+        }
+
+        const updateSize = () => {
+            const value = sizeInput ? parseInt(sizeInput.value, 10) : 48;
+            const fontSize = Number.isFinite(value) ? value : 48;
+            overlay.style.fontSize = `${fontSize}px`;
+            if (sizeDisplay) {
+                sizeDisplay.textContent = `${fontSize}px`;
+            }
+            requestAnimationFrame(updatePositionIfAuto);
+            this.refreshOverlayAnimation(overlay);
+        };
+
+        if (sizeInput) {
+            sizeInput.addEventListener('input', updateSize);
+        }
+
+        const updateColor = () => {
+            if (!colorInput) return;
+            const value = colorInput.value || '#ffffff';
+            overlay.style.color = value;
+        };
+
+        if (colorInput) {
+            colorInput.addEventListener('input', () => {
+                updateColor();
+                requestAnimationFrame(updatePositionIfAuto);
+            });
+        }
+
+        const updateMotion = () => {
+            const value = motionSelect ? motionSelect.value : 'none';
+            this.applyOverlayMotion(overlay, value);
+        };
+
+        if (motionSelect) {
+            motionSelect.addEventListener('change', () => {
+                updateMotion();
+                requestAnimationFrame(updatePositionIfAuto);
+            });
+        }
+
+        const applyEffects = () => {
+            if (outlineCheckbox) {
+                overlay.classList.toggle('outline-effect', outlineCheckbox.checked);
+            }
+            if (dynamicCheckbox) {
+                overlay.classList.toggle('dynamic-effect', dynamicCheckbox.checked);
+            }
+            requestAnimationFrame(updatePositionIfAuto);
+            this.refreshOverlayAnimation(overlay);
+        };
+
+        if (outlineCheckbox) {
+            outlineCheckbox.addEventListener('change', applyEffects);
+        }
+        if (dynamicCheckbox) {
+            dynamicCheckbox.addEventListener('change', applyEffects);
+        }
+
+        updateText();
+        updateSize();
+        updateColor();
+        updateMotion();
+        this.applyOverlayStaticEffect(overlay, globalStaticSelect ? globalStaticSelect.value : 'none');
+        this.applyOverlayDynamicEffect(overlay, globalDynamicSelect ? globalDynamicSelect.value : 'none');
+        applyEffects();
+    }
+
+    setupGlobalTextEffects() {
+        const staticSelect = document.getElementById('static-effect');
+        const dynamicSelect = document.getElementById('dynamic-effect');
+
+        const applyStatic = () => {
+            const value = staticSelect ? staticSelect.value : 'none';
+            this.getTextOverlays().forEach(overlay => this.applyOverlayStaticEffect(overlay, value));
+        };
+
+        const applyDynamic = () => {
+            const value = dynamicSelect ? dynamicSelect.value : 'none';
+            this.getTextOverlays().forEach(overlay => this.applyOverlayDynamicEffect(overlay, value));
+        };
+
+        if (staticSelect) {
+            staticSelect.addEventListener('change', () => {
+                applyStatic();
+            });
+        }
+
+        if (dynamicSelect) {
+            dynamicSelect.addEventListener('change', () => {
+                applyDynamic();
+            });
+        }
+
+        applyStatic();
+        applyDynamic();
+    }
+
+    setupSubtitleOverlay() {
+        const overlay = document.getElementById('video-subtitle-overlay');
+        if (!overlay) {
+            return;
+        }
+
+        this.makeOverlayDraggable(overlay, {
+            manualAttr: 'manualSubtitlePosition',
+            autoHookName: '__autoPlaceSubtitleOverlay',
+            ensureHookName: '__ensureSubtitleOverlayWithinBounds',
+            positionMode: 'top-left',
+            autoPosition: ({ wrapper, element }) => {
+                const videoContainer = wrapper.querySelector('.video-player-container');
+                const containerTop = videoContainer ? videoContainer.offsetTop : 0;
+                const containerHeight = videoContainer ? videoContainer.offsetHeight : 0;
+                const baseTop = containerTop + Math.max(containerHeight * 0.35, 64);
+                const centeredLeft = Math.max((wrapper.clientWidth - element.offsetWidth) / 2, 0);
+                return {
+                    left: centeredLeft,
+                    top: Math.max(baseTop, 36)
+                };
+            }
         });
 
-        subtitleEl.dataset.manualPosition = manualPosition ? 'true' : 'false';
-        subtitleEl.__autoPlaceSubtitle = () => {
-            manualPosition = subtitleEl.dataset.manualPosition === 'true';
-            placeBelowVideo();
+        const subtitleInput = document.getElementById('video-subtitle-input');
+        const sizeInput = document.getElementById('video-subtitle-size');
+        const sizeDisplay = document.getElementById('video-subtitle-size-display');
+        const colorInput = document.getElementById('video-subtitle-color');
+        const motionSelect = document.getElementById('video-subtitle-motion');
+        const outlineCheckbox = document.getElementById('video-subtitle-outline');
+        const dynamicCheckbox = document.getElementById('video-subtitle-dynamic');
+        const globalStaticSelect = document.getElementById('static-effect');
+        const globalDynamicSelect = document.getElementById('dynamic-effect');
+
+        overlay.classList.add('motion-none', 'static-none', 'dynamic-none');
+
+        const updatePositionIfAuto = () => {
+            if (overlay.dataset.manualSubtitlePosition !== 'true' && typeof overlay.__autoPlaceSubtitleOverlay === 'function') {
+                requestAnimationFrame(() => overlay.__autoPlaceSubtitleOverlay());
+            } else if (typeof overlay.__ensureSubtitleOverlayWithinBounds === 'function') {
+                overlay.__ensureSubtitleOverlayWithinBounds();
+            }
         };
-        subtitleEl.__ensureSubtitleWithinBounds = () => {
-            manualPosition = subtitleEl.dataset.manualPosition === 'true';
-            ensureWithinBounds();
+
+        const updateText = () => {
+            const raw = subtitleInput ? subtitleInput.value : '';
+            const text = raw.trim();
+            overlay.textContent = text || '영상 부제목';
+            overlay.classList.toggle('empty', text.length === 0);
+            requestAnimationFrame(updatePositionIfAuto);
+            this.refreshOverlayAnimation(overlay);
         };
+
+        if (subtitleInput) {
+            subtitleInput.addEventListener('input', updateText);
+        }
+
+        const updateSize = () => {
+            const value = sizeInput ? parseInt(sizeInput.value, 10) : 32;
+            const fontSize = Number.isFinite(value) ? value : 32;
+            overlay.style.fontSize = `${fontSize}px`;
+            if (sizeDisplay) {
+                sizeDisplay.textContent = `${fontSize}px`;
+            }
+            requestAnimationFrame(updatePositionIfAuto);
+            this.refreshOverlayAnimation(overlay);
+        };
+
+        if (sizeInput) {
+            sizeInput.addEventListener('input', updateSize);
+        }
+
+        const updateColor = () => {
+            if (!colorInput) return;
+            const value = colorInput.value || '#ffe14d';
+            overlay.style.color = value;
+        };
+
+        if (colorInput) {
+            colorInput.addEventListener('input', () => {
+                updateColor();
+                requestAnimationFrame(updatePositionIfAuto);
+            });
+        }
+
+        const updateMotion = () => {
+            const value = motionSelect ? motionSelect.value : 'none';
+            this.applyOverlayMotion(overlay, value);
+        };
+
+        if (motionSelect) {
+            motionSelect.addEventListener('change', () => {
+                updateMotion();
+                requestAnimationFrame(updatePositionIfAuto);
+            });
+        }
+
+        const applyEffects = () => {
+            if (outlineCheckbox) {
+                overlay.classList.toggle('outline-effect', outlineCheckbox.checked);
+            }
+            if (dynamicCheckbox) {
+                overlay.classList.toggle('dynamic-effect', dynamicCheckbox.checked);
+            }
+            requestAnimationFrame(updatePositionIfAuto);
+            this.refreshOverlayAnimation(overlay);
+        };
+
+        if (outlineCheckbox) {
+            outlineCheckbox.addEventListener('change', applyEffects);
+        }
+        if (dynamicCheckbox) {
+            dynamicCheckbox.addEventListener('change', applyEffects);
+        }
+
+        const videoEl = document.getElementById('video-player');
+        if (videoEl) {
+            videoEl.addEventListener('loadedmetadata', () => {
+                if (overlay.dataset.manualSubtitlePosition !== 'true' && typeof overlay.__autoPlaceSubtitleOverlay === 'function') {
+                    overlay.__autoPlaceSubtitleOverlay();
+                } else if (typeof overlay.__ensureSubtitleOverlayWithinBounds === 'function') {
+                    overlay.__ensureSubtitleOverlayWithinBounds();
+                }
+            });
+        }
+        updateText();
+        updateSize();
+        updateColor();
+        updateMotion();
+        this.applyOverlayStaticEffect(overlay, globalStaticSelect ? globalStaticSelect.value : 'none');
+        this.applyOverlayDynamicEffect(overlay, globalDynamicSelect ? globalDynamicSelect.value : 'none');
+        applyEffects();
     }
 
     setupTimelineEditor() {
@@ -9372,6 +9857,9 @@ class VideoAnalysisApp {
         const trackOrder = ['main', 'description'];
         const lines = [];
 
+        let mainLine = null;
+        let descriptionLine = null;
+
         trackOrder.forEach(track => {
             const trackEnabled = typeof this.isSubtitleTrackEnabled === 'function'
                 ? this.isSubtitleTrackEnabled(track)
@@ -9431,16 +9919,35 @@ class VideoAnalysisApp {
                 ? candidate.text.trim()
                 : '';
 
-            if (candidate && text && !lines.some(line => line.track === track && line.text === text)) {
-                lines.push({ track, text });
+            if (candidate && text) {
+                if (track === 'description') {
+                    descriptionLine = descriptionLine || { track, text };
+                } else {
+                    mainLine = mainLine || { track, text };
+                }
             }
         };
 
-        if (lines.length === 0 && currentSubtitles.length > 0) {
+        if (!mainLine && currentSubtitles.length > 0) {
             tryAppendTrackFromClassification('main');
         }
 
+        const addLineIfMissing = (line) => {
+            if (!line) return;
+            if (!lines.some(existing => existing.track === line.track && existing.text === line.text)) {
+                lines.push(line);
+            }
+        };
+
+        if (mainLine) {
+            addLineIfMissing(mainLine);
+        }
+
         tryAppendTrackFromClassification('description');
+
+        if (descriptionLine) {
+            addLineIfMissing(descriptionLine);
+        }
 
         if (lines.length === 0 && currentSubtitles.length > 0) {
             const fallback = currentSubtitles[0];
@@ -9458,6 +9965,12 @@ class VideoAnalysisApp {
                 currentSubtitleEl.classList.add('subtitle-display');
                 currentSubtitleEl.classList.remove('no-subtitle');
                 currentSubtitleEl.innerHTML = '';
+
+                lines.sort((a, b) => {
+                    const orderA = trackOrder.indexOf(a.track);
+                    const orderB = trackOrder.indexOf(b.track);
+                    return orderA - orderB;
+                });
 
                 lines.forEach(line => {
                     const lineElement = document.createElement('div');
