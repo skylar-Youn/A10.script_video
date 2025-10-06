@@ -473,6 +473,10 @@
                     <div class="control-section">
                         <div class="video-editor-heading">
                             <h4>🎥 고급 영상 편집기</h4>
+                        </div>
+
+                        <div class="overlay-config-section">
+                            <h5 class="overlay-section-title">제목 설정</h5>
                             <div class="video-title-controls">
                                 <div class="title-input-group">
                                     <label for="video-title-input">제목</label>
@@ -514,13 +518,12 @@
                                         <span>동적 효과 (모션)</span>
                                     </label>
                                 </div>
+                            </div>
                         </div>
-                    </div>
 
-                        <!-- 부제목 & 텍스트 옵션 -->
-                        <div class="title-subtitle-controls">
-                            <div class="subtitle-controls-group">
-                                <h5>🎬 부제목 설정</h5>
+                        <div class="overlay-config-section">
+                            <h5 class="overlay-section-title">부제목 설정</h5>
+                            <div class="subtitle-controls-grid">
                                 <div class="subtitle-input-group">
                                     <label for="video-subtitle-input">부제목</label>
                                     <input type="text" id="video-subtitle-input" placeholder="부제목을 입력하세요">
@@ -562,40 +565,41 @@
                                     </label>
                                 </div>
                             </div>
-                            <div class="text-effects-control">
-                                <h4 class="area-title">🎨 텍스트 효과</h4>
-                                <div class="effects-controls">
-                                    <div class="control-group">
-                                        <label class="control-label" for="static-effect">정적 효과 (스타일)</label>
-                                        <select id="static-effect" class="control-select">
-                                            <option value="none">없음</option>
-                                            <option value="outline">외곽선</option>
-                                            <option value="shadow">그림자</option>
-                                            <option value="glow">글로우</option>
-                                            <option value="gradient">그라데이션</option>
-                                            <option value="neon">네온</option>
-                                        </select>
-                                    </div>
-                                    <div class="control-group">
-                                        <label class="control-label" for="dynamic-effect">동적 효과 (모션)</label>
-                                        <select id="dynamic-effect" class="control-select">
-                                            <option value="none">없음</option>
-                                            <option value="typewriter">타이핑</option>
-                                            <option value="wave">웨이브</option>
-                                            <option value="pulse">펄스</option>
-                                            <option value="shake">떨림</option>
-                                            <option value="fade">페이드</option>
-                                            <option value="bounce">바운스</option>
-                                            <option value="flip">플립</option>
-                                            <option value="slide">슬라이드</option>
-                                            <option value="zoom">줌</option>
-                                            <option value="rotate">회전</option>
-                                            <option value="glitch">글리치</option>
-                                            <option value="matrix">매트릭스</option>
-                                            <option value="fire">불꽃</option>
-                                            <option value="rainbow">무지개</option>
-                                        </select>
-                                    </div>
+                        </div>
+
+                        <div class="text-effects-control">
+                            <h4 class="area-title">🎨 텍스트 효과</h4>
+                            <div class="effects-controls">
+                                <div class="control-group">
+                                    <label class="control-label" for="static-effect">정적 효과 (스타일)</label>
+                                    <select id="static-effect" class="control-select">
+                                        <option value="none">없음</option>
+                                        <option value="outline">외곽선</option>
+                                        <option value="shadow">그림자</option>
+                                        <option value="glow">글로우</option>
+                                        <option value="gradient">그라데이션</option>
+                                        <option value="neon">네온</option>
+                                    </select>
+                                </div>
+                                <div class="control-group">
+                                    <label class="control-label" for="dynamic-effect">동적 효과 (모션)</label>
+                                    <select id="dynamic-effect" class="control-select">
+                                        <option value="none">없음</option>
+                                        <option value="typewriter">타이핑</option>
+                                        <option value="wave">웨이브</option>
+                                        <option value="pulse">펄스</option>
+                                        <option value="shake">떨림</option>
+                                        <option value="fade">페이드</option>
+                                        <option value="bounce">바운스</option>
+                                        <option value="flip">플립</option>
+                                        <option value="slide">슬라이드</option>
+                                        <option value="zoom">줌</option>
+                                        <option value="rotate">회전</option>
+                                        <option value="glitch">글리치</option>
+                                        <option value="matrix">매트릭스</option>
+                                        <option value="fire">불꽃</option>
+                                        <option value="rainbow">무지개</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>
