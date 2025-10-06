@@ -3085,6 +3085,29 @@ textarea:focus {
     cursor: grabbing;
 }
 
+.video-subtitle-wrapper .subtitle-display .subtitle-line {
+    display: block;
+    margin: 0;
+    line-height: 1.45;
+    word-break: keep-all;
+    white-space: normal;
+}
+
+.video-subtitle-wrapper .subtitle-display .subtitle-line + .subtitle-line {
+    margin-top: 0.45rem;
+}
+
+.video-subtitle-wrapper .subtitle-display .subtitle-line-main {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.video-subtitle-wrapper .subtitle-display .subtitle-line-description {
+    font-size: 1.05rem;
+    font-weight: 600;
+    opacity: 0.92;
+}
+
 .subtitle-display.no-subtitle {
     color: var(--text-muted);
     font-style: italic;

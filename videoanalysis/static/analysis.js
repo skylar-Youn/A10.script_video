@@ -340,7 +340,7 @@ class VideoAnalysisApp {
         const videoContainer = wrapper.querySelector('.video-player-container');
         const videoEl = wrapper.querySelector('#video-player');
 
-        let manualPosition = false;
+        let manualPosition = subtitleEl.dataset.manualPosition === 'true';
         let dragging = false;
         let startX = 0;
         let startY = 0;
@@ -408,6 +408,7 @@ class VideoAnalysisApp {
             ensureAbsolutePosition();
 
             manualPosition = true;
+            subtitleEl.dataset.manualPosition = 'true';
             dragging = true;
             startX = event.clientX;
             startY = event.clientY;
@@ -476,6 +477,16 @@ class VideoAnalysisApp {
         requestAnimationFrame(() => {
             placeBelowVideo();
         });
+
+        subtitleEl.dataset.manualPosition = manualPosition ? 'true' : 'false';
+        subtitleEl.__autoPlaceSubtitle = () => {
+            manualPosition = subtitleEl.dataset.manualPosition === 'true';
+            placeBelowVideo();
+        };
+        subtitleEl.__ensureSubtitleWithinBounds = () => {
+            manualPosition = subtitleEl.dataset.manualPosition === 'true';
+            ensureWithinBounds();
+        };
     }
 
     setupTimelineEditor() {
@@ -9347,36 +9358,150 @@ class VideoAnalysisApp {
         const currentSubtitleEl = document.getElementById('current-subtitle');
 
         // 현재 시간에 해당하는 자막 찾기
-        const currentSubtitle = subtitles.find(sub =>
+        const currentSubtitles = subtitles.filter(sub =>
             currentTime >= sub.start_time && currentTime <= sub.end_time);
 
-        if (currentSubtitle) {
-            if (currentSubtitleEl) {
-                currentSubtitleEl.textContent = currentSubtitle.text;
-                currentSubtitleEl.classList.add('subtitle-display');
-                currentSubtitleEl.classList.remove('no-subtitle');
+        const activeIndices = new Set();
+        currentSubtitles.forEach(sub => {
+            const idx = subtitles.indexOf(sub);
+            if (idx >= 0) {
+                activeIndices.add(idx);
+            }
+        });
+
+        const trackOrder = ['main', 'description'];
+        const lines = [];
+
+        trackOrder.forEach(track => {
+            const trackEnabled = typeof this.isSubtitleTrackEnabled === 'function'
+                ? this.isSubtitleTrackEnabled(track)
+                : true;
+            if (!trackEnabled) {
+                return;
             }
 
-            // 해당 자막 블록 하이라이트
-            document.querySelectorAll('.subtitle-block').forEach((block, index) => {
-                if (parseInt(block.dataset.index) === subtitles.indexOf(currentSubtitle)) {
-                    block.classList.add('selected');
-                } else {
-                    block.classList.remove('selected');
-                }
+            const candidate = currentSubtitles.find(sub => {
+                const normalized = this.getSubtitleTrackType
+                    ? this.getSubtitleTrackType(sub)
+                    : (sub.assigned_track || sub.track || 'main');
+                return (normalized || 'main') === track;
             });
+
+            const text = candidate && typeof candidate.text === 'string'
+                ? candidate.text.trim()
+                : '';
+
+            if (candidate && text) {
+                lines.push({ track, text });
+            }
+        });
+
+        const tryAppendTrackFromClassification = (track) => {
+            if (lines.some(line => line.track === track)) {
+                return;
+            }
+
+            const trackEnabled = typeof this.isSubtitleTrackEnabled === 'function'
+                ? this.isSubtitleTrackEnabled(track)
+                : true;
+            if (!trackEnabled) {
+                return;
+            }
+
+            const fromMap = this.timeline && this.timeline.speakerClassifiedSubtitles
+                ? this.timeline.speakerClassifiedSubtitles[track]
+                : null;
+
+            const candidateFromMap = Array.isArray(fromMap)
+                ? fromMap.find(sub => currentTime >= sub.start_time && currentTime <= sub.end_time)
+                : null;
+
+            const candidateFromClassified = !candidateFromMap && Array.isArray(this.classifiedSubtitles)
+                ? this.classifiedSubtitles.find(sub => {
+                    const normalized = this.getSubtitleTrackType
+                        ? this.getSubtitleTrackType(sub)
+                        : (sub.assigned_track || sub.track || 'main');
+                    return (normalized || 'main') === track && currentTime >= sub.start_time && currentTime <= sub.end_time;
+                })
+                : null;
+
+            const candidate = candidateFromMap || candidateFromClassified;
+
+            const text = candidate && typeof candidate.text === 'string'
+                ? candidate.text.trim()
+                : '';
+
+            if (candidate && text && !lines.some(line => line.track === track && line.text === text)) {
+                lines.push({ track, text });
+            }
+        };
+
+        if (lines.length === 0 && currentSubtitles.length > 0) {
+            tryAppendTrackFromClassification('main');
+        }
+
+        tryAppendTrackFromClassification('description');
+
+        if (lines.length === 0 && currentSubtitles.length > 0) {
+            const fallback = currentSubtitles[0];
+            const fallbackText = typeof fallback.text === 'string' ? fallback.text.trim() : '';
+            if (fallbackText) {
+                lines.push({
+                    track: this.getSubtitleTrackType ? this.getSubtitleTrackType(fallback) : 'main',
+                    text: fallbackText
+                });
+            }
+        }
+
+        if (lines.length > 0) {
+            if (currentSubtitleEl) {
+                currentSubtitleEl.classList.add('subtitle-display');
+                currentSubtitleEl.classList.remove('no-subtitle');
+                currentSubtitleEl.innerHTML = '';
+
+                lines.forEach(line => {
+                    const lineElement = document.createElement('div');
+                    lineElement.className = `subtitle-line subtitle-line-${line.track}`;
+                    lineElement.dataset.track = line.track;
+                    lineElement.textContent = line.text;
+                    currentSubtitleEl.appendChild(lineElement);
+                });
+
+                if (currentSubtitleEl.dataset.manualPosition !== 'true' && typeof currentSubtitleEl.__autoPlaceSubtitle === 'function') {
+                    currentSubtitleEl.__autoPlaceSubtitle();
+                } else if (typeof currentSubtitleEl.__ensureSubtitleWithinBounds === 'function') {
+                    currentSubtitleEl.__ensureSubtitleWithinBounds();
+                }
+            }
         } else {
             if (currentSubtitleEl) {
                 currentSubtitleEl.textContent = '자막이 없습니다';
                 currentSubtitleEl.classList.add('subtitle-display');
                 currentSubtitleEl.classList.add('no-subtitle');
+
+                if (currentSubtitleEl.dataset.manualPosition !== 'true' && typeof currentSubtitleEl.__autoPlaceSubtitle === 'function') {
+                    currentSubtitleEl.__autoPlaceSubtitle();
+                } else if (typeof currentSubtitleEl.__ensureSubtitleWithinBounds === 'function') {
+                    currentSubtitleEl.__ensureSubtitleWithinBounds();
+                }
             }
 
             // 모든 선택 해제
             document.querySelectorAll('.subtitle-block.selected').forEach(el => {
                 el.classList.remove('selected');
             });
+            return;
         }
+
+        // 자막 블록 하이라이트 업데이트
+        document.querySelectorAll('.subtitle-block').forEach(block => {
+            const blockIndex = parseInt(block.dataset.index, 10);
+            if (activeIndices.has(blockIndex)) {
+                block.classList.add('selected');
+            } else {
+                block.classList.remove('selected');
+            }
+        });
     }
 
     async drawAudioWaveform(audioPath) {
