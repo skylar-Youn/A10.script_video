@@ -83,6 +83,7 @@ class VideoAnalysisApp {
         this.setupSubtitleDrag();
         this.setupTitleOverlay();
         this.setupSubtitleOverlay();
+        this.setupRealtimeSubtitleOverlays();
         this.setupGlobalTextEffects();
         this.loadFileList();
         this.loadFolderTree();
@@ -131,6 +132,10 @@ class VideoAnalysisApp {
         if (titleOverlay) overlays.push(titleOverlay);
         const subtitleOverlay = document.getElementById('video-subtitle-overlay');
         if (subtitleOverlay) overlays.push(subtitleOverlay);
+        const mainRealtimeOverlay = document.getElementById('overlay-main-subtitle');
+        if (mainRealtimeOverlay) overlays.push(mainRealtimeOverlay);
+        const descriptionRealtimeOverlay = document.getElementById('overlay-description-subtitle');
+        if (descriptionRealtimeOverlay) overlays.push(descriptionRealtimeOverlay);
         return overlays;
     }
 
@@ -389,6 +394,7 @@ class VideoAnalysisApp {
         const manualAttr = options.manualAttr || 'manualPosition';
         const autoHookName = options.autoHookName || '__applyAutoPosition';
         const ensureHookName = options.ensureHookName || '__ensureWithinBounds';
+        element.__manualAttrKey = manualAttr;
         const positionMode = options.positionMode || 'top-left';
 
         if (element.dataset[manualAttr] === undefined) {
@@ -594,6 +600,8 @@ class VideoAnalysisApp {
         element[ensureHookName] = () => {
             ensureWithinBounds();
         };
+        element.__autoPositionHook = element[autoHookName];
+        element.__ensureWithinBoundsHook = element[ensureHookName];
 
         requestAnimationFrame(() => {
             applyAutoPosition(true);
@@ -641,38 +649,57 @@ class VideoAnalysisApp {
     }
 
     setupSubtitleDrag() {
-        const subtitleEl = document.getElementById('current-subtitle');
-        if (!subtitleEl) {
-            return;
-        }
-
-        this.makeOverlayDraggable(subtitleEl, {
-            manualAttr: 'manualPosition',
-            autoHookName: '__autoPlaceSubtitle',
-            ensureHookName: '__ensureSubtitleWithinBounds',
-            positionMode: 'center-x',
-            autoPosition: ({ wrapper, element }) => {
-                const videoContainer = wrapper.querySelector('.video-player-container');
-                const containerBottom = videoContainer
-                    ? videoContainer.offsetTop + videoContainer.offsetHeight
-                    : 0;
-                return {
-                    left: wrapper.clientWidth / 2,
-                    top: containerBottom + 16
-                };
-            }
-        });
-
         const videoEl = document.getElementById('video-player');
-        if (videoEl) {
-            videoEl.addEventListener('loadedmetadata', () => {
-                if (subtitleEl.dataset.manualPosition !== 'true' && typeof subtitleEl.__autoPlaceSubtitle === 'function') {
-                    subtitleEl.__autoPlaceSubtitle();
-                } else if (typeof subtitleEl.__ensureSubtitleWithinBounds === 'function') {
-                    subtitleEl.__ensureSubtitleWithinBounds();
+        const overlays = [
+            {
+                element: document.getElementById('current-subtitle'),
+                manualAttr: 'manualPosition',
+                autoHookName: '__autoPlaceSubtitle',
+                ensureHookName: '__ensureSubtitleWithinBounds',
+                verticalOffset: 16
+            },
+            {
+                element: document.getElementById('description-subtitle'),
+                manualAttr: 'manualDescriptionPosition',
+                autoHookName: '__autoPlaceDescriptionSubtitle',
+                ensureHookName: '__ensureDescriptionSubtitleWithinBounds',
+                verticalOffset: 84
+            }
+        ];
+
+        overlays.forEach(({ element, manualAttr, autoHookName, ensureHookName, verticalOffset }) => {
+            if (!element) {
+                return;
+            }
+
+            this.makeOverlayDraggable(element, {
+                manualAttr,
+                autoHookName,
+                ensureHookName,
+                positionMode: 'center-x',
+                autoPosition: ({ wrapper }) => {
+                    const videoContainer = wrapper.querySelector('.video-player-container');
+                    const containerBottom = videoContainer
+                        ? videoContainer.offsetTop + videoContainer.offsetHeight
+                        : 0;
+                    const offset = Number.isFinite(verticalOffset) ? verticalOffset : 16;
+                    return {
+                        left: wrapper.clientWidth / 2,
+                        top: containerBottom + offset
+                    };
                 }
             });
-        }
+
+            if (videoEl) {
+                videoEl.addEventListener('loadedmetadata', () => {
+                    if (element.dataset[manualAttr] !== 'true' && typeof element[autoHookName] === 'function') {
+                        element[autoHookName]();
+                    } else if (typeof element[ensureHookName] === 'function') {
+                        element[ensureHookName]();
+                    }
+                });
+            }
+        });
     }
 
     setupTitleOverlay() {
@@ -972,6 +999,78 @@ class VideoAnalysisApp {
         this.applyOverlayStaticEffect(overlay, globalStaticSelect ? globalStaticSelect.value : 'none');
         this.applyOverlayDynamicEffect(overlay, globalDynamicSelect ? globalDynamicSelect.value : 'none');
         applyEffects();
+    }
+
+    setupRealtimeSubtitleOverlays() {
+        const mainOverlay = document.getElementById('overlay-main-subtitle');
+        const descriptionOverlay = document.getElementById('overlay-description-subtitle');
+        const fallbackOverlay = document.getElementById('current-subtitle');
+        const fallbackDescriptionOverlay = document.getElementById('description-subtitle');
+
+        if (fallbackOverlay) {
+            fallbackOverlay.style.display = 'none';
+        }
+
+        if (fallbackDescriptionOverlay) {
+            fallbackDescriptionOverlay.style.display = 'none';
+        }
+
+        const staticSelect = document.getElementById('static-effect');
+        const dynamicSelect = document.getElementById('dynamic-effect');
+
+        const applyInitialEffects = (overlay) => {
+            if (!overlay) return;
+            overlay.classList.add('motion-none', 'static-none', 'dynamic-none', 'empty');
+            overlay.style.display = 'none';
+            this.applyOverlayStaticEffect(overlay, staticSelect ? staticSelect.value : 'none');
+            this.applyOverlayDynamicEffect(overlay, dynamicSelect ? dynamicSelect.value : 'none');
+        };
+
+        if (mainOverlay) {
+            this.makeOverlayDraggable(mainOverlay, {
+                manualAttr: 'manualMainRealtimePosition',
+                autoHookName: '__autoPlaceMainRealtimeOverlay',
+                ensureHookName: '__ensureMainRealtimeWithinBounds',
+                positionMode: 'center-x',
+                autoPosition: ({ wrapper }) => {
+                    const videoContainer = wrapper.querySelector('.video-player-container');
+                    const containerBottom = videoContainer
+                        ? videoContainer.offsetTop + videoContainer.offsetHeight
+                        : wrapper.clientHeight * 0.75;
+                    return {
+                        left: wrapper.clientWidth / 2,
+                        top: containerBottom + 16
+                    };
+                }
+            });
+            applyInitialEffects(mainOverlay);
+            if (typeof mainOverlay.__autoPositionHook === 'function') {
+                mainOverlay.__autoPositionHook(true);
+            }
+        }
+
+        if (descriptionOverlay) {
+            this.makeOverlayDraggable(descriptionOverlay, {
+                manualAttr: 'manualDescriptionRealtimePosition',
+                autoHookName: '__autoPlaceDescriptionRealtimeOverlay',
+                ensureHookName: '__ensureDescriptionRealtimeWithinBounds',
+                positionMode: 'center-x',
+                autoPosition: ({ wrapper }) => {
+                    const videoContainer = wrapper.querySelector('.video-player-container');
+                    const containerBottom = videoContainer
+                        ? videoContainer.offsetTop + videoContainer.offsetHeight
+                        : wrapper.clientHeight * 0.75;
+                    return {
+                        left: wrapper.clientWidth / 2,
+                        top: containerBottom + 70
+                    };
+                }
+            });
+            applyInitialEffects(descriptionOverlay);
+            if (typeof descriptionOverlay.__autoPositionHook === 'function') {
+                descriptionOverlay.__autoPositionHook(true);
+            }
+        }
     }
 
     setupTimelineEditor() {
@@ -9841,6 +9940,26 @@ class VideoAnalysisApp {
         const currentTime = this.timeline.currentTime;
         const subtitles = this.timeline.subtitleData.subtitles || [];
         const currentSubtitleEl = document.getElementById('current-subtitle');
+        const descriptionSubtitleEl = document.getElementById('description-subtitle');
+        const mainRealtimeOverlay = document.getElementById('overlay-main-subtitle');
+        const descriptionRealtimeOverlay = document.getElementById('overlay-description-subtitle');
+        const staticSelect = document.getElementById('static-effect');
+        const dynamicSelect = document.getElementById('dynamic-effect');
+
+        const prepareFallbackElement = (el) => {
+            if (!el) {
+                return;
+            }
+            if (!el.dataset.emptyText) {
+                el.dataset.emptyText = (el.textContent || '').trim();
+            }
+            el.innerHTML = '';
+            el.style.display = 'none';
+            el.classList.add('no-subtitle');
+        };
+
+        prepareFallbackElement(currentSubtitleEl);
+        prepareFallbackElement(descriptionSubtitleEl);
 
         // 현재 시간에 해당하는 자막 찾기
         const currentSubtitles = subtitles.filter(sub =>
@@ -9880,7 +9999,13 @@ class VideoAnalysisApp {
                 : '';
 
             if (candidate && text) {
-                lines.push({ track, text });
+                const line = { track, text };
+                lines.push(line);
+                if (track === 'description') {
+                    descriptionLine = descriptionLine || line;
+                } else {
+                    mainLine = mainLine || line;
+                }
             }
         });
 
@@ -9960,46 +10085,76 @@ class VideoAnalysisApp {
             }
         }
 
-        if (lines.length > 0) {
-            if (currentSubtitleEl) {
-                currentSubtitleEl.classList.add('subtitle-display');
-                currentSubtitleEl.classList.remove('no-subtitle');
-                currentSubtitleEl.innerHTML = '';
+        const staticEffectValue = staticSelect ? staticSelect.value : 'none';
+        const dynamicEffectValue = dynamicSelect ? dynamicSelect.value : 'none';
 
-                lines.sort((a, b) => {
-                    const orderA = trackOrder.indexOf(a.track);
-                    const orderB = trackOrder.indexOf(b.track);
-                    return orderA - orderB;
-                });
+        const updateOverlayForTrack = (overlay, line, track) => {
+            if (!overlay) return;
 
-                lines.forEach(line => {
-                    const lineElement = document.createElement('div');
-                    lineElement.className = `subtitle-line subtitle-line-${line.track}`;
-                    lineElement.dataset.track = line.track;
-                    lineElement.textContent = line.text;
-                    currentSubtitleEl.appendChild(lineElement);
-                });
+            const manualAttr = overlay.__manualAttrKey || 'manualPosition';
+            const trackEnabled = typeof this.isSubtitleTrackEnabled === 'function'
+                ? this.isSubtitleTrackEnabled(track)
+                : true;
+            const text = line && typeof line.text === 'string' ? line.text.trim() : '';
 
-                if (currentSubtitleEl.dataset.manualPosition !== 'true' && typeof currentSubtitleEl.__autoPlaceSubtitle === 'function') {
-                    currentSubtitleEl.__autoPlaceSubtitle();
-                } else if (typeof currentSubtitleEl.__ensureSubtitleWithinBounds === 'function') {
-                    currentSubtitleEl.__ensureSubtitleWithinBounds();
-                }
-            }
-        } else {
-            if (currentSubtitleEl) {
-                currentSubtitleEl.textContent = '자막이 없습니다';
-                currentSubtitleEl.classList.add('subtitle-display');
-                currentSubtitleEl.classList.add('no-subtitle');
-
-                if (currentSubtitleEl.dataset.manualPosition !== 'true' && typeof currentSubtitleEl.__autoPlaceSubtitle === 'function') {
-                    currentSubtitleEl.__autoPlaceSubtitle();
-                } else if (typeof currentSubtitleEl.__ensureSubtitleWithinBounds === 'function') {
-                    currentSubtitleEl.__ensureSubtitleWithinBounds();
-                }
+            if (!trackEnabled || !text) {
+                overlay.classList.add('empty');
+                overlay.style.display = 'none';
+                overlay.textContent = '';
+                return;
             }
 
-            // 모든 선택 해제
+            overlay.textContent = text;
+            overlay.dataset.track = track;
+            overlay.classList.remove('empty');
+            overlay.style.display = 'flex';
+
+            if (overlay.dataset[manualAttr] !== 'true') {
+                if (typeof overlay.__autoPositionHook === 'function') {
+                    overlay.__autoPositionHook();
+                }
+            } else if (typeof overlay.__ensureWithinBoundsHook === 'function') {
+                overlay.__ensureWithinBoundsHook();
+            }
+
+            this.applyOverlayStaticEffect(overlay, staticEffectValue);
+            this.applyOverlayDynamicEffect(overlay, dynamicEffectValue);
+        };
+
+        const findLineForTrack = (track) => lines.find(line => line.track === track) || null;
+        const mainTrackLine = mainLine || findLineForTrack('main');
+        const descriptionTrackLine = descriptionLine || findLineForTrack('description');
+
+        updateOverlayForTrack(mainRealtimeOverlay, mainTrackLine, 'main');
+        updateOverlayForTrack(descriptionRealtimeOverlay, descriptionTrackLine, 'description');
+
+        const showFallbackLine = (el, line) => {
+            if (!el) {
+                return;
+            }
+
+            const text = line && typeof line.text === 'string' ? line.text.trim() : '';
+            if (text) {
+                el.textContent = text;
+                el.style.display = 'flex';
+                el.classList.remove('no-subtitle', 'empty');
+            } else {
+                const fallback = el.dataset.emptyText || '';
+                el.textContent = fallback;
+                el.style.display = fallback ? 'flex' : 'none';
+                el.classList.add('no-subtitle');
+            }
+        };
+
+        if (!mainRealtimeOverlay) {
+            showFallbackLine(currentSubtitleEl, mainTrackLine || lines[0] || null);
+        }
+
+        if (!descriptionRealtimeOverlay) {
+            showFallbackLine(descriptionSubtitleEl, descriptionTrackLine || null);
+        }
+
+        if (lines.length === 0) {
             document.querySelectorAll('.subtitle-block.selected').forEach(el => {
                 el.classList.remove('selected');
             });
