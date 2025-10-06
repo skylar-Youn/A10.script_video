@@ -67,6 +67,35 @@ class VideoAnalysisApp {
         this.commentaryAudioLocalFile = null;
         this.videoMuteState = false;
         this.requestedFolderPath = null;
+        this.textStylePresetStorageKey = 'videoanalysis_text_style_presets';
+        this.textStylePresetSelectedName = null;
+        this.textStylePresetElements = null;
+        this.realtimeStyleConfigs = {
+            main: {
+                overlayId: 'overlay-main-subtitle',
+                fallbackId: 'current-subtitle',
+                sizeInputId: 'realtime-main-size',
+                sizeDisplayId: 'realtime-main-size-display',
+                colorInputId: 'realtime-main-color',
+                staticSelectId: 'realtime-main-static-effect',
+                dynamicSelectId: 'realtime-main-dynamic-effect',
+                outlineCheckboxId: 'realtime-main-outline',
+                dynamicCheckboxId: 'realtime-main-dynamic',
+                manualAttr: 'manualMainRealtimePosition'
+            },
+            description: {
+                overlayId: 'overlay-description-subtitle',
+                fallbackId: 'description-subtitle',
+                sizeInputId: 'realtime-description-size',
+                sizeDisplayId: 'realtime-description-size-display',
+                colorInputId: 'realtime-description-color',
+                staticSelectId: 'realtime-description-static-effect',
+                dynamicSelectId: 'realtime-description-dynamic-effect',
+                outlineCheckboxId: 'realtime-description-outline',
+                dynamicCheckboxId: 'realtime-description-dynamic',
+                manualAttr: 'manualDescriptionRealtimePosition'
+            }
+        };
 
         // 하이브리드 자막 트랙 시스템 설정
         this.trackStates = {
@@ -80,11 +109,12 @@ class VideoAnalysisApp {
 
     init() {
         this.setupEventListeners();
-        this.setupSubtitleDrag();
         this.setupTitleOverlay();
         this.setupSubtitleOverlay();
         this.setupRealtimeSubtitleOverlays();
         this.setupGlobalTextEffects();
+        this.setupTextStylePresetControls();
+        this.setupRealtimeSubtitleStyleControls();
         this.loadFileList();
         this.loadFolderTree();
         this.updateUI();
@@ -648,60 +678,6 @@ class VideoAnalysisApp {
         this.refreshOverlayAnimation(overlay);
     }
 
-    setupSubtitleDrag() {
-        const videoEl = document.getElementById('video-player');
-        const overlays = [
-            {
-                element: document.getElementById('current-subtitle'),
-                manualAttr: 'manualPosition',
-                autoHookName: '__autoPlaceSubtitle',
-                ensureHookName: '__ensureSubtitleWithinBounds',
-                verticalOffset: 16
-            },
-            {
-                element: document.getElementById('description-subtitle'),
-                manualAttr: 'manualDescriptionPosition',
-                autoHookName: '__autoPlaceDescriptionSubtitle',
-                ensureHookName: '__ensureDescriptionSubtitleWithinBounds',
-                verticalOffset: 84
-            }
-        ];
-
-        overlays.forEach(({ element, manualAttr, autoHookName, ensureHookName, verticalOffset }) => {
-            if (!element) {
-                return;
-            }
-
-            this.makeOverlayDraggable(element, {
-                manualAttr,
-                autoHookName,
-                ensureHookName,
-                positionMode: 'center-x',
-                autoPosition: ({ wrapper }) => {
-                    const videoContainer = wrapper.querySelector('.video-player-container');
-                    const containerBottom = videoContainer
-                        ? videoContainer.offsetTop + videoContainer.offsetHeight
-                        : 0;
-                    const offset = Number.isFinite(verticalOffset) ? verticalOffset : 16;
-                    return {
-                        left: wrapper.clientWidth / 2,
-                        top: containerBottom + offset
-                    };
-                }
-            });
-
-            if (videoEl) {
-                videoEl.addEventListener('loadedmetadata', () => {
-                    if (element.dataset[manualAttr] !== 'true' && typeof element[autoHookName] === 'function') {
-                        element[autoHookName]();
-                    } else if (typeof element[ensureHookName] === 'function') {
-                        element[ensureHookName]();
-                    }
-                });
-            }
-        });
-    }
-
     setupTitleOverlay() {
         const overlay = document.getElementById('video-title-overlay');
         if (!overlay) {
@@ -867,6 +843,661 @@ class VideoAnalysisApp {
         applyDynamic();
     }
 
+    setupTextStylePresetControls() {
+        const nameInput = document.getElementById('text-style-preset-name');
+        const saveBtn = document.getElementById('save-text-style-preset');
+        const select = document.getElementById('text-style-preset-select');
+        const applyBtn = document.getElementById('apply-text-style-preset');
+        const deleteBtn = document.getElementById('delete-text-style-preset');
+
+        if (!nameInput || !saveBtn || !select || !applyBtn || !deleteBtn) {
+            return;
+        }
+
+        this.textStylePresetElements = {
+            nameInput,
+            saveBtn,
+            select,
+            applyBtn,
+            deleteBtn
+        };
+
+        saveBtn.addEventListener('click', () => this.handleSaveTextStylePreset());
+
+        select.addEventListener('change', () => {
+            const value = select.value;
+            this.textStylePresetSelectedName = value || null;
+            applyBtn.disabled = !value;
+            deleteBtn.disabled = !value;
+        });
+
+        applyBtn.addEventListener('click', () => {
+            const value = select.value;
+            if (value) {
+                this.applyTextStylePresetByName(value);
+            }
+        });
+
+        deleteBtn.addEventListener('click', () => {
+            const value = select.value;
+            if (value) {
+                this.deleteTextStylePreset(value);
+            }
+        });
+
+        this.refreshTextStylePresetOptions();
+    }
+
+    setupRealtimeSubtitleStyleControls() {
+        if (!this.realtimeStyleConfigs) {
+            return;
+        }
+
+        Object.entries(this.realtimeStyleConfigs).forEach(([key, config]) => {
+            this.initializeRealtimeStyleControl(key, config);
+        });
+    }
+
+    initializeRealtimeStyleControl(key, config) {
+        const overlay = document.getElementById(config.overlayId);
+        if (!overlay) {
+            return;
+        }
+
+        const fallback = document.getElementById(config.fallbackId);
+        const sizeInput = document.getElementById(config.sizeInputId);
+        const sizeDisplay = document.getElementById(config.sizeDisplayId);
+        const colorInput = document.getElementById(config.colorInputId);
+        const staticSelect = document.getElementById(config.staticSelectId);
+        const dynamicSelect = document.getElementById(config.dynamicSelectId);
+        const outlineCheckbox = document.getElementById(config.outlineCheckboxId);
+        const dynamicCheckbox = document.getElementById(config.dynamicCheckboxId);
+
+        const computedStyle = window.getComputedStyle(overlay);
+        const initialFontSize = Math.round(parseFloat(computedStyle.fontSize) || 32);
+        const initialColorHex = this.rgbToHex(computedStyle.color) || '#ffffff';
+        const initialStaticEffect = overlay.dataset.staticEffect || 'none';
+        const initialDynamicEffect = overlay.dataset.dynamicEffect || 'none';
+
+        const applyFontSize = (value) => {
+            if (!Number.isFinite(value)) {
+                return;
+            }
+            overlay.style.fontSize = `${value}px`;
+            if (fallback) {
+                fallback.style.fontSize = `${value}px`;
+            }
+            this.refreshOverlayAnimation(overlay);
+            if (fallback) {
+                this.refreshOverlayAnimation(fallback);
+            }
+        };
+
+        const applyColor = (value) => {
+            if (!value) {
+                return;
+            }
+            overlay.style.color = value;
+            if (fallback) {
+                fallback.style.color = value;
+            }
+        };
+
+        const applyOutline = (enabled) => {
+            overlay.classList.toggle('outline-effect', enabled);
+            if (fallback) {
+                fallback.classList.toggle('outline-effect', enabled);
+            }
+        };
+
+        const applyDynamic = (enabled) => {
+            overlay.classList.toggle('dynamic-effect', enabled);
+            if (fallback) {
+                fallback.classList.toggle('dynamic-effect', enabled);
+            }
+            this.refreshOverlayAnimation(overlay);
+            if (fallback) {
+                this.refreshOverlayAnimation(fallback);
+            }
+        };
+
+        const applyStaticEffect = (effectValue) => {
+            const value = effectValue || 'none';
+            this.applyOverlayStaticEffect(overlay, value);
+            if (fallback) {
+                this.applyOverlayStaticEffect(fallback, value);
+            }
+        };
+
+        const applyDynamicEffectSelect = (effectValue) => {
+            const value = effectValue || 'none';
+            this.applyOverlayDynamicEffect(overlay, value);
+            if (fallback) {
+                this.applyOverlayDynamicEffect(fallback, value);
+            }
+        };
+
+        if (sizeInput) {
+            sizeInput.value = initialFontSize;
+            sizeInput.addEventListener('input', (event) => {
+                const value = parseInt(event.target.value, 10);
+                const fontSize = Number.isFinite(value) ? value : initialFontSize;
+                if (sizeDisplay) {
+                    sizeDisplay.textContent = `${fontSize}px`;
+                }
+                applyFontSize(fontSize);
+            });
+        }
+
+        if (sizeDisplay) {
+            sizeDisplay.textContent = `${initialFontSize}px`;
+        }
+
+        if (colorInput) {
+            colorInput.value = initialColorHex;
+            colorInput.addEventListener('input', (event) => {
+                const value = event.target.value || '#ffffff';
+                applyColor(value);
+            });
+        }
+
+        if (staticSelect) {
+            staticSelect.value = initialStaticEffect;
+            staticSelect.addEventListener('change', (event) => {
+                applyStaticEffect(event.target.value);
+            });
+        }
+
+        if (outlineCheckbox) {
+            outlineCheckbox.checked = overlay.classList.contains('outline-effect');
+            outlineCheckbox.addEventListener('change', (event) => {
+                applyOutline(event.target.checked);
+            });
+        }
+
+        if (dynamicCheckbox) {
+            dynamicCheckbox.checked = overlay.classList.contains('dynamic-effect');
+            dynamicCheckbox.addEventListener('change', (event) => {
+                applyDynamic(event.target.checked);
+            });
+        }
+
+        if (dynamicSelect) {
+            dynamicSelect.value = initialDynamicEffect;
+            dynamicSelect.addEventListener('change', (event) => {
+                applyDynamicEffectSelect(event.target.value);
+            });
+        }
+
+        // 초기 적용
+        applyFontSize(initialFontSize);
+        applyColor(initialColorHex);
+        applyStaticEffect(initialStaticEffect);
+        if (outlineCheckbox) {
+            applyOutline(outlineCheckbox.checked);
+        }
+        if (dynamicCheckbox) {
+            applyDynamic(dynamicCheckbox.checked);
+        }
+        if (dynamicSelect) {
+            applyDynamicEffectSelect(dynamicSelect.value);
+        }
+    }
+
+    getTextStylePresets() {
+        try {
+            const stored = window.localStorage.getItem(this.textStylePresetStorageKey);
+            if (!stored) {
+                return [];
+            }
+            const parsed = JSON.parse(stored);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            console.warn('text style preset storage unavailable:', error);
+            return [];
+        }
+    }
+
+    setTextStylePresets(presets) {
+        try {
+            window.localStorage.setItem(this.textStylePresetStorageKey, JSON.stringify(presets));
+        } catch (error) {
+            console.error('Failed to persist text style presets:', error);
+            if (typeof this.showError === 'function') {
+                this.showError('스타일 프리셋을 저장할 수 없습니다: ' + error.message);
+            }
+        }
+    }
+
+    rgbToHex(color) {
+        if (!color) {
+            return null;
+        }
+
+        if (color.startsWith('#')) {
+            return color;
+        }
+
+        const rgbaMatch = color.match(/rgba?\s*\((\d+),\s*(\d+),\s*(\d+)/i);
+        if (!rgbaMatch) {
+            return null;
+        }
+
+        const toHex = (value) => {
+            const intVal = Math.max(0, Math.min(255, parseInt(value, 10)));
+            return intVal.toString(16).padStart(2, '0');
+        };
+
+        const r = toHex(rgbaMatch[1]);
+        const g = toHex(rgbaMatch[2]);
+        const b = toHex(rgbaMatch[3]);
+        return `#${r}${g}${b}`;
+    }
+
+    refreshTextStylePresetOptions() {
+        const elements = this.textStylePresetElements;
+        if (!elements) {
+            return;
+        }
+
+        const { select, applyBtn, deleteBtn } = elements;
+        const presets = this.getTextStylePresets()
+            .map(preset => ({
+                ...preset,
+                savedAt: preset.savedAt || preset.saved_at || null
+            }))
+            .sort((a, b) => {
+                const aTime = a.savedAt ? new Date(a.savedAt).getTime() : 0;
+                const bTime = b.savedAt ? new Date(b.savedAt).getTime() : 0;
+                return bTime - aTime;
+            });
+
+        select.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '저장된 프리셋 선택';
+        select.appendChild(placeholder);
+
+        presets.forEach(preset => {
+            const option = document.createElement('option');
+            option.value = preset.name;
+            const timestamp = this.formatTimestampForDisplay ? this.formatTimestampForDisplay(preset.savedAt) : '';
+            option.textContent = timestamp ? `${preset.name} (${timestamp})` : preset.name;
+            select.appendChild(option);
+        });
+
+        if (this.textStylePresetSelectedName) {
+            select.value = this.textStylePresetSelectedName;
+        }
+
+        const hasSelection = !!select.value;
+        applyBtn.disabled = !hasSelection;
+        deleteBtn.disabled = !hasSelection;
+    }
+
+    collectCurrentTextStylePreset() {
+        const normalizePosition = (value) => {
+            if (typeof value !== 'string') {
+                return null;
+            }
+            const trimmed = value.trim();
+            return trimmed.length > 0 ? trimmed : null;
+        };
+
+        const titleOverlay = document.getElementById('video-title-overlay');
+        const subtitleOverlay = document.getElementById('video-subtitle-overlay');
+        const titleInput = document.getElementById('video-title-input');
+        const titleSizeInput = document.getElementById('video-title-size');
+        const titleColorInput = document.getElementById('video-title-color');
+        const titleMotionSelect = document.getElementById('video-title-motion');
+        const titleOutlineCheckbox = document.getElementById('video-title-outline');
+        const titleDynamicCheckbox = document.getElementById('video-title-dynamic');
+
+        const subtitleInput = document.getElementById('video-subtitle-input');
+        const subtitleSizeInput = document.getElementById('video-subtitle-size');
+        const subtitleColorInput = document.getElementById('video-subtitle-color');
+        const subtitleMotionSelect = document.getElementById('video-subtitle-motion');
+        const subtitleOutlineCheckbox = document.getElementById('video-subtitle-outline');
+        const subtitleDynamicCheckbox = document.getElementById('video-subtitle-dynamic');
+
+        const staticSelect = document.getElementById('static-effect');
+        const dynamicSelect = document.getElementById('dynamic-effect');
+
+        const titleFontSize = titleSizeInput ? parseInt(titleSizeInput.value, 10) : null;
+        const subtitleFontSize = subtitleSizeInput ? parseInt(subtitleSizeInput.value, 10) : null;
+
+        const collectRealtimeStyle = (key) => {
+            const config = this.realtimeStyleConfigs?.[key];
+            if (!config) {
+                return null;
+            }
+
+            const overlay = document.getElementById(config.overlayId);
+            const sizeInput = document.getElementById(config.sizeInputId);
+            const colorInput = document.getElementById(config.colorInputId);
+            const staticSelect = document.getElementById(config.staticSelectId);
+            const dynamicSelect = document.getElementById(config.dynamicSelectId);
+            const outlineCheckbox = document.getElementById(config.outlineCheckboxId);
+            const dynamicCheckbox = document.getElementById(config.dynamicCheckboxId);
+
+            const fontSizeRaw = sizeInput ? parseInt(sizeInput.value, 10) : null;
+            const fontSize = Number.isFinite(fontSizeRaw) ? fontSizeRaw : null;
+
+            return {
+                fontSize,
+                color: colorInput ? colorInput.value : null,
+                outline: outlineCheckbox ? !!outlineCheckbox.checked : false,
+                dynamic: dynamicCheckbox ? !!dynamicCheckbox.checked : false,
+                manualPosition: overlay ? overlay.dataset[config.manualAttr] === 'true' : false,
+                left: overlay && overlay.dataset[config.manualAttr] === 'true' ? (overlay.style.left || null) : null,
+                top: overlay && overlay.dataset[config.manualAttr] === 'true' ? (overlay.style.top || null) : null,
+                staticEffect: staticSelect ? staticSelect.value : (overlay ? overlay.dataset.staticEffect || 'none' : 'none'),
+                dynamicEffect: dynamicSelect ? dynamicSelect.value : (overlay ? overlay.dataset.dynamicEffect || 'none' : 'none')
+            };
+        };
+
+        return {
+            title: {
+                text: titleInput ? titleInput.value : '',
+                fontSize: Number.isFinite(titleFontSize) ? titleFontSize : null,
+                color: titleColorInput ? titleColorInput.value : null,
+                motion: titleMotionSelect ? titleMotionSelect.value : null,
+                outline: titleOutlineCheckbox ? !!titleOutlineCheckbox.checked : false,
+                dynamic: titleDynamicCheckbox ? !!titleDynamicCheckbox.checked : false,
+                manualPosition: titleOverlay ? titleOverlay.dataset.manualTitlePosition === 'true' : false,
+                left: titleOverlay ? normalizePosition(titleOverlay.style.left) : null,
+                top: titleOverlay ? normalizePosition(titleOverlay.style.top) : null
+            },
+            subtitle: {
+                text: subtitleInput ? subtitleInput.value : '',
+                fontSize: Number.isFinite(subtitleFontSize) ? subtitleFontSize : null,
+                color: subtitleColorInput ? subtitleColorInput.value : null,
+                motion: subtitleMotionSelect ? subtitleMotionSelect.value : null,
+                outline: subtitleOutlineCheckbox ? !!subtitleOutlineCheckbox.checked : false,
+                dynamic: subtitleDynamicCheckbox ? !!subtitleDynamicCheckbox.checked : false,
+                manualPosition: subtitleOverlay ? subtitleOverlay.dataset.manualSubtitlePosition === 'true' : false,
+                left: subtitleOverlay ? normalizePosition(subtitleOverlay.style.left) : null,
+                top: subtitleOverlay ? normalizePosition(subtitleOverlay.style.top) : null
+            },
+            global: {
+                staticEffect: staticSelect ? staticSelect.value : 'none',
+                dynamicEffect: dynamicSelect ? dynamicSelect.value : 'none'
+            },
+            realtime: {
+                main: collectRealtimeStyle('main'),
+                description: collectRealtimeStyle('description')
+            }
+        };
+    }
+
+    applyTextStylePresetByName(name) {
+        if (!name) {
+            return;
+        }
+
+        const preset = this.getTextStylePresets().find(item => item.name === name);
+        if (!preset) {
+            if (typeof this.showError === 'function') {
+                this.showError(`"${name}" 프리셋을 찾을 수 없습니다.`);
+            }
+            return;
+        }
+
+        this.applyTextStylePreset(preset);
+        if (typeof this.showSuccess === 'function') {
+            this.showSuccess(`"${preset.name}" 스타일 프리셋을 적용했습니다.`);
+        }
+    }
+
+    applyTextStylePreset(preset) {
+        if (!preset) {
+            return;
+        }
+
+        const titleInput = document.getElementById('video-title-input');
+        const titleSizeInput = document.getElementById('video-title-size');
+        const titleColorInput = document.getElementById('video-title-color');
+        const titleMotionSelect = document.getElementById('video-title-motion');
+        const titleOutlineCheckbox = document.getElementById('video-title-outline');
+        const titleDynamicCheckbox = document.getElementById('video-title-dynamic');
+
+        const subtitleInput = document.getElementById('video-subtitle-input');
+        const subtitleSizeInput = document.getElementById('video-subtitle-size');
+        const subtitleColorInput = document.getElementById('video-subtitle-color');
+        const subtitleMotionSelect = document.getElementById('video-subtitle-motion');
+        const subtitleOutlineCheckbox = document.getElementById('video-subtitle-outline');
+        const subtitleDynamicCheckbox = document.getElementById('video-subtitle-dynamic');
+
+        const staticSelect = document.getElementById('static-effect');
+        const dynamicSelect = document.getElementById('dynamic-effect');
+
+        const dispatchValue = (element, value, eventType = 'input') => {
+            if (!element || value === undefined || value === null) {
+                return;
+            }
+            element.value = `${value}`;
+            element.dispatchEvent(new Event(eventType, { bubbles: true }));
+        };
+
+        const dispatchCheckbox = (element, checked) => {
+            if (element === null || element === undefined || checked === undefined || checked === null) {
+                return;
+            }
+            element.checked = !!checked;
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+
+        if (preset.title) {
+            dispatchValue(titleInput, preset.title.text ?? '', 'input');
+            if (Number.isFinite(preset.title.fontSize) && titleSizeInput) {
+                dispatchValue(titleSizeInput, preset.title.fontSize, 'input');
+            }
+            if (preset.title.color && titleColorInput) {
+                dispatchValue(titleColorInput, preset.title.color, 'input');
+            }
+            if (preset.title.motion && titleMotionSelect) {
+                dispatchValue(titleMotionSelect, preset.title.motion, 'change');
+            }
+            dispatchCheckbox(titleOutlineCheckbox, preset.title.outline);
+            dispatchCheckbox(titleDynamicCheckbox, preset.title.dynamic);
+        }
+
+        if (preset.subtitle) {
+            dispatchValue(subtitleInput, preset.subtitle.text ?? '', 'input');
+            if (Number.isFinite(preset.subtitle.fontSize) && subtitleSizeInput) {
+                dispatchValue(subtitleSizeInput, preset.subtitle.fontSize, 'input');
+            }
+            if (preset.subtitle.color && subtitleColorInput) {
+                dispatchValue(subtitleColorInput, preset.subtitle.color, 'input');
+            }
+            if (preset.subtitle.motion && subtitleMotionSelect) {
+                dispatchValue(subtitleMotionSelect, preset.subtitle.motion, 'change');
+            }
+            dispatchCheckbox(subtitleOutlineCheckbox, preset.subtitle.outline);
+            dispatchCheckbox(subtitleDynamicCheckbox, preset.subtitle.dynamic);
+        }
+
+        if (preset.global) {
+            if (staticSelect && preset.global.staticEffect) {
+                dispatchValue(staticSelect, preset.global.staticEffect, 'change');
+            }
+            if (dynamicSelect && preset.global.dynamicEffect) {
+                dispatchValue(dynamicSelect, preset.global.dynamicEffect, 'change');
+            }
+        }
+
+        const applyRealtimeFromPreset = (key, data) => {
+            if (!data || !this.realtimeStyleConfigs) {
+                return;
+            }
+
+            const config = this.realtimeStyleConfigs[key];
+            if (!config) {
+                return;
+            }
+
+            const sizeInput = document.getElementById(config.sizeInputId);
+            const colorInput = document.getElementById(config.colorInputId);
+            const staticSelect = document.getElementById(config.staticSelectId);
+            const dynamicSelect = document.getElementById(config.dynamicSelectId);
+            const outlineCheckbox = document.getElementById(config.outlineCheckboxId);
+            const dynamicCheckbox = document.getElementById(config.dynamicCheckboxId);
+            const overlay = document.getElementById(config.overlayId);
+
+            if (sizeInput && Number.isFinite(data.fontSize)) {
+                dispatchValue(sizeInput, data.fontSize, 'input');
+            }
+
+            if (colorInput && data.color) {
+                dispatchValue(colorInput, data.color, 'input');
+            }
+
+            if (staticSelect && data.staticEffect) {
+                dispatchValue(staticSelect, data.staticEffect, 'change');
+            }
+
+            dispatchCheckbox(outlineCheckbox, data.outline);
+            dispatchCheckbox(dynamicCheckbox, data.dynamic);
+
+            if (dynamicSelect && data.dynamicEffect) {
+                dispatchValue(dynamicSelect, data.dynamicEffect, 'change');
+            }
+
+            if (overlay) {
+                applyManualPosition(overlay, config.manualAttr, data);
+            }
+        };
+
+        const applyManualPosition = (overlay, manualAttr, data) => {
+            if (!overlay || !data) {
+                return;
+            }
+
+            const manual = !!data.manualPosition;
+            overlay.dataset[manualAttr] = manual ? 'true' : 'false';
+
+            if (manual) {
+                if (data.left !== undefined && data.left !== null) {
+                    overlay.style.left = data.left;
+                }
+                if (data.top !== undefined && data.top !== null) {
+                    overlay.style.top = data.top;
+                }
+                if (typeof overlay.__ensureWithinBoundsHook === 'function') {
+                    overlay.__ensureWithinBoundsHook();
+                }
+            } else {
+                if (data.left !== undefined) {
+                    overlay.style.left = '';
+                }
+                if (data.top !== undefined) {
+                    overlay.style.top = '';
+                }
+                if (typeof overlay.__autoPositionHook === 'function') {
+                    overlay.__autoPositionHook(true);
+                }
+            }
+        };
+
+        const titleOverlay = document.getElementById('video-title-overlay');
+        const subtitleOverlay = document.getElementById('video-subtitle-overlay');
+
+        if (preset.title && titleOverlay) {
+            applyManualPosition(titleOverlay, 'manualTitlePosition', preset.title);
+        }
+
+        if (preset.subtitle && subtitleOverlay) {
+            applyManualPosition(subtitleOverlay, 'manualSubtitlePosition', preset.subtitle);
+        }
+
+        if (preset.realtime) {
+            applyRealtimeFromPreset('main', preset.realtime.main);
+            applyRealtimeFromPreset('description', preset.realtime.description);
+        }
+
+        if (this.textStylePresetElements) {
+            this.textStylePresetElements.nameInput.value = preset.name || '';
+        }
+
+        this.textStylePresetSelectedName = preset.name || null;
+        this.refreshTextStylePresetOptions();
+    }
+
+    handleSaveTextStylePreset() {
+        if (!this.textStylePresetElements) {
+            return;
+        }
+
+        const { nameInput } = this.textStylePresetElements;
+        const rawName = (nameInput.value || '').trim();
+        const fallbackName = `스타일 프리셋 ${this.formatTimestampForDisplay(new Date().toISOString())}`;
+        const name = rawName || fallbackName;
+
+        if (!name) {
+            if (typeof this.showError === 'function') {
+                this.showError('프리셋 이름을 입력해 주세요.');
+            }
+            return;
+        }
+
+        const presetData = this.collectCurrentTextStylePreset();
+        presetData.name = name;
+        presetData.savedAt = new Date().toISOString();
+
+        const presets = this.getTextStylePresets();
+        const existingIndex = presets.findIndex(item => item.name === name);
+
+        if (existingIndex >= 0) {
+            const overwrite = window.confirm(`"${name}" 프리셋이 이미 존재합니다. 덮어쓰시겠습니까?`);
+            if (!overwrite) {
+                return;
+            }
+            presets[existingIndex] = presetData;
+        } else {
+            presets.push(presetData);
+        }
+
+        this.setTextStylePresets(presets);
+        this.textStylePresetSelectedName = name;
+        this.textStylePresetElements.nameInput.value = name;
+        this.refreshTextStylePresetOptions();
+
+        if (typeof this.showSuccess === 'function') {
+            this.showSuccess(`"${name}" 스타일 프리셋을 저장했습니다.`);
+        }
+    }
+
+    deleteTextStylePreset(name) {
+        const presets = this.getTextStylePresets();
+        const index = presets.findIndex(item => item.name === name);
+
+        if (index === -1) {
+            if (typeof this.showError === 'function') {
+                this.showError(`"${name}" 프리셋을 찾을 수 없습니다.`);
+            }
+            return;
+        }
+
+        const confirmed = window.confirm(`"${name}" 프리셋을 삭제하시겠습니까?`);
+        if (!confirmed) {
+            return;
+        }
+
+        presets.splice(index, 1);
+        this.setTextStylePresets(presets);
+        this.textStylePresetSelectedName = null;
+        if (this.textStylePresetElements) {
+            this.textStylePresetElements.select.value = '';
+            this.textStylePresetElements.applyBtn.disabled = true;
+            this.textStylePresetElements.deleteBtn.disabled = true;
+        }
+        this.refreshTextStylePresetOptions();
+
+        if (typeof this.showSuccess === 'function') {
+            this.showSuccess(`"${name}" 프리셋을 삭제했습니다.`);
+        }
+    }
+
     setupSubtitleOverlay() {
         const overlay = document.getElementById('video-subtitle-overlay');
         if (!overlay) {
@@ -1004,17 +1635,6 @@ class VideoAnalysisApp {
     setupRealtimeSubtitleOverlays() {
         const mainOverlay = document.getElementById('overlay-main-subtitle');
         const descriptionOverlay = document.getElementById('overlay-description-subtitle');
-        const fallbackOverlay = document.getElementById('current-subtitle');
-        const fallbackDescriptionOverlay = document.getElementById('description-subtitle');
-
-        if (fallbackOverlay) {
-            fallbackOverlay.style.display = 'none';
-        }
-
-        if (fallbackDescriptionOverlay) {
-            fallbackDescriptionOverlay.style.display = 'none';
-        }
-
         const staticSelect = document.getElementById('static-effect');
         const dynamicSelect = document.getElementById('dynamic-effect');
 
@@ -9939,12 +10559,14 @@ class VideoAnalysisApp {
 
         const currentTime = this.timeline.currentTime;
         const subtitles = this.timeline.subtitleData.subtitles || [];
-        const currentSubtitleEl = document.getElementById('current-subtitle');
-        const descriptionSubtitleEl = document.getElementById('description-subtitle');
         const mainRealtimeOverlay = document.getElementById('overlay-main-subtitle');
         const descriptionRealtimeOverlay = document.getElementById('overlay-description-subtitle');
         const staticSelect = document.getElementById('static-effect');
         const dynamicSelect = document.getElementById('dynamic-effect');
+
+        // 현재 시간에 해당하는 자막 찾기
+        const fallbackMainEl = document.getElementById('current-subtitle');
+        const fallbackDescriptionEl = document.getElementById('description-subtitle');
 
         const prepareFallbackElement = (el) => {
             if (!el) {
@@ -9953,15 +10575,11 @@ class VideoAnalysisApp {
             if (!el.dataset.emptyText) {
                 el.dataset.emptyText = (el.textContent || '').trim();
             }
-            el.innerHTML = '';
-            el.style.display = 'none';
-            el.classList.add('no-subtitle');
         };
 
-        prepareFallbackElement(currentSubtitleEl);
-        prepareFallbackElement(descriptionSubtitleEl);
+        prepareFallbackElement(fallbackMainEl);
+        prepareFallbackElement(fallbackDescriptionEl);
 
-        // 현재 시간에 해당하는 자막 찾기
         const currentSubtitles = subtitles.filter(sub =>
             currentTime >= sub.start_time && currentTime <= sub.end_time);
 
@@ -10128,8 +10746,20 @@ class VideoAnalysisApp {
         updateOverlayForTrack(mainRealtimeOverlay, mainTrackLine, 'main');
         updateOverlayForTrack(descriptionRealtimeOverlay, descriptionTrackLine, 'description');
 
-        const showFallbackLine = (el, line) => {
+        const updateFallbackLine = (el, line, track) => {
             if (!el) {
+                return;
+            }
+
+            const resolvedTrack = (line && line.track) || track || 'main';
+            const trackEnabled = typeof this.isSubtitleTrackEnabled === 'function'
+                ? this.isSubtitleTrackEnabled(resolvedTrack)
+                : true;
+
+            if (!trackEnabled) {
+                el.textContent = el.dataset.emptyText || '';
+                el.style.display = 'none';
+                el.classList.add('no-subtitle', 'empty');
                 return;
             }
 
@@ -10137,22 +10767,28 @@ class VideoAnalysisApp {
             if (text) {
                 el.textContent = text;
                 el.style.display = 'flex';
-                el.classList.remove('no-subtitle', 'empty');
+                el.classList.remove('no-subtitle');
+                el.classList.remove('empty');
             } else {
                 const fallback = el.dataset.emptyText || '';
                 el.textContent = fallback;
                 el.style.display = fallback ? 'flex' : 'none';
                 el.classList.add('no-subtitle');
+                if (fallback) {
+                    el.classList.remove('empty');
+                } else {
+                    el.classList.add('empty');
+                }
             }
+
+            this.applyOverlayStaticEffect(el, staticEffectValue);
+            this.applyOverlayDynamicEffect(el, dynamicEffectValue);
+            el.dataset.track = resolvedTrack;
         };
 
-        if (!mainRealtimeOverlay) {
-            showFallbackLine(currentSubtitleEl, mainTrackLine || lines[0] || null);
-        }
-
-        if (!descriptionRealtimeOverlay) {
-            showFallbackLine(descriptionSubtitleEl, descriptionTrackLine || null);
-        }
+        const fallbackMainLine = mainTrackLine || lines[0] || null;
+        updateFallbackLine(fallbackMainEl, fallbackMainLine, 'main');
+        updateFallbackLine(fallbackDescriptionEl, descriptionTrackLine || null, 'description');
 
         if (lines.length === 0) {
             document.querySelectorAll('.subtitle-block.selected').forEach(el => {
