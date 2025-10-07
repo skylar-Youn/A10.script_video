@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image
@@ -186,6 +186,7 @@ def run_text_removal(config: RemovalConfig) -> None:
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
         config.model_id,
         torch_dtype=torch_dtype,
+        low_cpu_mem_usage=False,
     )
     pipe = pipe.to(torch_device)
     pipe.enable_attention_slicing()
@@ -376,6 +377,102 @@ def run_background_fill(config: BackgroundFillConfig) -> None:
             writer.release()
     finally:
         cap.release()
+
+
+def split_media_components(video_path: Path, session_dir: Path) -> Dict[str, Path]:
+    """Split audio, muted video, and subtitles from the source video if available."""
+
+    outputs: Dict[str, Path] = {}
+
+    if not video_path.exists():
+        raise RuntimeError(f"영상 파일을 찾을 수 없습니다: {video_path}")
+
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    audio_m4a = session_dir / "audio_track.m4a"
+    audio_wav = session_dir / "audio_track.wav"
+    video_only = session_dir / "video_without_audio.mp4"
+    subtitles_srt = session_dir / "subtitles.srt"
+
+    def _run_ffmpeg(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    # Extract audio (try copy first, fallback to PCM WAV)
+    if audio_m4a.exists():
+        audio_m4a.unlink()
+    cmd_audio_copy = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(video_path),
+        "-vn",
+        "-acodec",
+        "copy",
+        str(audio_m4a),
+    ]
+    proc_audio = _run_ffmpeg(cmd_audio_copy)
+    if proc_audio.returncode == 0 and audio_m4a.exists():
+        outputs["audio"] = audio_m4a
+    else:
+        if audio_m4a.exists():
+            audio_m4a.unlink()
+        if audio_wav.exists():
+            audio_wav.unlink()
+        cmd_audio_wav = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(video_path),
+            "-vn",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            "44100",
+            str(audio_wav),
+        ]
+        proc_audio = _run_ffmpeg(cmd_audio_wav)
+        if proc_audio.returncode == 0 and audio_wav.exists():
+            outputs["audio"] = audio_wav
+
+    # Extract video without audio
+    if video_only.exists():
+        video_only.unlink()
+    cmd_video = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(video_path),
+        "-an",
+        "-c:v",
+        "copy",
+        str(video_only),
+    ]
+    proc_video = _run_ffmpeg(cmd_video)
+    if proc_video.returncode == 0 and video_only.exists():
+        outputs["video"] = video_only
+
+    # Extract first subtitle track if present
+    if subtitles_srt.exists():
+        subtitles_srt.unlink()
+    cmd_sub = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(video_path),
+        "-map",
+        "0:s:0",
+        str(subtitles_srt),
+    ]
+    proc_sub = _run_ffmpeg(cmd_sub)
+    if proc_sub.returncode == 0 and subtitles_srt.exists():
+        outputs["subtitle"] = subtitles_srt
+    elif subtitles_srt.exists():
+        subtitles_srt.unlink()
+
+    if not outputs:
+        raise RuntimeError("분리 가능한 음성, 영상, 자막 트랙을 찾지 못했습니다.")
+
+    return outputs
 
 
 def prepare_video_preview(video_path: Path, session_dir: Path) -> Tuple[np.ndarray, float, int, int, int, Path, Path]:

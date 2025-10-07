@@ -106,6 +106,20 @@ const STORAGE_KEY = "kis-selected-record";
 
 let activePreviewModal = null;
 let allowLongScriptFormSync = true;
+const videoLoaderInputs = new Map();
+
+function getVideoToolLabel(tool) {
+  switch (tool) {
+    case TOOL_KEYS.SCRIPT:
+    case "shorts_script":
+      return "쇼츠 대본";
+    case TOOL_KEYS.SCENES:
+    case "shorts_scenes":
+      return "쇼츠 장면";
+    default:
+      return "영상";
+  }
+}
 
 function persistSelection(tool, recordId, payload) {
   try {
@@ -162,6 +176,15 @@ function closePreviewModal() {
       video.removeAttribute("src");
       video.load();
     }
+    const objectUrl = modal.dataset.videoObjectUrl;
+    if (objectUrl) {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch (error) {
+        console.warn("Failed to revoke object URL:", error);
+      }
+      delete modal.dataset.videoObjectUrl;
+    }
   }
   if (escHandler) {
     document.removeEventListener("keydown", escHandler);
@@ -216,6 +239,140 @@ function openPreviewModal(title, bodyHtml) {
 
   activePreviewModal = { backdrop, escHandler, modal };
   return modal;
+}
+
+function ensureVideoLoaderInput(tool) {
+  let input = videoLoaderInputs.get(tool);
+  if (input) return input;
+  input = document.createElement("input");
+  input.type = "file";
+  input.accept = "video/*";
+  input.style.display = "none";
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    if (file) {
+      handleVideoFileSelection(tool, file);
+    } else {
+      showNotification("선택된 영상이 없습니다.", "error");
+    }
+    input.value = "";
+  });
+  document.body.appendChild(input);
+  videoLoaderInputs.set(tool, input);
+  return input;
+}
+
+function handleVideoFileSelection(tool, file) {
+  if (!file) {
+    showNotification("선택된 영상이 없습니다.", "error");
+    return;
+  }
+  const objectUrl = URL.createObjectURL(file);
+  const safeName = escapeHtml(file.name || "불러온 영상");
+  const sizeLabel = formatFileSize(file.size);
+  const label = getVideoToolLabel(tool);
+  const title = label === "영상" ? "영상 미리보기" : `${label} 영상 미리보기`;
+  const body = `
+    <div class="video-preview-wrapper">
+      <video controls preload="metadata" style="width: 100%; max-height: 480px; background: #000;" data-video-player></video>
+      <p class="video-preview-meta">${safeName}${sizeLabel ? ` · ${escapeHtml(sizeLabel)}` : ""}</p>
+    </div>
+  `;
+  const modal = openPreviewModal(title, body);
+  if (modal) {
+    modal.dataset.videoObjectUrl = objectUrl;
+    const video = modal.querySelector("[data-video-player]");
+    if (video) {
+      video.src = objectUrl;
+      video.load();
+      video.play().catch(() => {});
+    }
+    setupPreviewModalInteractions(modal);
+    const messageLabel = label === "영상" ? "영상" : `${label} 영상`;
+    showNotification(`${messageLabel}을 불러왔습니다.`, "success");
+  } else {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function handleVideoUrlLoad(tool, url) {
+  const trimmed = (url || "").trim();
+  if (!trimmed) {
+    showNotification("영상 URL을 입력하세요.", "error");
+    return;
+  }
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch (error) {
+    showNotification("올바른 영상 URL이 아닙니다.", "error");
+    return;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    showNotification("http 또는 https URL만 지원합니다.", "error");
+    return;
+  }
+
+  const safeUrl = parsed.toString();
+  const label = getVideoToolLabel(tool);
+  const title = label === "영상" ? "영상 미리보기" : `${label} 영상 미리보기`;
+  const body = `
+    <div class="video-preview-wrapper">
+      <video controls preload="metadata" style="width: 100%; max-height: 480px; background: #000;" src="${escapeHtml(safeUrl)}"></video>
+      <p class="video-preview-meta">${escapeHtml(safeUrl)}</p>
+    </div>
+  `;
+  const modal = openPreviewModal(title, body);
+  if (modal) {
+    setupPreviewModalInteractions(modal);
+    const messageLabel = label === "영상" ? "영상" : `${label} 영상`;
+    showNotification(`${messageLabel}을 불러왔습니다.`, "success");
+  }
+}
+
+function openVideoLoadDialog(tool) {
+  const label = getVideoToolLabel(tool);
+  const titleLabel = label === "영상" ? "영상" : `${label} 영상`;
+  const description = label === "영상"
+    ? "영상 파일을 선택하거나 URL을 입력해 미리보기를 확인하세요."
+    : `${label}에 사용할 영상을 선택하거나 URL을 입력해 미리보기를 확인하세요.`;
+  const body = `
+    <div class="video-load-dialog">
+      <p>${escapeHtml(description)}</p>
+      <div class="video-load-actions">
+        <button type="button" class="outline" data-video-load-file>내 컴퓨터에서 선택</button>
+        <button type="button" class="secondary" data-video-load-url>URL 입력</button>
+      </div>
+    </div>
+  `;
+  const modal = openPreviewModal(`${titleLabel} 불러오기`, body);
+  if (!modal) return;
+  setupPreviewModalInteractions(modal);
+
+  const fileButton = modal.querySelector("[data-video-load-file]");
+  if (fileButton) {
+    fileButton.addEventListener("click", () => {
+      closePreviewModal();
+      const input = ensureVideoLoaderInput(tool);
+      input.click();
+    });
+  }
+
+  const urlButton = modal.querySelector("[data-video-load-url]");
+  if (urlButton) {
+    urlButton.addEventListener("click", () => {
+      const value = window.prompt("불러올 영상 URL을 입력하세요.");
+      if (value === null) {
+        return;
+      }
+      if (!value.trim()) {
+        showNotification("영상 URL을 입력하세요.", "error");
+        return;
+      }
+      closePreviewModal();
+      handleVideoUrlLoad(tool, value);
+    });
+  }
 }
 
 async function api(path, options = {}) {
@@ -431,6 +588,21 @@ function formatTimestamp(value) {
     dateStyle: "short",
     timeStyle: "short"
   }).format(date);
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value < 0) return "";
+  if (value === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const precision = size >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
 }
 
 function toOptionalNumber(value) {
@@ -6348,6 +6520,15 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!copyBtn) return;
     event.preventDefault();
     handleCopyButton(copyBtn);
+  });
+
+  document.addEventListener("click", (event) => {
+    const loadVideoBtn = event.target.closest("[data-load-video]");
+    if (!loadVideoBtn) return;
+    event.preventDefault();
+    const tool = loadVideoBtn.getAttribute("data-load-video");
+    if (!tool) return;
+    openVideoLoadDialog(tool);
   });
 
   Object.keys(TOOL_CONFIG).forEach((tool) => {

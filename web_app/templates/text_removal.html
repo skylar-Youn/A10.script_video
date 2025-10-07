@@ -100,7 +100,16 @@
                     <input type="file" id="video-file" name="video" accept="video/*" required>
                 </label>
             </div>
-            <button type="submit">첫 프레임 불러오기</button>
+            <div class="action-buttons">
+                <button type="submit" class="primary">
+                    <span class="label">첫 프레임 불러오기</span>
+                    <span class="progress" id="preview-progress"></span>
+                </button>
+                <button type="button" id="split-media" class="secondary" disabled>
+                    <span class="label">음성·영상·자막 분리</span>
+                    <span class="progress" id="split-progress"></span>
+                </button>
+            </div>
             <p id="preview-status" class="status-text"></p>
         </form>
 
@@ -191,6 +200,8 @@
 (() => {
     const previewForm = document.getElementById('preview-form');
     const previewStatus = document.getElementById('preview-status');
+    const previewSubmit = previewForm.querySelector('button[type="submit"]');
+    const previewProgress = document.getElementById('preview-progress');
     const canvasWrapper = document.getElementById('canvas-wrapper');
     const canvas = document.getElementById('roi-canvas');
     const ctx = canvas.getContext('2d');
@@ -204,13 +215,17 @@
     const processStatus = document.getElementById('process-status');
     const processSubmit = document.getElementById('process-submit');
     const fillBackgroundBtn = document.getElementById('fill-background');
+    const splitMediaBtn = document.getElementById('split-media');
     const resultLink = document.getElementById('result-link');
     const processLabel = processSubmit.querySelector('.label');
     const processProgress = document.getElementById('process-progress');
     const fillLabel = fillBackgroundBtn.querySelector('.label');
     const fillProgress = document.getElementById('fill-progress');
+    const splitLabel = splitMediaBtn.querySelector('.label');
+    const splitProgress = document.getElementById('split-progress');
     const DEFAULT_PROCESS_LABEL = processLabel.textContent.trim();
     const DEFAULT_FILL_LABEL = fillLabel.textContent.trim();
+    const DEFAULT_SPLIT_LABEL = splitLabel.textContent.trim();
 
     const promptInput = document.getElementById('prompt');
     const negativePromptInput = document.getElementById('negative-prompt');
@@ -248,6 +263,7 @@
         processingMode = mode;
         const isDiffusion = mode === 'diffusion';
         const isFill = mode === 'fill';
+        const isSplit = mode === 'split';
 
         processLabel.textContent = isDiffusion ? (message || '복원 중...') : DEFAULT_PROCESS_LABEL;
         processProgress.textContent = isDiffusion ? '진행 중...' : '';
@@ -257,22 +273,37 @@
         fillProgress.textContent = isFill ? '진행 중...' : '';
         fillBackgroundBtn.classList.toggle('is-processing', isFill);
 
+        splitLabel.textContent = isSplit ? (message || '분리 중...') : DEFAULT_SPLIT_LABEL;
+        splitProgress.textContent = isSplit ? '진행 중...' : '';
+        splitMediaBtn.classList.toggle('is-processing', isSplit);
+
         if (mode) {
             processSubmit.disabled = true;
             fillBackgroundBtn.disabled = true;
+            previewSubmit.disabled = true;
+            splitMediaBtn.disabled = true;
         } else {
             const disabled = !sessionId || boxes.length === 0;
             processSubmit.disabled = disabled;
             fillBackgroundBtn.disabled = disabled;
+            previewSubmit.disabled = false;
+            splitMediaBtn.disabled = !sessionId;
         }
     }
 
-    function renderResultLink(url, label = '처리된 영상 내려받기') {
-        if (!url) {
+    function renderResultLink(links, defaultLabel = '처리된 영상 내려받기') {
+        if (!links) {
             resultLink.innerHTML = '';
             return;
         }
-        resultLink.innerHTML = `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+        const items = Array.isArray(links)
+            ? links
+            : [typeof links === 'string' ? { url: links, label: defaultLabel } : links];
+        const markup = items
+            .filter((item) => item && item.url)
+            .map((item) => `<a href="${item.url}" target="_blank" rel="noopener">${item.label || defaultLabel}</a>`)
+            .join(' ');
+        resultLink.innerHTML = markup;
     }
 
     function serializeBoxes() {
@@ -322,6 +353,7 @@
             const disabled = !sessionId || boxes.length === 0;
             processSubmit.disabled = disabled;
             fillBackgroundBtn.disabled = disabled;
+            splitMediaBtn.disabled = !sessionId;
         }
         renderCanvas();
     }
@@ -434,6 +466,9 @@
         const formData = new FormData();
         formData.append('video', fileInput.files[0]);
         setStatus(previewStatus, '미리보기를 생성하는 중...', '');
+        previewProgress.textContent = '진행 중...';
+        previewForm.querySelector('button').disabled = true;
+        splitMediaBtn.disabled = true;
 
         try {
             const response = await fetch('/api/text-removal/preview', {
@@ -464,6 +499,9 @@
             previewImage.src = data.preview_image;
 
             setStatus(previewStatus, '미리보기가 준비되었습니다. 캔버스에서 영역을 지정하세요.', 'success');
+            previewProgress.textContent = '완료';
+            previewSubmit.disabled = false;
+            splitMediaBtn.disabled = false;
         } catch (error) {
             sessionId = null;
             sessionInput.value = '';
@@ -471,6 +509,58 @@
             canvasWrapper.classList.remove('active');
             processPanel.classList.add('hidden');
             setStatus(previewStatus, error.message || '미리보기를 생성하지 못했습니다.', 'error');
+            previewProgress.textContent = '';
+            previewSubmit.disabled = false;
+            splitMediaBtn.disabled = true;
+        }
+    });
+
+    splitMediaBtn.addEventListener('click', async () => {
+        if (!sessionId) {
+            setStatus(previewStatus, '먼저 영상을 업로드하고 미리보기를 생성하세요.', 'error');
+            return;
+        }
+
+        setProcessingState('split', '분리 중...');
+        setStatus(processStatus, '영상에서 음성, 영상, 자막을 분리하는 중입니다...', '');
+        renderResultLink(null);
+
+        try {
+            const response = await fetch('/api/text-removal/split-media', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '미디어 분리에 실패했습니다.');
+            }
+
+            setStatus(processStatus, '음성·영상·자막 분리가 완료되었습니다!', 'success');
+            splitProgress.textContent = '완료';
+            const links = [];
+            if (data.audio_url) {
+                links.push({ url: data.audio_url, label: '음성 트랙 다운로드' });
+            }
+            if (data.video_url) {
+                links.push({ url: data.video_url, label: '영상(무음) 다운로드' });
+            }
+            if (data.subtitle_url) {
+                links.push({ url: data.subtitle_url, label: '자막 다운로드' });
+            }
+            renderResultLink(links);
+        } catch (error) {
+            setStatus(processStatus, error.message || '미디어 분리 중 오류가 발생했습니다.', 'error');
+        } finally {
+            setTimeout(() => {
+                setProcessingState(null);
+                updateBoxesUI();
+            }, 600);
         }
     });
 

@@ -105,6 +105,7 @@ from .utils.text_removal import (
     RemovalConfig,
     TrackerUnavailableError,
     prepare_video_preview,
+    split_media_components,
     run_background_fill,
     run_text_removal,
 )
@@ -172,6 +173,10 @@ class TextRemovalFillRequest(BaseModel):
     dilate: int = 4
     fps: Optional[float] = None
     max_frames: Optional[int] = None
+
+
+class TextRemovalSplitRequest(BaseModel):
+    session_id: str
 
 
 logger = logging.getLogger(__name__)
@@ -1876,6 +1881,75 @@ async def text_removal_fill_background(payload: TextRemovalFillRequest) -> Dict[
     }
 
 
+@app.post("/api/text-removal/split-media")
+async def text_removal_split_media(payload: TextRemovalSplitRequest) -> Dict[str, Any]:
+    session_dir = TEXT_REMOVAL_UPLOAD_DIR / payload.session_id
+    if not session_dir.exists():
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다. 먼저 영상을 업로드하세요.")
+
+    meta_path = session_dir / "meta.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=400, detail="세션 정보가 손상되었습니다. 다시 시도하세요.")
+
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="세션 정보를 읽을 수 없습니다.") from exc
+
+    processed_path_str = meta.get("processed_path") or meta.get("input_path")
+    if not processed_path_str:
+        raise HTTPException(status_code=400, detail="업로드된 영상 파일을 찾을 수 없습니다.")
+
+    video_path = Path(processed_path_str)
+    if not video_path.exists():
+        raise HTTPException(status_code=400, detail="업로드된 영상 파일을 찾을 수 없습니다.")
+
+    try:
+        outputs = split_media_components(video_path, session_dir)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Media split failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"미디어 분리 중 오류가 발생했습니다: {exc}",
+        ) from exc
+
+    meta.update(
+        {
+            "split_audio_path": str(outputs.get("audio", "")) if outputs.get("audio") else None,
+            "split_video_path": str(outputs.get("video", "")) if outputs.get("video") else None,
+            "split_subtitles_path": str(outputs.get("subtitle", "")) if outputs.get("subtitle") else None,
+        }
+    )
+    meta_path.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    audio_url = (
+        f"/api/text-removal/download/split/{payload.session_id}?kind=audio"
+        if outputs.get("audio")
+        else None
+    )
+    video_url = (
+        f"/api/text-removal/download/split/{payload.session_id}?kind=video"
+        if outputs.get("video")
+        else None
+    )
+    subtitle_url = (
+        f"/api/text-removal/download/split/{payload.session_id}?kind=subtitle"
+        if outputs.get("subtitle")
+        else None
+    )
+
+    return {
+        "session_id": payload.session_id,
+        "audio_url": audio_url,
+        "video_url": video_url,
+        "subtitle_url": subtitle_url,
+        "message": "음성, 영상, 자막 분리를 완료했습니다.",
+    }
+
+
 @app.get("/api/text-removal/download/{session_id}")
 async def text_removal_download(session_id: str) -> FileResponse:
     session_dir = TEXT_REMOVAL_UPLOAD_DIR / session_id
@@ -1912,6 +1986,40 @@ async def text_removal_download_background(session_id: str) -> FileResponse:
     download_name = f"{stem}_background{output_path.suffix}"
 
     return FileResponse(output_path, filename=download_name)
+
+
+@app.get("/api/text-removal/download/split/{session_id}")
+async def text_removal_download_split(session_id: str, kind: str = "audio") -> FileResponse:
+    session_dir = TEXT_REMOVAL_UPLOAD_DIR / session_id
+    meta_path = session_dir / "meta.json"
+    if not session_dir.exists() or not meta_path.exists():
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    path_map = {
+        "audio": meta.get("split_audio_path"),
+        "video": meta.get("split_video_path"),
+        "subtitle": meta.get("split_subtitles_path"),
+    }
+    target_path = path_map.get(kind)
+    if not target_path:
+        raise HTTPException(status_code=404, detail=f"요청한 {kind} 파일을 찾을 수 없습니다.")
+
+    file_path = Path(target_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="요청한 파일이 존재하지 않습니다.")
+
+    original_name = meta.get("original_filename", file_path.name)
+    stem = Path(original_name).stem or "output"
+    suffix = file_path.suffix
+    if kind == "audio":
+        download_name = f"{stem}_audio{suffix}"
+    elif kind == "video":
+        download_name = f"{stem}_video{suffix}"
+    else:
+        download_name = f"{stem}_subtitles{suffix}"
+
+    return FileResponse(file_path, filename=download_name)
 
 
 @app.get("/ytdl", response_class=HTMLResponse)

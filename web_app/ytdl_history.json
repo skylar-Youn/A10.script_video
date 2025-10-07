@@ -1,5 +1,21 @@
 [
   {
+    "timestamp": "2025-10-07T20:18:54.304816",
+    "urls": [
+      "https://www.youtube.com/shorts/fsxkDic07z4"
+    ],
+    "files": [
+      "/home/sk/ws/youtubeanalysis/youtube/download/사라질 위기라는 연변 조선족 근황 [fsxkDic07z4].webm",
+      "/home/sk/ws/youtubeanalysis/youtube/download/사라질 위기라는 연변 조선족 근황 [fsxkDic07z4].ko.srt"
+    ],
+    "settings": {
+      "output_dir": "/home/sk/ws/youtubeanalysis/youtube/download",
+      "sub_langs": "ko",
+      "download_subs": true,
+      "auto_subs": true
+    }
+  },
+  {
     "timestamp": "2025-09-24T19:58:46.197771",
     "urls": [
       "https://www.youtube.com/shorts/vTMssu3XB7g"

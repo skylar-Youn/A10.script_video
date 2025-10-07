@@ -325,6 +325,9 @@ async def api_generate_long_script(payload: dict[str, Any] = Body(...)) -> dict[
         line_prefix = f"{segment.index}." if segment.index is not None else "- "
         script_lines.append(f"{line_prefix} {segment.text}".strip())
     script_text = "\n".join(script_lines).strip()
+    if not script_text:
+        fallback_text = "\n".join(segment.text for segment in subtitles if segment.text).strip()
+        script_text = fallback_text or topic
 
     return {
         "topic": topic,
