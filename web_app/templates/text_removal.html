@@ -78,7 +78,7 @@
             <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
             <a href="/copyright" class="nav-link {% if nav_active == 'copyright' %}active{% endif %}">🛡️ 저작권 검사</a>
         </nav>
-        <p class="page-description">영상 첫 프레임에서 지울 영역을 직접 지정하고, Stable Diffusion 인페인팅으로 워터마크·텍스트를 한 번에 제거합니다.</p>
+        <p class="page-description">영상 첫 프레임에서 지울 영역을 직접 지정하고, Stable Diffusion 인페인팅 또는 OpenCV 배경 채우기로 텍스트를 제거해 보세요.</p>
     </header>
 
     <section class="panel">
@@ -86,7 +86,8 @@
         <ol>
             <li><strong>영상 업로드</strong>: 첫 프레임을 추출해 브라우저에서 바로 영역을 지정합니다.</li>
             <li><strong>영역 지정</strong>: 캔버스에서 드래그하여 지울 텍스트/워터마크 영역을 여러 개 그립니다.</li>
-            <li><strong>인페인팅 실행</strong>: Stable Diffusion 모델(runwayml/stable-diffusion-inpainting)로 전체 프레임을 순회하며 자동 복원합니다.</li>
+            <li><strong>글자 지우고 인페인팅 영상 복원</strong>: Stable Diffusion(runwayml/stable-diffusion-inpainting)으로 프레임 전체를 복원합니다.</li>
+            <li><strong>글자를 배경색으로 가리기</strong>: OpenCV 인페인트를 활용해 지정한 박스를 주변 배경색으로 빠르게 덮습니다.</li>
         </ol>
         <p class="hint-text">처리에는 GPU가 권장됩니다. CPU 모드도 가능하지만 시간이 오래 걸릴 수 있습니다.</p>
     </section>
@@ -170,7 +171,16 @@
                 <textarea id="boxes-json" class="boxes-list" readonly></textarea>
             </label>
 
-            <button type="submit" id="process-submit" disabled>영상 인페인팅 실행</button>
+            <div class="action-buttons">
+                <button type="submit" id="process-submit" class="primary" disabled>
+                    <span class="label">글자 지우고 인페인팅 영상 복원</span>
+                    <span class="progress" id="process-progress"></span>
+                </button>
+                <button type="button" id="fill-background" class="secondary" disabled>
+                    <span class="label">글자를 배경색으로 덮어 가리기</span>
+                    <span class="progress" id="fill-progress"></span>
+                </button>
+            </div>
             <p id="process-status" class="status-text"></p>
             <div id="result-link" class="result-link"></div>
         </form>
@@ -193,7 +203,14 @@
     const processForm = document.getElementById('process-form');
     const processStatus = document.getElementById('process-status');
     const processSubmit = document.getElementById('process-submit');
+    const fillBackgroundBtn = document.getElementById('fill-background');
     const resultLink = document.getElementById('result-link');
+    const processLabel = processSubmit.querySelector('.label');
+    const processProgress = document.getElementById('process-progress');
+    const fillLabel = fillBackgroundBtn.querySelector('.label');
+    const fillProgress = document.getElementById('fill-progress');
+    const DEFAULT_PROCESS_LABEL = processLabel.textContent.trim();
+    const DEFAULT_FILL_LABEL = fillLabel.textContent.trim();
 
     const promptInput = document.getElementById('prompt');
     const negativePromptInput = document.getElementById('negative-prompt');
@@ -217,6 +234,7 @@
     let isDrawing = false;
     let startPoint = { x: 0, y: 0 };
     let tempPoint = { x: 0, y: 0 };
+    let processingMode = null;
 
     function setStatus(el, message, type = '') {
         el.textContent = message || '';
@@ -226,12 +244,85 @@
         }
     }
 
+    function setProcessingState(mode, message = '') {
+        processingMode = mode;
+        const isDiffusion = mode === 'diffusion';
+        const isFill = mode === 'fill';
+
+        processLabel.textContent = isDiffusion ? (message || '복원 중...') : DEFAULT_PROCESS_LABEL;
+        processProgress.textContent = isDiffusion ? '진행 중...' : '';
+        processSubmit.classList.toggle('is-processing', isDiffusion);
+
+        fillLabel.textContent = isFill ? (message || '배경 채우는 중...') : DEFAULT_FILL_LABEL;
+        fillProgress.textContent = isFill ? '진행 중...' : '';
+        fillBackgroundBtn.classList.toggle('is-processing', isFill);
+
+        if (mode) {
+            processSubmit.disabled = true;
+            fillBackgroundBtn.disabled = true;
+        } else {
+            const disabled = !sessionId || boxes.length === 0;
+            processSubmit.disabled = disabled;
+            fillBackgroundBtn.disabled = disabled;
+        }
+    }
+
+    function renderResultLink(url, label = '처리된 영상 내려받기') {
+        if (!url) {
+            resultLink.innerHTML = '';
+            return;
+        }
+        resultLink.innerHTML = `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+    }
+
+    function serializeBoxes() {
+        return boxes.map((box) => ({
+            x: Math.round(box.x),
+            y: Math.round(box.y),
+            width: Math.round(box.width),
+            height: Math.round(box.height),
+        }));
+    }
+
+    function buildDiffusionPayload() {
+        return {
+            session_id: sessionId,
+            prompt: promptInput.value.trim() || 'remove text and restore background',
+            negative_prompt: negativePromptInput.value.trim() || 'text, watermark, caption',
+            model_id: modelInput.value.trim() || 'runwayml/stable-diffusion-inpainting',
+            guidance_scale: parseFloat(guidanceInput.value) || 7.5,
+            strength: Math.min(Math.max(parseFloat(strengthInput.value) || 0.75, 0), 1),
+            num_inference_steps: Math.max(parseInt(stepsInput.value, 10) || 30, 1),
+            dilate: Math.max(parseInt(dilateInput.value, 10) || 0, 0),
+            device: deviceSelect.value,
+            dtype: dtypeSelect.value,
+            seed: seedInput.value ? parseInt(seedInput.value, 10) : null,
+            fps: fpsInput.value ? parseFloat(fpsInput.value) : null,
+            max_frames: maxFramesInput.value ? parseInt(maxFramesInput.value, 10) : null,
+            boxes: serializeBoxes(),
+        };
+    }
+
+    function buildFillPayload() {
+        return {
+            session_id: sessionId,
+            dilate: Math.max(parseInt(dilateInput.value, 10) || 0, 0),
+            fps: fpsInput.value ? parseFloat(fpsInput.value) : null,
+            max_frames: maxFramesInput.value ? parseInt(maxFramesInput.value, 10) : null,
+            boxes: serializeBoxes(),
+        };
+    }
+
     function updateBoxesUI() {
         boxesTextarea.value = JSON.stringify(boxes, null, 2);
         boxCount.textContent = boxes.length.toString();
         undoBtn.disabled = boxes.length === 0;
         clearBtn.disabled = boxes.length === 0;
-        processSubmit.disabled = !sessionId || boxes.length === 0;
+        if (!processingMode) {
+            const disabled = !sessionId || boxes.length === 0;
+            processSubmit.disabled = disabled;
+            fillBackgroundBtn.disabled = disabled;
+        }
         renderCanvas();
     }
 
@@ -326,11 +417,13 @@
 
     previewForm.addEventListener('submit', async (event) => {
         event.preventDefault();
-        resultLink.innerHTML = '';
+        renderResultLink(null);
         boxes = [];
         updateBoxesUI();
+        setProcessingState(null);
         setStatus(processStatus, '');
         processSubmit.disabled = true;
+        fillBackgroundBtn.disabled = true;
 
         const fileInput = document.getElementById('video-file');
         if (!fileInput.files || fileInput.files.length === 0) {
@@ -392,31 +485,11 @@
             return;
         }
 
-        processSubmit.disabled = true;
+        setProcessingState('diffusion', '복원 중...');
         setStatus(processStatus, 'Stable Diffusion으로 영상을 복원하는 중입니다. 시간이 다소 걸릴 수 있습니다...', '');
-        resultLink.innerHTML = '';
+        renderResultLink(null);
 
-        const payload = {
-            session_id: sessionId,
-            prompt: promptInput.value.trim() || 'remove text and restore background',
-            negative_prompt: negativePromptInput.value.trim() || 'text, watermark, caption',
-            model_id: modelInput.value.trim() || 'runwayml/stable-diffusion-inpainting',
-            guidance_scale: parseFloat(guidanceInput.value) || 7.5,
-            strength: Math.min(Math.max(parseFloat(strengthInput.value) || 0.75, 0), 1),
-            num_inference_steps: Math.max(parseInt(stepsInput.value, 10) || 30, 1),
-            dilate: Math.max(parseInt(dilateInput.value, 10) || 0, 0),
-            device: deviceSelect.value,
-            dtype: dtypeSelect.value,
-            seed: seedInput.value ? parseInt(seedInput.value, 10) : null,
-            fps: fpsInput.value ? parseFloat(fpsInput.value) : null,
-            max_frames: maxFramesInput.value ? parseInt(maxFramesInput.value, 10) : null,
-            boxes: boxes.map((box) => ({
-                x: Math.round(box.x),
-                y: Math.round(box.y),
-                width: Math.round(box.width),
-                height: Math.round(box.height),
-            })),
-        };
+        const payload = buildDiffusionPayload();
 
         try {
             const response = await fetch('/api/text-removal/process', {
@@ -429,15 +502,62 @@
 
             const data = await response.json();
             if (!response.ok) {
-                throw new Error(data.detail || '영상 인페인팅에 실패했습니다.');
+                throw new Error(data.detail || '영상 복원에 실패했습니다.');
             }
 
-            setStatus(processStatus, '영상 인페인팅이 완료되었습니다!', 'success');
-            resultLink.innerHTML = `<a href="${data.video_url}" target="_blank" rel="noopener">결과 영상 다운로드</a>`;
+            setStatus(processStatus, '영상 복원이 완료되었습니다!', 'success');
+            processProgress.textContent = '완료';
+            renderResultLink(data.video_url, '복원된 영상 내려받기');
         } catch (error) {
-            setStatus(processStatus, error.message || '영상 인페인팅 중 오류가 발생했습니다.', 'error');
+            setStatus(processStatus, error.message || '영상 복원 중 오류가 발생했습니다.', 'error');
         } finally {
-            processSubmit.disabled = boxes.length === 0;
+            setTimeout(() => {
+                setProcessingState(null);
+                updateBoxesUI();
+            }, 600);
+        }
+    });
+
+    fillBackgroundBtn.addEventListener('click', async () => {
+        if (!sessionId) {
+            setStatus(processStatus, '먼저 영상을 업로드하고 미리보기를 생성하세요.', 'error');
+            return;
+        }
+        if (boxes.length === 0) {
+            setStatus(processStatus, '먼저 가릴 영역을 지정하세요.', 'error');
+            return;
+        }
+
+        setProcessingState('fill', '배경 채우는 중...');
+        setStatus(processStatus, 'OpenCV 인페인트로 텍스트 영역을 배경에 맞춰 덮는 중입니다...', '');
+        renderResultLink(null);
+
+        const payload = buildFillPayload();
+
+        try {
+            const response = await fetch('/api/text-removal/fill-background', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '배경 채우기에 실패했습니다.');
+            }
+
+            setStatus(processStatus, '배경 가리기가 완료되었습니다!', 'success');
+            fillProgress.textContent = '완료';
+            renderResultLink(data.video_url, '배경 처리된 영상 내려받기');
+        } catch (error) {
+            setStatus(processStatus, error.message || '배경 채우기 중 오류가 발생했습니다.', 'error');
+        } finally {
+            setTimeout(() => {
+                setProcessingState(null);
+                updateBoxesUI();
+            }, 600);
         }
     });
 })();

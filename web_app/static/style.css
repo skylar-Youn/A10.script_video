@@ -103,6 +103,22 @@ button {
     font-weight: 600;
     cursor: pointer;
     transition: transform 0.12s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+button.primary {
+    background: linear-gradient(120deg, #5b7fff, #4bd4ff);
+    color: #04142e;
+}
+button.secondary {
+    background: rgba(255, 255, 255, 0.06);
+    color: #d5e4ff;
+    border: 1px solid rgba(148, 190, 255, 0.24);
+}
+button.secondary:hover {
+    background: rgba(255, 255, 255, 0.12);
 }
 button:hover {
     transform: translateY(-1px);
@@ -110,6 +126,28 @@ button:hover {
 button.danger {
     background: linear-gradient(120deg, #ff6d6d, #ff3d7f);
     color: #fff6f6;
+}
+button .progress {
+    font-size: 0.8rem;
+    color: rgba(12, 28, 54, 0.8);
+    letter-spacing: 0.02em;
+}
+button.secondary .progress {
+    color: rgba(223, 237, 255, 0.85);
+}
+button.is-processing {
+    opacity: 0.82;
+    cursor: wait;
+}
+button.is-processing:hover {
+    transform: none;
+}
+
+.action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
 }
 
 .nav-link.active {

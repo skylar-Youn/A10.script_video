@@ -100,10 +100,12 @@ except Exception as exc:  # pylint: disable=broad-except
 from youtube.ytcopyrightinspector import run_precheck as run_copyright_precheck
 
 from .utils.text_removal import (
+    BackgroundFillConfig,
     DiffusionUnavailableError,
     RemovalConfig,
     TrackerUnavailableError,
     prepare_video_preview,
+    run_background_fill,
     run_text_removal,
 )
 
@@ -162,6 +164,14 @@ class TextRemovalProcessRequest(BaseModel):
     boxes: List[TextRemovalBox]
     max_frames: Optional[int] = None
     fps: Optional[float] = None
+
+
+class TextRemovalFillRequest(BaseModel):
+    session_id: str
+    boxes: List[TextRemovalBox]
+    dilate: int = 4
+    fps: Optional[float] = None
+    max_frames: Optional[int] = None
 
 
 logger = logging.getLogger(__name__)
@@ -1792,6 +1802,80 @@ async def text_removal_process(payload: TextRemovalProcessRequest) -> Dict[str, 
     }
 
 
+@app.post("/api/text-removal/fill-background")
+async def text_removal_fill_background(payload: TextRemovalFillRequest) -> Dict[str, Any]:
+    if cv2 is None:
+        raise HTTPException(
+            status_code=500,
+            detail="OpenCV(opencv-contrib-python) 패키지가 설치되어 있어야 합니다.",
+        )
+
+    session_dir = TEXT_REMOVAL_UPLOAD_DIR / payload.session_id
+    if not session_dir.exists():
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다. 먼저 영상을 업로드하세요.")
+
+    meta_path = session_dir / "meta.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=400, detail="세션 정보가 손상되었습니다. 다시 시도하세요.")
+
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="세션 정보를 읽을 수 없습니다.") from exc
+
+    processed_path_str = meta.get("processed_path") or meta.get("input_path")
+    if not processed_path_str:
+        raise HTTPException(status_code=400, detail="업로드된 영상 파일을 찾을 수 없습니다.")
+
+    video_path = Path(processed_path_str)
+    if not video_path.exists():
+        raise HTTPException(status_code=400, detail="업로드된 영상 파일을 찾을 수 없습니다.")
+
+    if not payload.boxes:
+        raise HTTPException(status_code=400, detail="가릴 영역을 최소 한 개 이상 지정하세요.")
+
+    output_path = session_dir / "background_filled.mp4"
+
+    config = BackgroundFillConfig(
+        video_path=video_path,
+        output_path=output_path,
+        boxes=[(box.x, box.y, box.width, box.height) for box in payload.boxes],
+        dilate_radius=max(int(payload.dilate or 0), 0),
+        fps_override=payload.fps,
+        max_frames=payload.max_frames,
+    )
+
+    try:
+        await run_in_threadpool(run_background_fill, config)
+    except TrackerUnavailableError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Background fill failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"영상 처리 중 오류가 발생했습니다: {exc}",
+        ) from exc
+
+    meta.update(
+        {
+            "background_output_path": str(output_path),
+            "background_fill_dilate": max(int(payload.dilate or 0), 0),
+            "background_boxes": [box.model_dump() for box in payload.boxes],
+        }
+    )
+    meta_path.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    return {
+        "session_id": payload.session_id,
+        "video_url": f"/api/text-removal/download/background/{payload.session_id}",
+        "output_path": str(output_path),
+        "message": "배경 채우기가 완료되었습니다.",
+    }
+
+
 @app.get("/api/text-removal/download/{session_id}")
 async def text_removal_download(session_id: str) -> FileResponse:
     session_dir = TEXT_REMOVAL_UPLOAD_DIR / session_id
@@ -1807,6 +1891,25 @@ async def text_removal_download(session_id: str) -> FileResponse:
     original_name = meta.get("original_filename", output_path.name)
     stem = Path(original_name).stem or "restored"
     download_name = f"{stem}_restored{output_path.suffix}"
+
+    return FileResponse(output_path, filename=download_name)
+
+
+@app.get("/api/text-removal/download/background/{session_id}")
+async def text_removal_download_background(session_id: str) -> FileResponse:
+    session_dir = TEXT_REMOVAL_UPLOAD_DIR / session_id
+    meta_path = session_dir / "meta.json"
+    if not session_dir.exists() or not meta_path.exists():
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    output_path = Path(meta.get("background_output_path", session_dir / "background_filled.mp4"))
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="배경 처리된 영상이 존재하지 않습니다.")
+
+    original_name = meta.get("original_filename", output_path.name)
+    stem = Path(original_name).stem or "restored"
+    download_name = f"{stem}_background{output_path.suffix}"
 
     return FileResponse(output_path, filename=download_name)
 

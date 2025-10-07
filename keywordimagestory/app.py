@@ -4,12 +4,13 @@ from __future__ import annotations
 import logging
 import os
 import glob
+import mimetypes
 from datetime import datetime
 from typing import Any
 from pathlib import Path
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -50,6 +51,8 @@ app = FastAPI(title="Keyword Image Story Studio", version="0.1.0")
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 app.mount("/outputs", StaticFiles(directory=str(settings.outputs_dir)), name="outputs")
+
+DOWNLOAD_ROOT = Path("/home/sk/ws/A10.script_video/youtube/download").resolve()
 
 LANGUAGE_LABELS = {
     "ko": "Korean",
@@ -304,6 +307,32 @@ async def api_generate_shorts_scenes(payload: dict[str, Any] = Body(...)) -> dic
         "language": language,
         "subtitles": [segment.dict() for segment in subtitles],
         "scenes": [prompt.dict() for prompt in scenes],
+    }
+
+
+@app.post("/api/generate/long-script")
+async def api_generate_long_script(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    topic = str(payload.get("topic") or payload.get("keyword") or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic is required")
+
+    language = str(payload.get("language", settings.default_language) or settings.default_language)
+    context = GenerationContext(keyword=topic, language=language, duration=settings.default_story_duration)
+    subtitles, images = ShortsScriptGenerator().generate(context)
+
+    script_lines = []
+    for segment in subtitles:
+        line_prefix = f"{segment.index}." if segment.index is not None else "- "
+        script_lines.append(f"{line_prefix} {segment.text}".strip())
+    script_text = "\n".join(script_lines).strip()
+
+    return {
+        "topic": topic,
+        "keyword": topic,
+        "language": language,
+        "content": script_text,
+        "subtitles": [segment.dict() for segment in subtitles],
+        "images": [prompt.dict() for prompt in images],
     }
 
 
@@ -628,7 +657,7 @@ async def api_delete_history_entry(project_id: str, version: int) -> Response:
 async def api_get_downloads():
     """다운로드 폴더에서 사용 가능한 영상과 자막 파일 목록을 반환합니다."""
     try:
-        download_dir = Path("/home/sk/ws/A10.script_video/youtube/download")
+        download_dir = DOWNLOAD_ROOT
         if not download_dir.exists():
             return {"files": [], "message": "Download directory not found"}
 
@@ -658,6 +687,35 @@ async def api_get_downloads():
         raise HTTPException(status_code=500, detail=f"Error listing downloads: {str(e)}")
 
 
+@app.get("/api/video")
+async def api_stream_video(path: str = Query(..., description="경로는 다운로드 디렉터리 내부의 영상 파일이어야 합니다.")) -> FileResponse:
+    """요청된 영상 파일을 스트리밍합니다."""
+    if not path:
+        raise HTTPException(status_code=400, detail="Video path is required.")
+
+    try:
+        video_path = Path(path).expanduser().resolve()
+    except Exception as exc:  # pragma: no cover - guard for invalid path
+        raise HTTPException(status_code=400, detail="Invalid video path.") from exc
+
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Video file not found.")
+
+    try:
+        download_dir = DOWNLOAD_ROOT
+        if download_dir not in video_path.parents and video_path != download_dir:
+            raise HTTPException(status_code=403, detail="Access to the requested file is not allowed.")
+    except ValueError as exc:  # pragma: no cover - guard for path resolution errors
+        raise HTTPException(status_code=403, detail="Invalid file location.") from exc
+
+    media_type, _ = mimetypes.guess_type(str(video_path))
+    return FileResponse(
+        video_path,
+        media_type=media_type or "application/octet-stream",
+        filename=video_path.name
+    )
+
+
 @app.post("/api/import-video")
 async def api_import_video(
     selected_file: str = Form(...),
@@ -665,7 +723,7 @@ async def api_import_video(
 ):
     """선택된 영상과 자막을 프로젝트로 가져옵니다."""
     try:
-        download_dir = Path("/home/sk/ws/A10.script_video/youtube/download")
+        download_dir = DOWNLOAD_ROOT
         logging.info(f"Looking for file: {selected_file}")
 
         # SRT 파일 찾기 (정확한 파일명으로)

@@ -408,5 +408,88 @@
     </article>
   </section>
 
+  <!-- Tool 6: 글 작성 & 대본 만들기 -->
+  <section class="tool-section">
+    <article class="tool-card writing-tool">
+      <header class="tool-header">
+        <div class="tool-icon">✍️</div>
+        <div class="tool-info">
+          <h2>6. 글 작성하기 &amp; 대본 만들기</h2>
+          <p>자유롭게 대본을 작성하거나 붙여넣고, ChatGPT 창과 연동해 빠르게 결과를 다듬어 보세요.</p>
+        </div>
+      </header>
+
+      <div class="tool-content">
+        <form id="long-script-form" class="tool-form">
+          <div class="mode-selection">
+            <label>실행 모드
+              <select name="mode" id="long-script-mode">
+                <option value="api" selected>API 모드 (서버에서 직접 처리)</option>
+                <option value="chatgpt">ChatGPT 창 모드 (새 창에서 ChatGPT 열기)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="input-group">
+            <label>콘텐츠 주제
+              <input type="text" name="script_topic" placeholder="예: 인공지능 트렌드 요약">
+            </label>
+          </div>
+
+          <div class="form-controls">
+            <label>언어
+              <select name="script_language">
+                <option value="ko" selected>한국어</option>
+                <option value="en">English</option>
+                <option value="ja">日本語</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="editor-section">
+            <label>대본 편집 공간
+              <textarea id="long-script-editor" name="script_body" rows="16" placeholder="여기에 대본을 작성하거나 붙여넣으세요. 필요하면 직접 편집하면서 사용할 수 있습니다."></textarea>
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="contrast" data-generate-long-script>대본 생성</button>
+            <button type="submit" class="secondary">대본 업데이트</button>
+            <button type="button" class="secondary" data-gpt-script-button>GPT창에서 '유튜브 대본생성' 열기</button>
+            <button type="button" class="secondary" data-copy-long-script>대본 복사</button>
+            <button type="button" data-save="long_script" class="outline">결과 저장</button>
+            <button type="button" data-refresh="long_script" class="secondary">새로고침</button>
+          </div>
+        </form>
+
+        <div class="chatgpt-import-section" data-chatgpt-import-section style="display: none;">
+          <div class="chatgpt-import-hint">
+            <p>ChatGPT에서 생성된 대본을 아래 입력창에 붙여넣고 <strong>결과 반영</strong> 버튼을 눌러 편집 공간으로 가져오세요.</p>
+          </div>
+          <label>ChatGPT 결과 붙여넣기
+            <textarea id="long-script-chatgpt-input" rows="10" placeholder="ChatGPT에서 생성한 대본을 여기에 붙여넣으세요."></textarea>
+          </label>
+          <div class="chatgpt-import-actions">
+            <button type="button" class="outline" data-process-chatgpt-long-script>결과 반영</button>
+            <button type="button" class="secondary" data-clear-chatgpt-long-script>초기화</button>
+          </div>
+        </div>
+
+        <div class="results-section">
+          <div id="long-script-results" class="tool-results long-script-results">
+            <div class="placeholder"><p>대본을 작성한 뒤 '대본 업데이트' 버튼을 클릭하면 여기에서 미리보기와 저장 옵션을 확인할 수 있습니다.</p></div>
+          </div>
+
+          <div class="saved-results" id="long-script-saved">
+            <h3>💾 저장된 대본</h3>
+            <div class="saved-body">
+              <div class="placeholder"><p>저장된 대본이 없습니다.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
 </div>
 {% endblock %}

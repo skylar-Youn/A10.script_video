@@ -173,6 +173,7 @@ class ToolType(str, Enum):
     shorts_script = "shorts_script"
     shorts_scenes = "shorts_scenes"
     video_import = "video_import"
+    long_script = "long_script"
 
     @classmethod
     def _missing_(cls, value: object):  # type: ignore[override]

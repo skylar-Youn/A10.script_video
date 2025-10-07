@@ -167,6 +167,12 @@
   color: #6b7280;
 }
 
+.preview-instruction {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
 .preview-meta-tag {
   display: inline-flex;
   align-items: center;
@@ -189,6 +195,90 @@
   max-height: 300px;
   overflow: auto;
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+}
+
+.preview-video-search .video-search-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.preview-video-search .preview-input {
+  flex: 1;
+  min-width: 220px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.preview-video-search .video-search-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.video-search-results {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.video-result-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.video-result-item:hover {
+  border-color: #60a5fa;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+.video-result-item.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 4px 18px rgba(37, 99, 235, 0.2);
+}
+
+.video-result-title {
+  font-weight: 600;
+  color: #1f2937;
+  font-size: 0.95rem;
+}
+
+.video-result-meta {
+  font-size: 0.82rem;
+  color: #64748b;
+  word-break: break-all;
+}
+
+.preview-video-player .preview-video {
+  width: 100%;
+  border-radius: 12px;
+  background: #0f172a;
+}
+
+.preview-video-player .preview-video-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.preview-video-player [data-video-path] {
+  flex: 1;
+  font-size: 0.85rem;
+  color: #475569;
+  word-break: break-all;
 }
 
 /* 타임라인 섹션 */
@@ -1212,6 +1302,112 @@ textarea.inline-edit {
 .form-actions {
   display: flex;
   gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.writing-tool .tool-content {
+  background: #111;
+  color: #f5f5f5;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.writing-tool .tool-content label,
+.writing-tool .tool-content h3,
+.writing-tool .tool-content p,
+.writing-tool .tool-content small {
+  color: inherit;
+}
+
+.writing-tool .tool-content input,
+.writing-tool .tool-content select,
+.writing-tool .tool-content textarea {
+  background: #1a1a1a;
+  color: #f5f5f5;
+  border: 1px solid #2f2f2f;
+}
+
+.writing-tool .tool-content select option {
+  color: #111;
+}
+
+.writing-tool .tool-content input::placeholder,
+.writing-tool .tool-content textarea::placeholder {
+  color: #b5b5b5;
+}
+
+.writing-tool .tool-content .form-actions button.outline {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #f5f5f5;
+}
+
+.writing-tool .tool-content .form-actions button.secondary {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.writing-tool .tool-content .placeholder p {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.writing-tool .editor-section textarea {
+  width: 100%;
+  min-height: 360px;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  border: 1px solid #2f2f2f;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.6;
+  resize: vertical;
+  background: #161616;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.long-script-results article {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.long-script-results .script-preview-text {
+  white-space: pre-wrap;
+  background: #161616;
+  border: 1px solid #2f2f2f;
+  border-radius: 12px;
+  padding: 1.25rem;
+  font-family: inherit;
+  line-height: 1.7;
+  max-height: 520px;
+  overflow-y: auto;
+  color: #f0f0f0;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.writing-tool .chatgpt-import-section {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f5f5f5;
+}
+
+.writing-tool .chatgpt-import-section textarea {
+  margin-top: 0.75rem;
+  background: #161616;
+  border: 1px solid #2f2f2f;
+  color: #f5f5f5;
+  min-height: 240px;
+}
+
+.writing-tool .chatgpt-import-section .chatgpt-import-hint p {
+  margin: 0 0 0.75rem 0;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.writing-tool .chatgpt-import-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
   flex-wrap: wrap;
 }
 

@@ -51,6 +51,19 @@ class RemovalConfig:
     max_frames: Optional[int] = None
 
 
+@dataclass
+class BackgroundFillConfig:
+    """Configuration for fast background fill using OpenCV inpaint."""
+
+    video_path: Path
+    output_path: Path
+    boxes: Sequence[Tuple[float, float, float, float]]
+    dilate_radius: int = 0
+    codec: str = "mp4v"
+    fps_override: Optional[float] = None
+    max_frames: Optional[int] = None
+
+
 class TrackerUnavailableError(RuntimeError):
     """Raised when the OpenCV tracker API is missing."""
 
@@ -311,6 +324,58 @@ def _transcode_with_av(video_path: Path, output_path: Path) -> None:
         raise RuntimeError(f"PyAV 변환에 실패했습니다: {exc}") from exc
     except Exception as exc:  # pragma: no cover - guarded for unexpected runtime errors
         raise RuntimeError(f"PyAV 변환 중 오류가 발생했습니다: {exc}") from exc
+
+
+def run_background_fill(config: BackgroundFillConfig) -> None:
+    """Fill masked regions using OpenCV inpaint for a fast background cover."""
+
+    if cv2 is None:  # pragma: no cover - optional dependency check
+        raise TrackerUnavailableError(
+            "OpenCV (opencv-contrib-python) 패키지가 필요합니다."
+        ) from CV2_IMPORT_ERROR
+
+    video_path = Path(config.video_path)
+    output_path = Path(config.output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        output_path.unlink()
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"비디오 파일을 열 수 없습니다: {video_path}")
+
+    try:
+        fps = float(config.fps_override or cap.get(cv2.CAP_PROP_FPS) or 30.0)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        if width <= 0 or height <= 0:
+            raise RuntimeError("영상 해상도를 확인하지 못했습니다.")
+
+        frame_shape = (height, width, 3)
+        mask = _build_mask(frame_shape, config.boxes, max(int(config.dilate_radius), 0))
+        if not np.any(mask):
+            raise RuntimeError("가릴 영역이 올바르지 않습니다. 박스 좌표를 확인하세요.")
+
+        fourcc = cv2.VideoWriter_fourcc(*config.codec)
+        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+        if not writer.isOpened():
+            raise RuntimeError("출력 비디오를 생성하지 못했습니다. codec/FPS 설정을 확인하세요.")
+
+        try:
+            frame_index = 0
+            while True:
+                if config.max_frames is not None and frame_index >= config.max_frames:
+                    break
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                inpainted = cv2.inpaint(frame, mask, 3, cv2.INPAINT_TELEA)
+                writer.write(inpainted)
+                frame_index += 1
+        finally:
+            writer.release()
+    finally:
+        cap.release()
 
 
 def prepare_video_preview(video_path: Path, session_dir: Path) -> Tuple[np.ndarray, float, int, int, int, Path, Path]:

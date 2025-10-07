@@ -25,35 +25,40 @@ const state = {
     image_story: null,
     shorts_script: null,
     shorts_scenes: null,
-    video_import: null
+    video_import: null,
+    long_script: null
   },
   savedRecords: {
     story_keywords: [],
     image_story: [],
     shorts_script: [],
     shorts_scenes: [],
-    video_import: []
+    video_import: [],
+    long_script: []
   },
   activeRecords: {
     story_keywords: null,
     image_story: null,
     shorts_script: null,
     shorts_scenes: null,
-    video_import: null
+    video_import: null,
+    long_script: null
   },
   checkedRecords: {
     story_keywords: new Set(),
     image_story: new Set(),
     shorts_script: new Set(),
     shorts_scenes: new Set(),
-    video_import: new Set()
+    video_import: new Set(),
+    long_script: new Set()
   },
   lastRequests: {
     story_keywords: null,
     image_story: null,
     shorts_script: null,
     shorts_scenes: null,
-    video_import: null
+    video_import: null,
+    long_script: null
   },
   audioResults: {
     shorts_script: null,
@@ -67,12 +72,14 @@ const TOOL_KEYS = {
   IMAGE_STORY: "image_story",
   SCRIPT: "shorts_script",
   SCENES: "shorts_scenes",
-  VIDEO_IMPORT: "video_import"
+  VIDEO_IMPORT: "video_import",
+  LONG_SCRIPT: "long_script"
 };
 
 const GENERATION_ENDPOINTS = {
   [TOOL_KEYS.SCRIPT]: { url: "/api/generate/shorts-script", type: "json" },
-  [TOOL_KEYS.SCENES]: { url: "/api/generate/shorts-scenes", type: "json" }
+  [TOOL_KEYS.SCENES]: { url: "/api/generate/shorts-scenes", type: "json" },
+  [TOOL_KEYS.LONG_SCRIPT]: { url: "/api/generate/long-script", type: "json" }
 };
 
 const AUDIO_CONTAINER_IDS = {
@@ -91,9 +98,6 @@ const TRIM_LABELS = {
   current: "현재 프레임"
 };
 
-const FRAME_SECONDS = 1 / 30;
-const MIN_SEGMENT_DURATION = 0.05;
-
 let pendingRecordSelection = null;
 
 const timelineScrollCleanups = new WeakMap();
@@ -101,6 +105,7 @@ const timelineScrollCleanups = new WeakMap();
 const STORAGE_KEY = "kis-selected-record";
 
 let activePreviewModal = null;
+let allowLongScriptFormSync = true;
 
 function persistSelection(tool, recordId, payload) {
   try {
@@ -145,7 +150,19 @@ function getToolAlias(toolKey) {
 
 function closePreviewModal() {
   if (!activePreviewModal) return;
-  const { backdrop, escHandler } = activePreviewModal;
+  const { backdrop, escHandler, modal } = activePreviewModal;
+  if (modal) {
+    const video = modal.querySelector("video");
+    if (video) {
+      try {
+        video.pause();
+      } catch (error) {
+        console.warn("Failed to pause preview video:", error);
+      }
+      video.removeAttribute("src");
+      video.load();
+    }
+  }
   if (escHandler) {
     document.removeEventListener("keydown", escHandler);
   }
@@ -197,7 +214,8 @@ function openPreviewModal(title, bodyHtml) {
     });
   }
 
-  activePreviewModal = { backdrop, escHandler };
+  activePreviewModal = { backdrop, escHandler, modal };
+  return modal;
 }
 
 async function api(path, options = {}) {
@@ -1330,6 +1348,85 @@ function renderShortsSceneResults(result) {
   displayAudioResult(TOOL_KEYS.SCENES, state.audioResults[TOOL_KEYS.SCENES]);
 }
 
+function renderLongScriptResults(result) {
+  const container = document.getElementById("long-script-results");
+  if (!container) return;
+
+  const form = document.getElementById("long-script-form");
+  const editor = document.getElementById("long-script-editor");
+  const topicInput = form ? form.querySelector("input[name='script_topic']") : null;
+  const languageSelect = form ? form.querySelector("select[name='script_language']") : null;
+
+  if (allowLongScriptFormSync) {
+    const topic = typeof result?.topic === "string" ? result.topic : "";
+    if (topicInput) {
+      topicInput.value = topic;
+    }
+    if (languageSelect) {
+      const langValue = typeof result?.language === "string" && result.language ? result.language : languageSelect.value || "ko";
+      const matchedOption = Array.from(languageSelect.options).some((option) => option.value === langValue);
+      languageSelect.value = matchedOption ? langValue : languageSelect.options[0]?.value || "ko";
+    }
+    if (editor) {
+      const nextValue =
+        typeof result?.content === "string"
+          ? result.content
+          : typeof result?.script === "string"
+            ? result.script
+            : typeof result?.body === "string"
+              ? result.body
+              : "";
+      if (editor.value !== nextValue) {
+        const isFocused = document.activeElement === editor;
+        const previousSelectionStart = editor.selectionStart ?? editor.value.length;
+        editor.value = nextValue;
+        if (isFocused) {
+          const caret = Math.min(nextValue.length, previousSelectionStart);
+          editor.selectionStart = caret;
+          editor.selectionEnd = caret;
+        }
+      }
+    }
+  }
+
+  const primaryContent =
+    typeof result?.content === "string"
+      ? result.content
+      : typeof result?.script === "string"
+        ? result.script
+        : typeof result?.body === "string"
+          ? result.body
+          : "";
+  const hasContent = primaryContent.trim().length > 0;
+  if (!hasContent) {
+    container.innerHTML = '<div class="placeholder"><p>작성된 대본이 없습니다. 편집 공간에 내용을 입력해 보세요.</p></div>';
+    return;
+  }
+
+  const topicLabel =
+    (typeof result?.topic === "string" && result.topic.trim().length ? result.topic.trim() : null) ||
+    (typeof result?.keyword === "string" && result.keyword.trim().length ? result.keyword.trim() : null) ||
+    "작성한 대본";
+  const languageLabel = result?.language || "ko";
+  const updatedLabel = result?.updated_at ? formatTimestamp(result.updated_at) : (result?.generated_at ? formatTimestamp(result.generated_at) : "");
+  const safeContent = primaryContent;
+
+  container.innerHTML = `
+    <article>
+      <header class="result-header">
+        <div class="result-header-main">
+          <h3>${escapeHtml(topicLabel)}</h3>
+          <p class="status">언어: ${escapeHtml(languageLabel)}</p>
+        </div>
+        ${updatedLabel ? `<small class="status">마지막 수정: ${escapeHtml(updatedLabel)}</small>` : ""}
+      </header>
+      <section class="script-preview">
+        <pre class="script-preview-text" style="white-space: pre-wrap;">${escapeHtml(safeContent)}</pre>
+      </section>
+    </article>
+  `;
+}
+
 function getLanguageDisplayName(code) {
   const normalized = (code || "").toLowerCase();
   if (normalized.startsWith("ko")) return "한국어";
@@ -1563,7 +1660,267 @@ function clearTrimQueueForTool(toolKey) {
   updateTrimBadge(toolKey);
 }
 
-function buildResultPreview(toolKey) {
+function getVideoCandidates(downloads = [], query = "") {
+  const normalized = (query || "").trim().toLowerCase();
+  const results = [];
+  downloads.forEach((file) => {
+    if (!file || !file.has_video) return;
+    const videoFiles = Array.isArray(file.video_files) ? file.video_files : [];
+    if (!videoFiles.length) return;
+    const title = (file.title || file.id || "").trim();
+    const identifier = (file.id || "").trim();
+    const titleLower = title.toLowerCase();
+    const idLower = identifier.toLowerCase();
+    let baseScore = 0;
+    if (!normalized) {
+      baseScore = 1;
+    } else {
+      if (titleLower && titleLower.includes(normalized)) baseScore += 4;
+      if (idLower && idLower.includes(normalized)) baseScore += 3;
+    }
+    videoFiles.forEach((fullPath, index) => {
+      if (!fullPath) return;
+      const filename = fullPath.split(/[\\/]/).pop() || fullPath;
+      const filenameLower = filename.toLowerCase();
+      let score = baseScore;
+      if (normalized && filenameLower.includes(normalized)) {
+        score += 2;
+      }
+      results.push({
+        id: identifier || fullPath,
+        title: title || identifier || filename,
+        filename,
+        path: fullPath,
+        modified: file.modified || 0,
+        score: score + 1 / (index + 1)
+      });
+    });
+  });
+
+  results.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return (b.modified || 0) - (a.modified || 0);
+  });
+
+  return results.slice(0, 10);
+}
+
+function buildVideoResultsMarkup(candidates = []) {
+  if (!candidates.length) {
+    return "";
+  }
+  return candidates
+    .map((candidate) => {
+      const title = escapeHtml(candidate.title || candidate.filename || candidate.path);
+      const filename = escapeHtml(candidate.filename || "");
+      const path = escapeHtml(candidate.path || "");
+      return `
+        <button type="button" class="video-result-item" data-video-path="${path}" data-video-title="${title}" data-video-filename="${filename}">
+          <span class="video-result-title">${title}</span>
+          <span class="video-result-meta">${filename}</span>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function buildVideoSearchSection(result, downloads) {
+  const initialQuery = (result?.keyword || "").trim();
+  const candidates = Array.isArray(downloads) && downloads.length ? getVideoCandidates(downloads, initialQuery) : [];
+  const resultsMarkup = buildVideoResultsMarkup(candidates);
+  const queryValue = escapeHtml(initialQuery);
+  const noDownloadsMessage = '<p class="preview-meta">다운로드 폴더에서 영상을 찾을 수 없습니다. 먼저 영상 가져오기 기능을 사용해 주세요.</p>';
+  const noResultsMessage = '<p class="preview-meta">검색 결과가 없습니다. 다른 키워드로 다시 시도해 보세요.</p>';
+
+  return `
+    <section class="preview-section preview-video-search" data-video-search>
+      <h4>영상 찾기</h4>
+      <div class="video-search-controls">
+        <input type="text" class="preview-input" data-video-query value="${queryValue}" placeholder="영상 제목 또는 키워드를 입력하세요.">
+        <div class="video-search-buttons">
+          <button type="button" class="outline" data-video-search-btn>검색</button>
+          <button type="button" class="outline" data-video-refresh-btn>목록 새로고침</button>
+        </div>
+      </div>
+      <div class="video-search-results"${candidates.length ? "" : ' data-empty="true"'} data-video-results>
+        ${
+          Array.isArray(downloads) && downloads.length
+            ? resultsMarkup || noResultsMessage
+            : noDownloadsMessage
+        }
+      </div>
+      <p class="preview-meta preview-instruction">영상 항목을 선택하면 아래에서 미리보기를 확인할 수 있습니다.</p>
+    </section>
+    <section class="preview-section preview-video-player" data-video-player hidden>
+      <h4>영상 미리보기</h4>
+      <video controls preload="metadata" class="preview-video" data-video-element></video>
+      <div class="preview-meta preview-video-meta">
+        <span data-video-path></span>
+        <button type="button" class="secondary" data-video-open hidden>새 창으로 열기</button>
+      </div>
+    </section>
+  `;
+}
+
+function setupPreviewModalInteractions(modal) {
+  if (!modal) return;
+  const queryInput = modal.querySelector("[data-video-query]");
+  const resultsContainer = modal.querySelector("[data-video-results]");
+  const searchButton = modal.querySelector("[data-video-search-btn]");
+  const refreshButton = modal.querySelector("[data-video-refresh-btn]");
+  const playerSection = modal.querySelector("[data-video-player]");
+  const videoElement = modal.querySelector("[data-video-element]");
+  const pathLabel = modal.querySelector("[data-video-path]");
+  const openButton = modal.querySelector("[data-video-open]");
+  const detailsContainer = modal.querySelector("[data-preview-details]");
+
+  if (!resultsContainer || !queryInput) return;
+
+  const toggleDetails = (visible) => {
+    if (!detailsContainer) return;
+    detailsContainer.hidden = !visible;
+  };
+
+  const resetPlayer = () => {
+    if (videoElement) {
+      try {
+        videoElement.pause();
+      } catch (error) {
+        console.warn("Failed to pause preview video:", error);
+      }
+      videoElement.removeAttribute("src");
+      videoElement.load();
+    }
+    if (pathLabel) {
+      pathLabel.textContent = "";
+    }
+    if (openButton) {
+      openButton.hidden = true;
+      openButton.onclick = null;
+    }
+    if (playerSection) {
+      playerSection.hidden = true;
+    }
+  };
+
+  toggleDetails(false);
+
+  const selectCandidate = (button) => {
+    if (!button) return;
+    resultsContainer.querySelectorAll(".video-result-item").forEach((item) => {
+      item.classList.toggle("selected", item === button);
+    });
+    const path = button.getAttribute("data-video-path");
+    if (!path) return;
+    const title = button.getAttribute("data-video-title") || "";
+    const filename = button.getAttribute("data-video-filename") || "";
+    const videoUrl = `/api/video?path=${encodeURIComponent(path)}`;
+
+    if (videoElement) {
+      videoElement.src = videoUrl;
+      videoElement.load();
+    }
+    if (pathLabel) {
+      const pieces = [];
+      if (title) pieces.push(title);
+      if (filename && filename !== title) pieces.push(filename);
+      pathLabel.textContent = pieces.length ? pieces.join(" · ") : path;
+    }
+    if (openButton) {
+      openButton.hidden = false;
+      openButton.onclick = () => {
+        window.open(videoUrl, "_blank", "noopener");
+      };
+    }
+    if (playerSection) {
+      playerSection.hidden = false;
+    }
+    toggleDetails(true);
+    resultsContainer.dataset.selectedPath = path;
+  };
+
+  const updateResults = (query, options = {}) => {
+    const keepSelection = Boolean(options.keepSelection);
+    const previousSelection = keepSelection ? resultsContainer.dataset.selectedPath || "" : "";
+
+    if (!keepSelection) {
+      delete resultsContainer.dataset.selectedPath;
+    }
+
+    resetPlayer();
+    toggleDetails(false);
+
+    const candidates = getVideoCandidates(downloadData, query);
+    const markup = buildVideoResultsMarkup(candidates);
+
+    if (markup) {
+      resultsContainer.innerHTML = markup;
+      resultsContainer.removeAttribute("data-empty");
+
+      if (keepSelection && previousSelection) {
+        const match = Array.from(resultsContainer.querySelectorAll(".video-result-item")).find(
+          (btn) => btn.getAttribute("data-video-path") === previousSelection
+        );
+        if (match) {
+          selectCandidate(match);
+          return;
+        }
+      }
+    } else {
+      resultsContainer.innerHTML = downloadData.length
+        ? '<p class="preview-meta">검색 결과가 없습니다. 다른 키워드를 입력해 보세요.</p>'
+        : '<p class="preview-meta">다운로드된 영상이 없습니다.</p>';
+      resultsContainer.setAttribute("data-empty", "true");
+      delete resultsContainer.dataset.selectedPath;
+    }
+  };
+
+  resultsContainer.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-video-path]");
+    if (!button) return;
+    event.preventDefault();
+    selectCandidate(button);
+  });
+
+  if (searchButton) {
+    searchButton.addEventListener("click", () => {
+      const value = queryInput.value.trim();
+      updateResults(value, { keepSelection: false });
+    });
+  }
+
+  queryInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      updateResults(queryInput.value.trim(), { keepSelection: false });
+    }
+  });
+
+  if (refreshButton) {
+    refreshButton.addEventListener("click", async () => {
+      if (refreshButton.disabled) return;
+      const originalLabel = refreshButton.textContent;
+      try {
+        refreshButton.disabled = true;
+        refreshButton.textContent = "새로고침 중...";
+        await ensureDownloadData(true);
+        updateResults(queryInput.value.trim(), { keepSelection: true });
+        showNotification("영상 목록을 새로 불러왔습니다.", "success");
+      } catch (error) {
+        console.error("Failed to refresh download list:", error);
+        showNotification(error.message || "영상 목록 새로고침에 실패했습니다.", "error");
+      } finally {
+        refreshButton.disabled = false;
+        refreshButton.textContent = originalLabel;
+      }
+    });
+  }
+
+  // 초기 검색 결과 표시 (영상 선택 전까지 미리보기는 숨김)
+  updateResults(queryInput.value.trim(), { keepSelection: true });
+}
+
+function buildResultPreview(toolKey, downloads = []) {
   const result = state.latestResults[toolKey];
   if (!result) return null;
 
@@ -1574,9 +1931,9 @@ function buildResultPreview(toolKey) {
   const scenes = Array.isArray(result.scenes) ? result.scenes : [];
   const trims = getTrimEntries(toolKey);
 
-  const sections = [];
+  const detailSections = [];
 
-  sections.push(`
+  detailSections.push(`
     <section class="preview-section">
       <ul class="preview-meta-list">
         <li><strong>키워드:</strong> ${keyword || "—"}</li>
@@ -1610,7 +1967,7 @@ function buildResultPreview(toolKey) {
       })
       .join("");
     const remainder = subtitles.length > limited.length ? `<p class="preview-meta">총 ${subtitles.length}개 중 ${limited.length}개만 표시됩니다.</p>` : "";
-    sections.push(`
+    detailSections.push(`
       <section class="preview-section">
         <h4>자막 미리보기</h4>
         <ul class="preview-list">${items}</ul>
@@ -1641,7 +1998,7 @@ function buildResultPreview(toolKey) {
       })
       .join("");
     const remainder = images.length > limited.length ? `<p class="preview-meta">총 ${images.length}개 중 ${limited.length}개만 표시됩니다.</p>` : "";
-    sections.push(`
+    detailSections.push(`
       <section class="preview-section">
         <h4>이미지 장면 프롬프트</h4>
         <ul class="preview-list">${items}</ul>
@@ -1675,7 +2032,7 @@ function buildResultPreview(toolKey) {
       })
       .join("");
     const remainder = scenes.length > limited.length ? `<p class="preview-meta">총 ${scenes.length}개 중 ${limited.length}개만 표시됩니다.</p>` : "";
-    sections.push(`
+    detailSections.push(`
       <section class="preview-section">
         <h4>영상 장면 프롬프트</h4>
         <ul class="preview-list">${items}</ul>
@@ -1685,7 +2042,7 @@ function buildResultPreview(toolKey) {
   }
 
   if (typeof result.script === "string" && result.script.trim()) {
-    sections.push(`
+    detailSections.push(`
       <section class="preview-section">
         <h4>원문 스크립트</h4>
         <pre class="preview-code">${escapeHtml(result.script.trim())}</pre>
@@ -1718,14 +2075,23 @@ function buildResultPreview(toolKey) {
         .join("")}</ul>`
     : '<p class="preview-meta">등록된 프레임 자르기 명령이 없습니다.</p>';
 
-  sections.push(`
+  detailSections.push(`
     <section class="preview-section">
       <h4>프레임 자르기 명령</h4>
       ${trimsMarkup}
     </section>
   `);
 
-  const body = sections.join("");
+  const videoSection = buildVideoSearchSection(result, downloads);
+  const detailsMarkup = detailSections.length
+    ? detailSections.join("")
+    : '<section class="preview-section"><p class="preview-meta">표시할 미리보기 데이터가 없습니다.</p></section>';
+  const body = `
+    ${videoSection}
+    <div class="preview-details" data-preview-details hidden>
+      ${detailsMarkup}
+    </div>
+  `;
   const title =
     toolKey === TOOL_KEYS.SCRIPT ? "쇼츠 SRT 대본 미리보기" : toolKey === TOOL_KEYS.SCENES ? "쇼츠 씬 대본 미리보기" : "결과 미리보기";
 
@@ -1735,18 +2101,25 @@ function buildResultPreview(toolKey) {
   };
 }
 
-function showResultPreview(toolAliasOrKey) {
+async function showResultPreview(toolAliasOrKey) {
   const toolKey = resolveToolKey(toolAliasOrKey);
   if (!toolKey) {
     showNotification("미리보기를 지원하지 않는 도구입니다.", "error");
     return;
   }
-  const preview = buildResultPreview(toolKey);
+  const result = state.latestResults[toolKey];
+  if (!result) {
+    showNotification("표시할 결과가 없습니다. 먼저 결과를 생성해 주세요.", "error");
+    return;
+  }
+  await ensureDownloadData(false);
+  const preview = buildResultPreview(toolKey, downloadData);
   if (!preview) {
     showNotification("표시할 결과가 없습니다. 먼저 결과를 생성해 주세요.", "error");
     return;
   }
-  openPreviewModal(preview.title, preview.body);
+  const modal = openPreviewModal(preview.title, preview.body);
+  setupPreviewModalInteractions(modal);
 }
 
 function handleVideoTrim(toolAliasOrKey, mode) {
@@ -1888,6 +2261,36 @@ const TOOL_CONFIG = {
       if (!payload) return;
       formData.set("keyword", payload.keyword || "");
       formData.set("language", payload.language || "ko");
+    }
+  },
+  [TOOL_KEYS.LONG_SCRIPT]: {
+    savedContainer: "long-script-saved",
+    resultsContainer: "long-script-results",
+    renderer: renderLongScriptResults,
+    defaultTitle: (payload) => {
+      const topic = typeof payload?.topic === "string" ? payload.topic.trim() : "";
+      const keyword = typeof payload?.keyword === "string" ? payload.keyword.trim() : "";
+      if (topic) {
+        return `${topic} 대본`;
+      }
+      if (keyword) {
+        return `${keyword} 대본`;
+      }
+      const contentSource =
+        typeof payload?.content === "string"
+          ? payload.content
+          : typeof payload?.script === "string"
+            ? payload.script
+            : typeof payload?.body === "string"
+              ? payload.body
+              : "";
+      const content = contentSource.trim();
+      if (content) {
+        const condensed = content.replace(/\s+/g, " ");
+        const snippet = condensed.slice(0, 20);
+        return condensed.length > 20 ? `${snippet}...` : snippet || "작성한 대본";
+      }
+      return "작성한 대본";
     }
   }
 };
@@ -2064,6 +2467,12 @@ function selectSavedRecord(tool, recordId) {
     if (keyword) {
       state.lastRequests[tool] = { keyword, language };
     }
+  }
+  if (tool === TOOL_KEYS.LONG_SCRIPT) {
+    const topic = record.payload?.topic || "";
+    const language = record.payload?.language || "ko";
+    const keyword = record.payload?.keyword || topic;
+    state.lastRequests[tool] = { topic, keyword, language };
   }
   renderSavedRecords(tool);
   const target = document.getElementById(config.resultsContainer);
@@ -5592,11 +6001,272 @@ async function loadProject(projectId, { scrollIntoView = true } = {}) {
   }
 }
 
+function initLongScriptTool() {
+  const form = document.getElementById("long-script-form");
+  const editor = document.getElementById("long-script-editor");
+  const topicInput = form ? form.querySelector("input[name='script_topic']") : null;
+  const languageSelect = form ? form.querySelector("select[name='script_language']") : null;
+  const modeSelect = form ? form.querySelector("select[name='mode']") : null;
+  const generateButton = form ? form.querySelector("[data-generate-long-script]") : null;
+  const gptButton = form ? form.querySelector("[data-gpt-script-button]") : null;
+  const copyButton = form ? form.querySelector("[data-copy-long-script]") : null;
+  const chatgptSection = document.querySelector("[data-chatgpt-import-section]");
+  const chatgptTextarea = chatgptSection ? chatgptSection.querySelector("#long-script-chatgpt-input") : null;
+  const chatgptProcessButton = chatgptSection ? chatgptSection.querySelector("[data-process-chatgpt-long-script]") : null;
+  const chatgptClearButton = chatgptSection ? chatgptSection.querySelector("[data-clear-chatgpt-long-script]") : null;
+
+  renderLongScriptResults(state.latestResults[TOOL_KEYS.LONG_SCRIPT]);
+
+  if (!form || !editor) {
+    return;
+  }
+
+  const copyButtonInitialLabel = copyButton ? (copyButton.textContent || "대본 복사") : "대본 복사";
+  const getMode = () => (modeSelect ? modeSelect.value : "api");
+
+  const setButtonBusy = (button, busy) => {
+    if (!button) return;
+    button.disabled = busy;
+    if (busy) {
+      button.setAttribute("aria-busy", "true");
+    } else {
+      button.removeAttribute("aria-busy");
+    }
+  };
+
+  const showChatgptArea = (visible, { focus = true } = {}) => {
+    if (!chatgptSection) return;
+    chatgptSection.style.display = visible ? "block" : "none";
+    if (visible && chatgptTextarea && focus) {
+      chatgptTextarea.focus();
+    }
+  };
+
+  const updateModeUI = () => {
+    const isChatgpt = getMode() === "chatgpt";
+    showChatgptArea(isChatgpt, { focus: false });
+    if (gptButton) {
+      gptButton.style.display = isChatgpt ? "" : "none";
+    }
+    if (generateButton) {
+      generateButton.textContent = isChatgpt ? "ChatGPT 열기" : "대본 생성";
+    }
+  };
+
+  const updateStateFromForm = ({ notify = false } = {}) => {
+    const rawContent = editor.value || "";
+    const trimmedContent = rawContent.trim();
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+    const languageValue = languageSelect ? languageSelect.value : "ko";
+
+    state.lastRequests[TOOL_KEYS.LONG_SCRIPT] = {
+      topic: topicValue,
+      keyword: topicValue,
+      language: languageValue
+    };
+
+    if (!trimmedContent) {
+      state.latestResults[TOOL_KEYS.LONG_SCRIPT] = null;
+      state.activeRecords[TOOL_KEYS.LONG_SCRIPT] = null;
+      allowLongScriptFormSync = false;
+      renderLongScriptResults(null);
+      allowLongScriptFormSync = true;
+      if (notify) {
+        showNotification("대본 내용을 입력하세요.", "error");
+      }
+      return false;
+    }
+
+    const payload = {
+      topic: topicValue,
+      keyword: topicValue,
+      language: languageValue,
+      content: rawContent,
+      updated_at: new Date().toISOString()
+    };
+
+    state.latestResults[TOOL_KEYS.LONG_SCRIPT] = payload;
+    state.activeRecords[TOOL_KEYS.LONG_SCRIPT] = null;
+
+    allowLongScriptFormSync = false;
+    renderLongScriptResults(payload);
+    allowLongScriptFormSync = true;
+
+    if (notify) {
+      showNotification("대본이 업데이트되었습니다.", "success");
+    }
+    return true;
+  };
+
+  const handleChatgptLaunch = () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+    const query = topicValue ? `유튜브 대본생성 ${topicValue}` : "유튜브 대본생성";
+    const gptUrl = `https://chatgpt.com/?q=${encodeURIComponent(query)}`;
+    window.open(gptUrl, "_blank", "width=1200,height=800");
+    showChatgptArea(true);
+    showNotification("ChatGPT 창에서 대본을 생성한 뒤 결과를 붙여넣어 주세요.", "info");
+  };
+
+  const handleApiGeneration = async () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+    if (!topicValue) {
+      alert("콘텐츠 주제를 입력하세요.");
+      if (topicInput) topicInput.focus();
+      return;
+    }
+    const languageValue = languageSelect ? languageSelect.value : "ko";
+    const endpoint = GENERATION_ENDPOINTS[TOOL_KEYS.LONG_SCRIPT];
+    if (!endpoint) {
+      showNotification("이 기능은 현재 사용할 수 없습니다.", "error");
+      return;
+    }
+    setButtonBusy(generateButton, true);
+    try {
+      const requestBody = {
+        topic: topicValue,
+        keyword: topicValue,
+        language: languageValue
+      };
+      const data = await api(endpoint.url, {
+        method: "POST",
+        body: JSON.stringify(requestBody)
+      });
+      const enriched = {
+        topic: data?.topic || topicValue,
+        keyword: data?.keyword || topicValue,
+        language: data?.language || languageValue,
+        content: typeof data?.content === "string" ? data.content : "",
+        subtitles: Array.isArray(data?.subtitles) ? data.subtitles : [],
+        images: Array.isArray(data?.images) ? data.images : [],
+        updated_at: new Date().toISOString(),
+        generated_at: new Date().toISOString()
+      };
+      state.latestResults[TOOL_KEYS.LONG_SCRIPT] = enriched;
+      state.activeRecords[TOOL_KEYS.LONG_SCRIPT] = null;
+      state.lastRequests[TOOL_KEYS.LONG_SCRIPT] = {
+        topic: enriched.topic,
+        keyword: enriched.keyword,
+        language: enriched.language
+      };
+      allowLongScriptFormSync = false;
+      renderLongScriptResults(enriched);
+      allowLongScriptFormSync = true;
+      renderSavedRecords(TOOL_KEYS.LONG_SCRIPT);
+      showNotification("대본을 생성했습니다.", "success");
+      if (chatgptTextarea && getMode() !== "chatgpt") {
+        chatgptTextarea.value = "";
+        showChatgptArea(false, { focus: false });
+      }
+    } catch (error) {
+      console.error("Failed to generate long script:", error);
+      showNotification(error.message || "대본 생성에 실패했습니다.", "error");
+    } finally {
+      setButtonBusy(generateButton, false);
+    }
+  };
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    updateStateFromForm({ notify: true });
+  });
+
+  editor.addEventListener("input", () => {
+    updateStateFromForm();
+  });
+
+  if (topicInput) {
+    topicInput.addEventListener("input", () => {
+      updateStateFromForm();
+    });
+  }
+
+  if (languageSelect) {
+    languageSelect.addEventListener("change", () => {
+      updateStateFromForm();
+    });
+  }
+
+  if (modeSelect) {
+    modeSelect.addEventListener("change", () => {
+      updateModeUI();
+    });
+  }
+
+  if (generateButton) {
+    generateButton.addEventListener("click", async () => {
+      if (getMode() === "chatgpt") {
+        handleChatgptLaunch();
+      } else {
+        await handleApiGeneration();
+      }
+    });
+  }
+
+  if (gptButton) {
+    gptButton.addEventListener("click", () => {
+      handleChatgptLaunch();
+    });
+  }
+
+  if (copyButton) {
+    copyButton.addEventListener("click", async () => {
+      const content = editor.value || "";
+      if (!content.trim()) {
+        alert("복사할 대본이 없습니다.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(content);
+        copyButton.textContent = "복사 완료!";
+        setTimeout(() => {
+          copyButton.textContent = copyButtonInitialLabel;
+        }, 2000);
+      } catch (error) {
+        console.error("Failed to copy long script:", error);
+        alert("클립보드에 복사하지 못했습니다. 직접 복사해 주세요.");
+      }
+    });
+  }
+
+  if (state.latestResults[TOOL_KEYS.LONG_SCRIPT]) {
+    const existing = state.latestResults[TOOL_KEYS.LONG_SCRIPT];
+    const topicValue = typeof existing?.topic === "string" ? existing.topic : "";
+    const languageValue = typeof existing?.language === "string" ? existing.language : (languageSelect ? languageSelect.value : "ko");
+    state.lastRequests[TOOL_KEYS.LONG_SCRIPT] = { topic: topicValue, keyword: topicValue, language: languageValue };
+  } else {
+    updateStateFromForm();
+  }
+
+  if (chatgptProcessButton && chatgptTextarea) {
+    chatgptProcessButton.addEventListener("click", () => {
+      const chatgptResult = chatgptTextarea.value.trim();
+      if (!chatgptResult) {
+        alert("ChatGPT 결과를 입력하세요.");
+        chatgptTextarea.focus();
+        return;
+      }
+      editor.value = chatgptResult;
+      updateStateFromForm({ notify: true });
+      showNotification("ChatGPT 결과를 편집 공간에 반영했습니다.", "success");
+    });
+  }
+
+  if (chatgptClearButton && chatgptTextarea) {
+    chatgptClearButton.addEventListener("click", () => {
+      chatgptTextarea.value = "";
+      chatgptTextarea.focus();
+    });
+  }
+
+  updateModeUI();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   initStoryKeywordPage();
   initImageStoryPage();
   initShortsScriptPage();
   initShortsScenesPage();
+  initLongScriptTool();
 
   // 자동 저장 시스템 초기화
   setupAutoSave();
@@ -5645,10 +6315,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.querySelectorAll("[data-preview]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const tool = button.getAttribute("data-preview");
       if (!tool) return;
-      showResultPreview(tool);
+      await showResultPreview(tool);
     });
   });
 
@@ -7341,17 +8011,54 @@ function deleteTimelineRow(rowIndex) {
 // ---------------------------------------------------------------------------
 
 let downloadData = [];
+let downloadRequestInFlight = null;
+
+async function requestDownloadList() {
+  if (downloadRequestInFlight) {
+    try {
+      return await downloadRequestInFlight;
+    } catch (error) {
+      // previous failure should not permanently reject; fall through to retry
+    }
+  }
+  downloadRequestInFlight = fetch("/api/downloads")
+    .then(async (response) => {
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "다운로드 목록을 불러오지 못했습니다.");
+      }
+      return response.json();
+    })
+    .finally(() => {
+      downloadRequestInFlight = null;
+    });
+  const payload = await downloadRequestInFlight;
+  return Array.isArray(payload?.files) ? payload.files : [];
+}
+
+async function ensureDownloadData(force = false) {
+  if (!force && downloadData.length) {
+    return downloadData;
+  }
+  try {
+    const files = await requestDownloadList();
+    downloadData = files;
+    return downloadData;
+  } catch (error) {
+    console.error("Failed to load download metadata:", error);
+    showNotification(error.message || "다운로드 파일 정보를 불러오지 못했습니다.", "error");
+    return [];
+  }
+}
 
 async function fetchDownloadList() {
   try {
-    const response = await fetch('/api/downloads');
-    const data = await response.json();
-    downloadData = data.files || [];
-
+    const files = await requestDownloadList();
+    downloadData = files;
     renderDownloadList();
     updateSelectedFileDropdown();
 
-    showNotification(`${data.count}개의 파일을 찾았습니다.`, 'success');
+    showNotification(`${downloadData.length}개의 파일을 찾았습니다.`, 'success');
   } catch (error) {
     console.error('Error fetching downloads:', error);
     showNotification('다운로드 목록을 불러오는데 실패했습니다.', 'error');
