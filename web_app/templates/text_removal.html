@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>영상에서 글자 지우기</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .canvas-wrapper {
+            margin-top: 16px;
+            border: 1px solid #444;
+            border-radius: 8px;
+            background: #111;
+            padding: 12px;
+            display: none;
+        }
+        .canvas-wrapper.active {
+            display: block;
+        }
+        #roi-canvas {
+            max-width: 100%;
+            border-radius: 4px;
+            cursor: crosshair;
+        }
+        .canvas-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 8px;
+        }
+        .boxes-list {
+            width: 100%;
+            min-height: 80px;
+            font-family: monospace;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .status-text {
+            margin-top: 8px;
+            font-size: 0.95rem;
+            color: #9ad7ff;
+        }
+        .status-text.error {
+            color: #ff8a8a;
+        }
+        .status-text.success {
+            color: #8af5a6;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }
+        .form-grid label {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-weight: 500;
+        }
+        .result-link {
+            margin-top: 12px;
+        }
+        .result-link a {
+            color: #8af5a6;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <h1>영상에서 글자 지우기</h1>
+        <nav class="nav-links">
+            <a href="/ytdl" class="nav-link {% if nav_active == 'ytdl' %}active{% endif %}">⬇️ 다운로드 도구</a>
+            <a href="/text-removal" class="nav-link {% if nav_active == 'text_removal' %}active{% endif %}">🧽 영상에서 글자 지우기</a>
+            <a href="/analysis" class="nav-link">📊 분석 도구</a>
+            <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
+            <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
+            <a href="/copyright" class="nav-link {% if nav_active == 'copyright' %}active{% endif %}">🛡️ 저작권 검사</a>
+        </nav>
+        <p class="page-description">영상 첫 프레임에서 지울 영역을 직접 지정하고, Stable Diffusion 인페인팅으로 워터마크·텍스트를 한 번에 제거합니다.</p>
+    </header>
+
+    <section class="panel">
+        <h2>🧠 사용 흐름</h2>
+        <ol>
+            <li><strong>영상 업로드</strong>: 첫 프레임을 추출해 브라우저에서 바로 영역을 지정합니다.</li>
+            <li><strong>영역 지정</strong>: 캔버스에서 드래그하여 지울 텍스트/워터마크 영역을 여러 개 그립니다.</li>
+            <li><strong>인페인팅 실행</strong>: Stable Diffusion 모델(runwayml/stable-diffusion-inpainting)로 전체 프레임을 순회하며 자동 복원합니다.</li>
+        </ol>
+        <p class="hint-text">처리에는 GPU가 권장됩니다. CPU 모드도 가능하지만 시간이 오래 걸릴 수 있습니다.</p>
+    </section>
+
+    <section class="panel">
+        <h3>1️⃣ 영상 업로드 & 미리보기</h3>
+        <form id="preview-form" class="text-removal-form" enctype="multipart/form-data">
+            <div class="form-grid">
+                <label>영상 파일 선택
+                    <input type="file" id="video-file" name="video" accept="video/*" required>
+                </label>
+            </div>
+            <button type="submit">첫 프레임 불러오기</button>
+            <p id="preview-status" class="status-text"></p>
+        </form>
+
+        <div id="canvas-wrapper" class="canvas-wrapper">
+            <canvas id="roi-canvas" width="640" height="360"></canvas>
+            <div class="canvas-controls">
+                <div>
+                    <strong>지정된 영역:</strong> <span id="box-count">0</span>개
+                </div>
+                <div>
+                    <button type="button" id="undo-box" class="btn-secondary" disabled>마지막 영역 취소</button>
+                    <button type="button" id="clear-boxes" class="btn-secondary" disabled>모두 초기화</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel hidden" id="process-panel">
+        <h3>2️⃣ 인페인팅 설정</h3>
+        <form id="process-form">
+            <input type="hidden" id="session-id" name="session_id">
+            <div class="form-grid">
+                <label>Prompt
+                    <input type="text" id="prompt" value="remove text and restore background">
+                </label>
+                <label>Negative Prompt
+                    <input type="text" id="negative-prompt" value="text, watermark, caption">
+                </label>
+                <label>모델 ID
+                    <input type="text" id="model-id" value="runwayml/stable-diffusion-inpainting">
+                </label>
+                <label>Guidance Scale
+                    <input type="number" step="0.1" id="guidance-scale" value="7.5">
+                </label>
+                <label>Strength
+                    <input type="number" step="0.05" min="0" max="1" id="strength" value="0.75">
+                </label>
+                <label>Diffusion Steps
+                    <input type="number" min="1" max="100" id="inference-steps" value="30">
+                </label>
+                <label>Mask Dilate (px)
+                    <input type="number" min="0" max="32" id="dilate" value="4">
+                </label>
+                <label>Device
+                    <select id="device">
+                        <option value="cuda">cuda (GPU)</option>
+                        <option value="cpu">cpu</option>
+                    </select>
+                </label>
+                <label>dtype
+                    <select id="dtype">
+                        <option value="float16">float16</option>
+                        <option value="float32">float32</option>
+                    </select>
+                </label>
+                <label>Seed (선택)
+                    <input type="number" id="seed" placeholder="랜덤">
+                </label>
+                <label>FPS Override (선택)
+                    <input type="number" step="0.01" id="fps-override" placeholder="원본 유지">
+                </label>
+                <label>Max Frames (선택)
+                    <input type="number" id="max-frames" placeholder="전체 처리">
+                </label>
+            </div>
+
+            <label>영역 목록 (JSON)
+                <textarea id="boxes-json" class="boxes-list" readonly></textarea>
+            </label>
+
+            <button type="submit" id="process-submit" disabled>영상 인페인팅 실행</button>
+            <p id="process-status" class="status-text"></p>
+            <div id="result-link" class="result-link"></div>
+        </form>
+    </section>
+</div>
+
+<script>
+(() => {
+    const previewForm = document.getElementById('preview-form');
+    const previewStatus = document.getElementById('preview-status');
+    const canvasWrapper = document.getElementById('canvas-wrapper');
+    const canvas = document.getElementById('roi-canvas');
+    const ctx = canvas.getContext('2d');
+    const undoBtn = document.getElementById('undo-box');
+    const clearBtn = document.getElementById('clear-boxes');
+    const boxCount = document.getElementById('box-count');
+    const processPanel = document.getElementById('process-panel');
+    const sessionInput = document.getElementById('session-id');
+    const boxesTextarea = document.getElementById('boxes-json');
+    const processForm = document.getElementById('process-form');
+    const processStatus = document.getElementById('process-status');
+    const processSubmit = document.getElementById('process-submit');
+    const resultLink = document.getElementById('result-link');
+
+    const promptInput = document.getElementById('prompt');
+    const negativePromptInput = document.getElementById('negative-prompt');
+    const modelInput = document.getElementById('model-id');
+    const guidanceInput = document.getElementById('guidance-scale');
+    const strengthInput = document.getElementById('strength');
+    const stepsInput = document.getElementById('inference-steps');
+    const dilateInput = document.getElementById('dilate');
+    const deviceSelect = document.getElementById('device');
+    const dtypeSelect = document.getElementById('dtype');
+    const seedInput = document.getElementById('seed');
+    const fpsInput = document.getElementById('fps-override');
+    const maxFramesInput = document.getElementById('max-frames');
+
+    let sessionId = null;
+    let previewImage = new Image();
+    let nativeWidth = 0;
+    let nativeHeight = 0;
+    let scale = 1;
+    let boxes = [];
+    let isDrawing = false;
+    let startPoint = { x: 0, y: 0 };
+    let tempPoint = { x: 0, y: 0 };
+
+    function setStatus(el, message, type = '') {
+        el.textContent = message || '';
+        el.classList.remove('error', 'success');
+        if (type) {
+            el.classList.add(type);
+        }
+    }
+
+    function updateBoxesUI() {
+        boxesTextarea.value = JSON.stringify(boxes, null, 2);
+        boxCount.textContent = boxes.length.toString();
+        undoBtn.disabled = boxes.length === 0;
+        clearBtn.disabled = boxes.length === 0;
+        processSubmit.disabled = !sessionId || boxes.length === 0;
+        renderCanvas();
+    }
+
+    function renderCanvas(tempRect = null) {
+        if (!previewImage.src) {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(previewImage, 0, 0, canvas.width, canvas.height);
+
+        ctx.lineWidth = 2;
+        boxes.forEach((box) => {
+            ctx.strokeStyle = 'rgba(0, 255, 180, 0.9)';
+            ctx.fillStyle = 'rgba(0, 255, 180, 0.15)';
+            ctx.beginPath();
+            ctx.rect(box.x * scale, box.y * scale, box.width * scale, box.height * scale);
+            ctx.fill();
+            ctx.stroke();
+        });
+
+        if (tempRect) {
+            ctx.strokeStyle = 'rgba(255, 200, 0, 0.9)';
+            ctx.fillStyle = 'rgba(255, 200, 0, 0.2)';
+            ctx.beginPath();
+            ctx.rect(tempRect.x * scale, tempRect.y * scale, tempRect.width * scale, tempRect.height * scale);
+            ctx.fill();
+            ctx.stroke();
+        }
+    }
+
+    function toVideoCoords(evt) {
+        const rect = canvas.getBoundingClientRect();
+        const x = (evt.clientX - rect.left) / scale;
+        const y = (evt.clientY - rect.top) / scale;
+        return {
+            x: Math.min(Math.max(x, 0), nativeWidth),
+            y: Math.min(Math.max(y, 0), nativeHeight),
+        };
+    }
+
+    canvas.addEventListener('mousedown', (evt) => {
+        if (!sessionId || !previewImage.src) return;
+        isDrawing = true;
+        startPoint = toVideoCoords(evt);
+        tempPoint = { ...startPoint };
+    });
+
+    canvas.addEventListener('mousemove', (evt) => {
+        if (!isDrawing) return;
+        tempPoint = toVideoCoords(evt);
+        const rect = normalizeRect(startPoint, tempPoint);
+        renderCanvas(rect);
+    });
+
+    function normalizeRect(a, b) {
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        const width = Math.abs(b.x - a.x);
+        const height = Math.abs(b.y - a.y);
+        return { x, y, width, height };
+    }
+
+    function finalizeRect() {
+        if (!isDrawing) return;
+        isDrawing = false;
+        const rect = normalizeRect(startPoint, tempPoint);
+        if (rect.width < 5 || rect.height < 5) {
+            renderCanvas();
+            return;
+        }
+        boxes.push(rect);
+        updateBoxesUI();
+    }
+
+    canvas.addEventListener('mouseup', finalizeRect);
+    canvas.addEventListener('mouseleave', () => {
+        if (!isDrawing) return;
+        finalizeRect();
+    });
+
+    undoBtn.addEventListener('click', () => {
+        boxes.pop();
+        updateBoxesUI();
+    });
+
+    clearBtn.addEventListener('click', () => {
+        boxes = [];
+        updateBoxesUI();
+    });
+
+    previewForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        resultLink.innerHTML = '';
+        boxes = [];
+        updateBoxesUI();
+        setStatus(processStatus, '');
+        processSubmit.disabled = true;
+
+        const fileInput = document.getElementById('video-file');
+        if (!fileInput.files || fileInput.files.length === 0) {
+            setStatus(previewStatus, '영상 파일을 선택하세요.', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('video', fileInput.files[0]);
+        setStatus(previewStatus, '미리보기를 생성하는 중...', '');
+
+        try {
+            const response = await fetch('/api/text-removal/preview', {
+                method: 'POST',
+                body: formData,
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '미리보기를 생성하지 못했습니다.');
+            }
+
+            sessionId = data.session_id;
+            sessionInput.value = sessionId;
+
+            nativeWidth = data.width;
+            nativeHeight = data.height;
+            scale = Math.min(720 / nativeWidth, 1);
+            canvas.width = Math.round(nativeWidth * scale);
+            canvas.height = Math.round(nativeHeight * scale);
+
+            previewImage = new Image();
+            previewImage.onload = () => {
+                canvasWrapper.classList.add('active');
+                processPanel.classList.remove('hidden');
+                updateBoxesUI();
+            };
+            previewImage.src = data.preview_image;
+
+            setStatus(previewStatus, '미리보기가 준비되었습니다. 캔버스에서 영역을 지정하세요.', 'success');
+        } catch (error) {
+            sessionId = null;
+            sessionInput.value = '';
+            previewImage = new Image();
+            canvasWrapper.classList.remove('active');
+            processPanel.classList.add('hidden');
+            setStatus(previewStatus, error.message || '미리보기를 생성하지 못했습니다.', 'error');
+        }
+    });
+
+    processForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!sessionId) {
+            setStatus(processStatus, '먼저 영상을 업로드하고 미리보기를 생성하세요.', 'error');
+            return;
+        }
+        if (boxes.length === 0) {
+            setStatus(processStatus, '인페인팅할 영역을 최소 한 개 이상 지정하세요.', 'error');
+            return;
+        }
+
+        processSubmit.disabled = true;
+        setStatus(processStatus, 'Stable Diffusion으로 영상을 복원하는 중입니다. 시간이 다소 걸릴 수 있습니다...', '');
+        resultLink.innerHTML = '';
+
+        const payload = {
+            session_id: sessionId,
+            prompt: promptInput.value.trim() || 'remove text and restore background',
+            negative_prompt: negativePromptInput.value.trim() || 'text, watermark, caption',
+            model_id: modelInput.value.trim() || 'runwayml/stable-diffusion-inpainting',
+            guidance_scale: parseFloat(guidanceInput.value) || 7.5,
+            strength: Math.min(Math.max(parseFloat(strengthInput.value) || 0.75, 0), 1),
+            num_inference_steps: Math.max(parseInt(stepsInput.value, 10) || 30, 1),
+            dilate: Math.max(parseInt(dilateInput.value, 10) || 0, 0),
+            device: deviceSelect.value,
+            dtype: dtypeSelect.value,
+            seed: seedInput.value ? parseInt(seedInput.value, 10) : null,
+            fps: fpsInput.value ? parseFloat(fpsInput.value) : null,
+            max_frames: maxFramesInput.value ? parseInt(maxFramesInput.value, 10) : null,
+            boxes: boxes.map((box) => ({
+                x: Math.round(box.x),
+                y: Math.round(box.y),
+                width: Math.round(box.width),
+                height: Math.round(box.height),
+            })),
+        };
+
+        try {
+            const response = await fetch('/api/text-removal/process', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '영상 인페인팅에 실패했습니다.');
+            }
+
+            setStatus(processStatus, '영상 인페인팅이 완료되었습니다!', 'success');
+            resultLink.innerHTML = `<a href="${data.video_url}" target="_blank" rel="noopener">결과 영상 다운로드</a>`;
+        } catch (error) {
+            setStatus(processStatus, error.message || '영상 인페인팅 중 오류가 발생했습니다.', 'error');
+        } finally {
+            processSubmit.disabled = boxes.length === 0;
+        }
+    });
+})();
+</script>
+</body>
+</html>
