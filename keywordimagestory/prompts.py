@@ -192,6 +192,37 @@ SHORTS_SCRIPT_ENGLISH_PROMPT_TEMPLATE = PromptTemplate(
     ),
 )
 
+SHORTS_SCRIPT_KOREAN_PROMPT_TEMPLATE = PromptTemplate(
+    name="shorts_script_prompt_ko",
+    description="Korean ChatGPT prompt for Shorts script generation",
+    template=(
+        "스토리 키워드 \"{keyword}\"를 바탕으로 60초 분량의 유튜브 쇼츠 자막과 장면별 이미지 묘사를 한국어로 작성하세요.\n\n"
+        "### 출력 규칙\n\n"
+        "1. 자막은 SRT 형식으로 작성합니다.\n"
+        "   - 각 항목은 자막 번호, 타임스탬프(00:00:00,000 --> 00:00:05,000), 대사 문장으로 구성합니다.\n"
+        "   - 각 대사의 끝에는 반드시 [이미지 #] 태그를 붙여 해당 장면 번호를 표시합니다.\n"
+        "   - 전체 길이가 약 60초가 되도록 6~10개의 자막을 작성합니다.\n\n"
+        "2. 자막 아래에는 이미지 장면 묘사를 정리합니다.\n"
+        "   - 자막에서 사용한 [이미지 #] 번호와 동일한 번호를 사용합니다.\n"
+        "   - 각 장면마다 분위기, 조명, 배경, 인물/오브젝트의 행동을 1~2문장으로 생생하게 설명합니다.\n\n"
+        "# 출력 형식\n\n"
+        "**[SRT 자막]**\n"
+        "1\n"
+        "00:00:00,000 --> 00:00:05,000\n"
+        "대사... [이미지 1]\n\n"
+        "2\n"
+        "00:00:05,000 --> 00:00:10,000\n"
+        "대사... [이미지 2]\n\n"
+        "...\n\n"
+        "**[이미지 장면 묘사]**\n"
+        "- [이미지 1] ...\n"
+        "- [이미지 2] ...\n"
+        "- ...\n\n"
+        "스토리 키워드: \"{keyword}\"\n"
+        "모든 문장을 한국어로 작성하세요."
+    ),
+)
+
 SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE = PromptTemplate(
     name="shorts_scene_prompt_en",
     description="English ChatGPT prompt for Shorts scene generation",
@@ -228,6 +259,38 @@ SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE = PromptTemplate(
     ),
 )
 
+SHORTS_SCENE_KOREAN_PROMPT_TEMPLATE = PromptTemplate(
+    name="shorts_scene_prompt_ko",
+    description="Korean ChatGPT prompt for Shorts scene generation",
+    template=(
+        "스토리 키워드 \"{keyword}\"를 바탕으로 60초 분량의 유튜브 쇼츠 영상 씬 대본과 촬영 지시사항을 한국어로 작성하세요.\n\n"
+        "### 출력 규칙\n\n"
+        "1. 씬 대본은 순차적으로 구성하고 각 씬에 다음 요소를 포함합니다.\n"
+        "   - [씬 #] 태그\n"
+        "   - 타임스탬프 (00:00:00,000 --> 00:00:05,000)\n"
+        "   - 대사 또는 내레이션\n"
+        "   - 카메라 움직임과 촬영 지시\n"
+        "   전체 길이가 약 60초가 되도록 6~10개의 씬을 작성하세요.\n\n"
+        "2. 씬 대본 아래에는 촬영 지시사항을 정리합니다.\n"
+        "   - 카메라 앵글, 카메라 움직임, 조명·색감, 배경과 소품, 인물·오브젝트의 행동과 감정을 구체적으로 서술하세요.\n\n"
+        "# 출력 형식\n\n"
+        "**[영상 씬 대본]**\n\n"
+        "[씬 1] 00:00:00,000 --> 00:00:06,000\n"
+        "대사: ...\n"
+        "카메라: ...\n\n"
+        "[씬 2] 00:00:06,000 --> 00:00:12,000\n"
+        "대사: ...\n"
+        "카메라: ...\n\n"
+        "...\n\n"
+        "**[촬영 지시사항]**\n"
+        "- [씬 1] ...\n"
+        "- [씬 2] ...\n"
+        "- ...\n\n"
+        "스토리 키워드: \"{keyword}\"\n"
+        "모든 문장을 한국어로 작성하세요."
+    ),
+)
+
 TRANSITION_TEMPLATE = PromptTemplate(
     name="transition",
     description="Bridge between two story chapters",
@@ -245,5 +308,9 @@ __all__ = [
     "IMAGE_STORY_TEMPLATE",
     "SHORTS_SCRIPT_TEMPLATE",
     "SHORTS_SCENE_TEMPLATE",
+    "SHORTS_SCRIPT_ENGLISH_PROMPT_TEMPLATE",
+    "SHORTS_SCRIPT_KOREAN_PROMPT_TEMPLATE",
+    "SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE",
+    "SHORTS_SCENE_KOREAN_PROMPT_TEMPLATE",
     "TRANSITION_TEMPLATE",
 ]

@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import subprocess
+import os
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image
+
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
 
 try:  # pragma: no cover - optional dependency check
     import cv2
@@ -15,6 +20,13 @@ try:  # pragma: no cover - optional dependency check
 except ImportError as exc:  # pragma: no cover - handled at runtime
     cv2 = None  # type: ignore[assignment]
     CV2_IMPORT_ERROR = exc
+
+try:  # pragma: no cover - optional dependency
+    import av
+    AV_IMPORT_ERROR: Optional[Exception] = None
+except ImportError as exc:  # pragma: no cover - handled at runtime
+    av = None  # type: ignore[assignment]
+    AV_IMPORT_ERROR = exc
 
 
 @dataclass
@@ -110,7 +122,7 @@ def run_text_removal(config: RemovalConfig) -> None:
         import torch
     except ImportError as exc:  # pragma: no cover - runtime dependency check
         raise DiffusionUnavailableError(
-            "diffusers 및 torch 패키지가 설치되어 있어야 합니다."
+            f"diffusers 및 torch 패키지가 설치되어 있어야 합니다. (추가 정보: {exc})"
         ) from exc
 
     boxes = list(config.boxes)
@@ -125,6 +137,8 @@ def run_text_removal(config: RemovalConfig) -> None:
     video_path = Path(config.video_path)
     output_path = Path(config.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        output_path.unlink()
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -243,6 +257,62 @@ def extract_first_frame(video_path: Path) -> Optional[Tuple[np.ndarray, float, i
     return frame, fps, frame_count, width, height
 
 
+def _transcode_with_av(video_path: Path, output_path: Path) -> None:
+    """Transcode the given video into H.264 using PyAV."""
+
+    if av is None:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "AV1 디코더가 포함된 ffmpeg 또는 PyAV(av 패키지)가 필요합니다. 'pip install av' 후 다시 시도하세요."
+        ) from AV_IMPORT_ERROR
+
+    try:
+        with av.open(str(video_path)) as input_container:
+            video_stream = next(
+                (stream for stream in input_container.streams if stream.type == "video"), None
+            )
+            if video_stream is None:
+                raise RuntimeError("비디오 스트림을 찾지 못했습니다.")
+
+            rate = None
+            if video_stream.average_rate:
+                rate = Fraction(video_stream.average_rate)
+            elif video_stream.codec_context and video_stream.codec_context.framerate:
+                rate = Fraction(video_stream.codec_context.framerate)
+            elif video_stream.time_base and video_stream.time_base.denominator:
+                rate = Fraction(video_stream.time_base.denominator, video_stream.time_base.numerator)
+            else:
+                rate = Fraction(30, 1)
+
+            width = int(video_stream.codec_context.width or getattr(video_stream, "width", 0) or 0)
+            height = int(video_stream.codec_context.height or getattr(video_stream, "height", 0) or 0)
+            if width <= 0 or height <= 0:
+                raise RuntimeError("영상의 가로·세로 크기를 확인하지 못했습니다.")
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if output_path.exists():
+                output_path.unlink()
+
+            with av.open(str(output_path), mode="w") as output_container:
+                out_stream = output_container.add_stream("libx264", rate=rate)
+                out_stream.pix_fmt = "yuv420p"
+                out_stream.width = width
+                out_stream.height = height
+                if video_stream.time_base:
+                    out_stream.time_base = video_stream.time_base
+
+                for frame in input_container.decode(video_stream):
+                    frame = frame.reformat(out_stream.width, out_stream.height, format="yuv420p")
+                    for packet in out_stream.encode(frame):
+                        output_container.mux(packet)
+
+                for packet in out_stream.encode():
+                    output_container.mux(packet)
+    except av.AVError as exc:  # pragma: no cover - runtime decode failure
+        raise RuntimeError(f"PyAV 변환에 실패했습니다: {exc}") from exc
+    except Exception as exc:  # pragma: no cover - guarded for unexpected runtime errors
+        raise RuntimeError(f"PyAV 변환 중 오류가 발생했습니다: {exc}") from exc
+
+
 def prepare_video_preview(video_path: Path, session_dir: Path) -> Tuple[np.ndarray, float, int, int, int, Path, Path]:
     """Return the preview frame and metadata, transcoding to H.264 if needed."""
 
@@ -271,11 +341,15 @@ def prepare_video_preview(video_path: Path, session_dir: Path) -> Tuple[np.ndarr
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         stderr = proc.stderr.strip() or proc.stdout.strip() or "ffmpeg 변환에 실패했습니다."
-        if "Decoder (codec av1) not found" in stderr or "Unknown decoder 'libdav1d'" in stderr:
-            raise RuntimeError(
-                "이 ffmpeg 빌드는 AV1 영상을 디코딩할 수 없습니다. AV1 지원이 포함된 ffmpeg(예: conda-forge ffmpeg>=5 또는 독립 실행형 ffmpeg 6.x)를 설치한 뒤 다시 시도하세요."
-            )
-        raise RuntimeError(stderr)
+        lower_err = stderr.lower()
+        av1_related = "av1" in lower_err or "libdav1d" in lower_err or "libaom" in lower_err
+        if av1_related:
+            try:
+                _transcode_with_av(video_path, transcoded_path)
+            except RuntimeError as av_exc:
+                raise RuntimeError(str(av_exc)) from av_exc
+        else:
+            raise RuntimeError(stderr)
 
     result = extract_first_frame(transcoded_path)
     if result is None:

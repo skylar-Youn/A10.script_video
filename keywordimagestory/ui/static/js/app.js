@@ -58,7 +58,8 @@ const state = {
   audioResults: {
     shorts_script: null,
     shorts_scenes: null
-  }
+  },
+  videoTrimQueue: []
 };
 
 const TOOL_KEYS = {
@@ -79,11 +80,27 @@ const AUDIO_CONTAINER_IDS = {
   [TOOL_KEYS.SCENES]: "shorts-scenes-audio"
 };
 
+const TOOL_ALIAS_MAP = {
+  shorts_script: TOOL_KEYS.SCRIPT,
+  shorts_scenes: TOOL_KEYS.SCENES
+};
+
+const TRIM_LABELS = {
+  start: "맨 앞프레임",
+  end: "맨 뒤 프레임",
+  current: "현재 프레임"
+};
+
+const FRAME_SECONDS = 1 / 30;
+const MIN_SEGMENT_DURATION = 0.05;
+
 let pendingRecordSelection = null;
 
 const timelineScrollCleanups = new WeakMap();
 
 const STORAGE_KEY = "kis-selected-record";
+
+let activePreviewModal = null;
 
 function persistSelection(tool, recordId, payload) {
   try {
@@ -111,6 +128,76 @@ function clearPersistedSelection() {
   } catch (error) {
     console.warn("Failed to clear persisted selection", error);
   }
+}
+
+function resolveToolKey(value) {
+  if (!value) return null;
+  if (Object.values(TOOL_KEYS).includes(value)) {
+    return value;
+  }
+  return TOOL_ALIAS_MAP[value] || null;
+}
+
+function getToolAlias(toolKey) {
+  const entry = Object.entries(TOOL_ALIAS_MAP).find(([, key]) => key === toolKey);
+  return entry ? entry[0] : "";
+}
+
+function closePreviewModal() {
+  if (!activePreviewModal) return;
+  const { backdrop, escHandler } = activePreviewModal;
+  if (escHandler) {
+    document.removeEventListener("keydown", escHandler);
+  }
+  if (backdrop && backdrop.parentNode) {
+    backdrop.parentNode.removeChild(backdrop);
+  }
+  activePreviewModal = null;
+}
+
+function openPreviewModal(title, bodyHtml) {
+  closePreviewModal();
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "preview-backdrop";
+
+  const modal = document.createElement("div");
+  modal.className = "preview-modal";
+  modal.innerHTML = `
+    <header class="preview-modal-header">
+      <h3>${title}</h3>
+      <button type="button" class="preview-modal-close" aria-label="닫기">×</button>
+    </header>
+    <div class="preview-content">
+      ${bodyHtml}
+    </div>
+  `;
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+
+  const escHandler = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePreviewModal();
+    }
+  };
+
+  document.addEventListener("keydown", escHandler);
+
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) {
+      closePreviewModal();
+    }
+  });
+
+  const closeBtn = modal.querySelector(".preview-modal-close");
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      closePreviewModal();
+    });
+  }
+
+  activePreviewModal = { backdrop, escHandler };
 }
 
 async function api(path, options = {}) {
@@ -209,6 +296,37 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function decodeHtml(value) {
+  if (value === null || value === undefined) return "";
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = value;
+  return textarea.value;
+}
+
+async function handleCopyButton(button) {
+  const rawValue = button.getAttribute("data-copy-text") || "";
+  const label = button.getAttribute("data-copy-label") || button.textContent || "복사";
+  const successText = button.getAttribute("data-copy-success") || "복사 완료!";
+  const decoded = decodeHtml(rawValue);
+  if (!decoded) {
+    alert("복사할 내용이 없습니다.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(decoded);
+    button.blur();
+    button.textContent = successText;
+    button.disabled = true;
+    setTimeout(() => {
+      button.textContent = label;
+      button.disabled = false;
+    }, 2000);
+  } catch (error) {
+    console.error("Failed to copy text:", error);
+    alert("클립보드로 복사하지 못했습니다. 브라우저 권한을 확인하거나 직접 복사해 주세요.");
+  }
+}
+
 function formatTime(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "";
   return Number(value).toFixed(1);
@@ -246,6 +364,45 @@ function formatTimecode(value) {
     .toString()
     .padStart(3, "0");
   return `${hours}:${minutes}:${seconds},${millis}`;
+}
+
+function parseTimecodeString(value) {
+  if (typeof value !== "string") return null;
+  const match = value.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const millis = Number(match[4]);
+  if ([hours, minutes, seconds, millis].some((num) => Number.isNaN(num))) {
+    return null;
+  }
+  return hours * 3600 + minutes * 60 + seconds + millis / 1000;
+}
+
+function toSeconds(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = parseTimecodeString(value.trim());
+    if (parsed !== null) return parsed;
+    const numeric = Number(value.trim());
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return null;
+}
+
+function applySegmentTimes(segment, startSeconds, endSeconds) {
+  if (!segment || typeof segment !== "object") return;
+  if (Number.isFinite(startSeconds)) {
+    if (typeof segment.start === "number") segment.start = startSeconds;
+    if (typeof segment.start_time === "string") segment.start_time = formatTimecode(startSeconds);
+  }
+  if (Number.isFinite(endSeconds)) {
+    if (typeof segment.end === "number") segment.end = endSeconds;
+    if (typeof segment.end_time === "string") segment.end_time = formatTimecode(endSeconds);
+  }
 }
 
 function formatTimestamp(value) {
@@ -475,9 +632,295 @@ function parseChatGPTImageResult(text) {
   }));
 }
 
+function parseTimecodeToSeconds(timecode) {
+  if (typeof timecode !== "string") return null;
+  const match = timecode.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+  if (!match) return null;
+  const hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const seconds = parseInt(match[3], 10);
+  const millis = parseInt(match[4], 10);
+  if ([hours, minutes, seconds, millis].some((value) => Number.isNaN(value))) {
+    return null;
+  }
+  return hours * 3600 + minutes * 60 + seconds + millis / 1000;
+}
+
+function parseChatGPTScenesResult(text) {
+  if (typeof text !== "string" || !text.trim()) {
+    return { subtitles: [], scenes: [] };
+  }
+
+  const subtitles = [];
+  const sceneMap = new Map();
+
+  const ensureScene = (index) => {
+    if (!sceneMap.has(index)) {
+      sceneMap.set(index, {
+        scene_tag: `씬 ${index}`,
+        action: "",
+        camera: "",
+        mood: "",
+        start: null,
+        end: null
+      });
+    }
+    return sceneMap.get(index);
+  };
+
+  const sceneSectionRegex = /\[Scene\s*(\d+)\]([\s\S]*?)(?=\[Scene\s*\d+\]|\[Filming Directions\]|\Z)/gi;
+  let match;
+  while ((match = sceneSectionRegex.exec(text)) !== null) {
+    const index = parseInt(match[1], 10);
+    if (Number.isNaN(index)) continue;
+    const block = match[2].trim();
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+
+    let startSeconds = null;
+    let endSeconds = null;
+    let dialogue = "";
+    let cameraInfo = "";
+
+    lines.forEach((line) => {
+      if (!startSeconds) {
+        const timeMatch = line.match(/(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})/);
+        if (timeMatch) {
+          startSeconds = parseTimecodeToSeconds(timeMatch[1]);
+          endSeconds = parseTimecodeToSeconds(timeMatch[2]);
+          return;
+        }
+      }
+
+      const dialogueMatch = line.match(/^Dialogue:\s*["“]?([\s\S]*?)["”]?$/i);
+      if (dialogueMatch) {
+        dialogue = dialogueMatch[1].trim();
+        return;
+      }
+
+      const cameraMatch = line.match(/^Camera:\s*([\s\S]*)$/i);
+      if (cameraMatch) {
+        cameraInfo = cameraMatch[1].trim();
+      }
+    });
+
+    if (dialogue) {
+      subtitles.push({
+        index,
+        start: startSeconds !== null ? startSeconds : undefined,
+        end: endSeconds !== null ? endSeconds : undefined,
+        text: dialogue,
+        scene_tag: `[씬 ${index}]`
+      });
+    }
+
+    const scene = ensureScene(index);
+    if (startSeconds !== null) scene.start = startSeconds;
+    if (endSeconds !== null) scene.end = endSeconds;
+    if (dialogue) {
+      scene.action = scene.action
+        ? `${scene.action}\nDialogue: ${dialogue}`
+        : `Dialogue: ${dialogue}`;
+    }
+    if (cameraInfo) {
+      scene.camera = scene.camera ? `${scene.camera} | ${cameraInfo}` : cameraInfo;
+    }
+  }
+
+  const fdMatch = text.match(/\[Filming Directions\]([\s\S]*)$/i);
+  if (fdMatch) {
+    const fdText = fdMatch[1];
+    const fdRegex = /\[Scene\s*(\d+)\]([\s\S]*?)(?=\[Scene\s*\d+\]|\Z)/gi;
+    let fdBlock;
+    while ((fdBlock = fdRegex.exec(fdText)) !== null) {
+      const index = parseInt(fdBlock[1], 10);
+      if (Number.isNaN(index)) continue;
+      const block = fdBlock[2].trim();
+      if (!block) continue;
+      const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+      if (!lines.length) continue;
+
+      const scene = ensureScene(index);
+      const detailLines = [];
+
+      lines.forEach((line) => {
+        const detailMatch = line.match(/^([A-Za-z가-힣\s]+):\s*(.+)$/);
+        if (!detailMatch) return;
+        const label = detailMatch[1].trim();
+        const value = detailMatch[2].trim();
+        const lower = label.toLowerCase();
+
+        if (lower === "mood" || lower === "분위기") {
+          scene.mood = value;
+        } else if (lower === "camera") {
+          scene.camera = scene.camera ? `${scene.camera} | ${value}` : value;
+        } else {
+          detailLines.push(`${label}: ${value}`);
+        }
+      });
+
+      if (detailLines.length) {
+        const detailText = detailLines.join(" | ");
+        scene.action = scene.action
+          ? `${scene.action}\n${detailText}`
+          : detailText;
+      }
+    }
+  }
+
+  const sortedSubtitles = subtitles.sort((a, b) => (a.index || 0) - (b.index || 0));
+
+  const scenes = Array.from(sceneMap.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, scene]) => scene);
+
+  return { subtitles: sortedSubtitles, scenes };
+}
+
+function buildExistingSRTString(subtitles = []) {
+  const ensureTimecode = (value) => {
+    if (typeof value === "string" && /\d{2}:\d{2}:\d{2},\d{3}/.test(value)) {
+      return value;
+    }
+    if (typeof value === "number") {
+      return formatTimecode(value);
+    }
+    return "00:00:00,000";
+  };
+
+  return subtitles
+    .map((subtitle, idx) => {
+      const index = subtitle.index ?? idx + 1;
+      const start = ensureTimecode(subtitle.start);
+      const end = ensureTimecode(subtitle.end);
+      const text = subtitle.text || "";
+      const tag = subtitle.scene_tag ? ` ${subtitle.scene_tag}` : "";
+      return `${index}\n${start} --> ${end}\n${text}${tag}\n`;
+    })
+    .join("\n")
+    .trim();
+}
+
+function createScriptContinuationPrompt({ keyword, language, existingSRT, nextIndex, nextImage, nextStartTimecode, summary = [] }) {
+  const isKorean = (language || "ko").toLowerCase().startsWith("ko");
+  const instructions = isKorean
+    ? `### 작업 지시
+
+1. 위 자막 내용을 세 줄의 핵심 bullet로 한국어로 요약하세요.
+2. 기존 스토리의 흐름을 이어 가면서 새로운 60초 분량 SRT 자막을 작성하세요. 자막 번호는 ${nextIndex}번부터 시작하고, 타임스탬프는 ${nextStartTimecode} 이후로 자연스럽게 이어지도록 설정하세요. 각 자막 끝에는 [이미지 #] 태그를 붙이고, 이미지 번호는 ${nextImage}번부터 순차적으로 사용하세요.
+3. 새 자막 작성이 끝나면, 해당 자막과 매칭되는 이미지 묘사를 목록 형태로 작성하세요. 각 항목은 "- [이미지 X] ..." 형식을 지키고, 분위기·조명·배경·행동을 생생하게 묘사하세요.
+`
+    : `### Tasks
+
+1. Summarize the existing subtitles above in exactly three bullet points.
+2. Continue the narrative with a NEW 60-second SRT script. Start numbering from ${nextIndex} and keep timestamps following ${nextStartTimecode}. End every subtitle with [Image #], continuing numbering from ${nextImage}.
+3. After the new SRT, list matching cinematic image descriptions using the format "- [Image X] ..." with vivid details (mood, lighting, setting, motion).
+`;
+
+  const normalizedSummary = Array.isArray(summary)
+    ? summary.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+
+  const exampleStart = nextStartTimecode || "00:00:00,000";
+  const outputFormat = isKorean
+    ? `# 출력 형식
+
+**[요약]**
+- 요약 1
+- 요약 2
+- 요약 3
+
+**[SRT 자막]**
+${nextIndex}
+${exampleStart} --> ...
+대사... [이미지 ${nextImage}]
+
+...
+
+**[이미지 장면 묘사]**
+- [이미지 ${nextImage}] ...
+- ...
+
+스토리 키워드: "${keyword || "Moonlit Song of the Robo Dog"}"
+`
+    : `# Output Format
+
+**[Summary]**
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+**[SRT Subtitles]**
+${nextIndex}
+${exampleStart} --> ...
+Line... [Image ${nextImage}]
+
+...
+
+**[Image Descriptions]**
+- [Image ${nextImage}] ...
+- ...
+
+Story keyword: "${keyword || "Moonlit Song of the Robo Dog"}"
+`;
+
+  const summarySection = normalizedSummary.length
+    ? (isKorean
+        ? `이전 요약:
+${normalizedSummary.map((item) => `- ${item}`).join("\n")}
+
+`
+        : `Previous summary:
+${normalizedSummary.map((item) => `- ${item}`).join("\n")}
+
+`)
+    : "";
+
+  const header = isKorean
+    ? `${summarySection}기존 SRT 자막 (참고용):
+
+${existingSRT}
+
+새로운 자막은 기존 흐름을 잇되, 포맷을 반드시 지켜주세요.
+`
+    : `${summarySection}Existing SRT subtitles (for reference):
+
+${existingSRT}
+
+Continue the story while respecting the established format.
+`;
+
+  return `${header}
+${instructions}
+${outputFormat}`.trim();
+}
 function parseChatGPTShortsResult(text) {
   const subtitles = [];
   const images = [];
+  const summary = [];
+
+  const summaryPatterns = [
+    /\*\*\[(?:Summary|요약)\]\*\*([\s\S]*?)(?=\*\*\[|$)/i,
+    /\[(?:Summary|요약)\]([\s\S]*?)(?=\[|$)/i
+  ];
+
+  for (const pattern of summaryPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const lines = match[1]
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      lines.forEach((line) => {
+        const bulletMatch = line.match(/^(?:[-–•\*]\s*|^\d+[.)]\s*)(.+)$/);
+        if (bulletMatch) {
+          summary.push(bulletMatch[1].trim());
+        } else {
+          summary.push(line);
+        }
+      });
+      break;
+    }
+  }
 
   // 먼저 [SRT 자막] 섹션 찾기 (여러 형태 지원)
   let srtText = "";
@@ -575,7 +1018,7 @@ function parseChatGPTShortsResult(text) {
     });
   }
 
-  return { subtitles, images };
+  return { subtitles, images, summary };
 }
 
 function renderStoryKeywordResults(result) {
@@ -670,9 +1113,41 @@ function renderShortsScriptResults(result) {
 
   const subtitles = Array.isArray(result?.subtitles) ? result.subtitles : [];
   const images = Array.isArray(result?.images) ? result.images : [];
+  const summaryItems = Array.isArray(result?.summary) ? result.summary : [];
+  const languageCode = (result?.language || "ko").toLowerCase();
+  const headerMarkup = `
+    <header class="result-header">
+      <div class="result-header-main">
+        <h3>쇼츠용 SRT 대본</h3>
+        <p class="status">키워드: <strong>${escapeHtml(result?.keyword ?? "")}</strong> · 언어: ${escapeHtml(result?.language ?? "ko")}</p>
+      </div>
+      <div class="result-header-actions">
+        <span class="trim-counter" data-trim-counter="shorts_script" hidden></span>
+        <button type="button" class="secondary" data-action="gpt-translate-script" title="ChatGPT로 전체 번역 비교 요청">GPT 번역 요청</button>
+      </div>
+    </header>
+  `;
 
   if (!subtitles.length && !images.length) {
+    if (summaryItems.length) {
+      const summaryHeading = languageCode.startsWith("ko") ? "요약" : "Summary";
+      const summaryMarkup = summaryItems
+        .map((bullet) => `<li>${escapeHtml(typeof bullet === "string" ? bullet : String(bullet))}</li>`)
+        .join("");
+      container.innerHTML = `
+        <article>
+          ${headerMarkup}
+          <section class="summary-section">
+            <h4>${summaryHeading}</h4>
+            <ul class="summary-list">${summaryMarkup}</ul>
+          </section>
+        </article>
+      `;
+      updateTrimBadge(TOOL_KEYS.SCRIPT);
+      return;
+    }
     container.innerHTML = '<div class="placeholder"><p>생성된 결과가 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
+    updateTrimBadge(TOOL_KEYS.SCRIPT);
     return;
   }
 
@@ -681,13 +1156,19 @@ function renderShortsScriptResults(result) {
       const index = typeof segment.index === "number" ? segment.index : "-";
       const start = formatTimecode(segment.start);
       const end = formatTimecode(segment.end);
+      const rawTag = segment.scene_tag ?? "";
       const text = escapeHtml(segment.text ?? "");
-      const tag = escapeHtml(segment.scene_tag ?? "");
+      const tag = escapeHtml(rawTag);
+      const copyText = `${index}\n${start} --> ${end}\n${segment.text ?? ""}${rawTag ? ` ${rawTag}` : ""}`;
+      const copyAttr = escapeHtml(copyText).replace(/\n/g, "&#10;");
       return `
         <li>
           <header><strong>${index}</strong> <span>${start} → ${end}</span></header>
           <p>${text}</p>
           <small>${tag}</small>
+          <div class="item-actions">
+            <button type="button" class="secondary copy-btn" data-copy-text="${copyAttr}" data-copy-label="복사">복사</button>
+          </div>
         </li>
       `;
     })
@@ -695,27 +1176,41 @@ function renderShortsScriptResults(result) {
 
   const imageMarkup = images
     .map((prompt, idx) => {
-      const tag = escapeHtml(prompt.tag ?? `이미지 ${idx + 1}`);
-      const description = escapeHtml(prompt.description ?? "");
+      const rawTag = prompt.tag ?? `이미지 ${idx + 1}`;
+      const rawDescription = prompt.description ?? "";
+      const tag = escapeHtml(rawTag);
+      const description = escapeHtml(rawDescription);
       const start = prompt.start !== undefined && prompt.start !== null ? formatTimecode(prompt.start) : "-";
       const end = prompt.end !== undefined && prompt.end !== null ? formatTimecode(prompt.end) : "-";
+      const copyText = `${rawTag} ${rawDescription}`.trim();
+      const copyAttr = escapeHtml(copyText).replace(/\n/g, "&#10;");
       return `
         <li>
           <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
           <p>${description}</p>
           <div class="item-actions">
+            <button type="button" class="secondary copy-btn" data-copy-text="${copyAttr}" data-copy-label="복사">복사</button>
           </div>
         </li>
       `;
     })
     .join("");
 
+  const summaryMarkup = summaryItems
+    .map((bullet, idx) => `<li>${escapeHtml(typeof bullet === "string" ? bullet : String(bullet))}</li>`)
+    .join("");
+  const summaryHeading = languageCode.startsWith("ko") ? "요약" : "Summary";
+  const summarySection = summaryItems.length
+    ? `<section class="summary-section">
+        <h4>${summaryHeading}</h4>
+        <ul class="summary-list">${summaryMarkup}</ul>
+      </section>`
+    : "";
+
   container.innerHTML = `
     <article>
-      <header>
-        <h3>쇼츠용 SRT 대본</h3>
-        <p class="status">키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong> · 언어: ${escapeHtml(result.language ?? "ko")}</p>
-      </header>
+      ${headerMarkup}
+      ${summarySection}
       <div class="grid">
         <section>
           <h4>자막 타임라인</h4>
@@ -728,6 +1223,7 @@ function renderShortsScriptResults(result) {
       </div>
     </article>
   `;
+  updateTrimBadge(TOOL_KEYS.SCRIPT);
   displayAudioResult(TOOL_KEYS.SCRIPT, state.audioResults[TOOL_KEYS.SCRIPT]);
 }
 
@@ -737,9 +1233,33 @@ function renderShortsSceneResults(result) {
 
   const subtitles = Array.isArray(result?.subtitles) ? result.subtitles : [];
   const scenes = Array.isArray(result?.scenes) ? result.scenes : [];
+  const rawScript = typeof result?.script === "string" ? result.script.trim() : "";
+  const headerMarkup = `
+    <header class="result-header">
+      <div class="result-header-main">
+        <h3>쇼츠용 씬 대본</h3>
+        <p class="status">키워드: <strong>${escapeHtml(result?.keyword ?? "")}</strong> · 언어: ${escapeHtml(result?.language ?? "ko")}</p>
+      </div>
+      <div class="result-header-actions">
+        <span class="trim-counter" data-trim-counter="shorts_scenes" hidden></span>
+        <button type="button" class="secondary" data-action="gpt-translate-scenes" title="ChatGPT로 전체 번역 비교 요청">GPT 번역 요청</button>
+      </div>
+    </header>
+  `;
 
   if (!subtitles.length && !scenes.length) {
+    if (rawScript) {
+      container.innerHTML = `
+        <article>
+          ${headerMarkup}
+          <pre class="script-preview">${escapeHtml(rawScript)}</pre>
+        </article>
+      `;
+      updateTrimBadge(TOOL_KEYS.SCENES);
+      return;
+    }
     container.innerHTML = '<div class="placeholder"><p>생성된 결과가 없습니다. 다른 키워드를 시도해 보세요.</p></div>';
+    updateTrimBadge(TOOL_KEYS.SCENES);
     return;
   }
 
@@ -750,11 +1270,17 @@ function renderShortsSceneResults(result) {
       const end = formatTimecode(segment.end);
       const text = escapeHtml(segment.text ?? "");
       const tag = escapeHtml(segment.scene_tag ?? "");
+      const rawTag = segment.scene_tag ?? "";
+      const copyText = `${index}\n${start} --> ${end}\n${segment.text ?? ""}${rawTag ? ` ${rawTag}` : ""}`;
+      const copyAttr = escapeHtml(copyText).replace(/\n/g, "&#10;");
       return `
         <li>
           <header><strong>${index}</strong> <span>${start} → ${end}</span></header>
           <p>${text}</p>
           <small>${tag}</small>
+          <div class="item-actions">
+            <button type="button" class="secondary copy-btn" data-copy-text="${copyAttr}" data-copy-label="복사">복사</button>
+          </div>
         </li>
       `;
     })
@@ -763,17 +1289,22 @@ function renderShortsSceneResults(result) {
   const sceneMarkup = scenes
     .map((scene, idx) => {
       const tag = escapeHtml(scene.scene_tag ?? `씬 ${idx + 1}`);
-      const action = escapeHtml(scene.action ?? "");
-      const camera = escapeHtml(scene.camera ?? "");
+      const actionRaw = scene.action ?? "";
+      const action = escapeHtml(actionRaw).replace(/\n/g, "<br>");
+      const cameraRaw = scene.camera ?? "";
+      const camera = escapeHtml(cameraRaw);
       const mood = escapeHtml(scene.mood ?? "");
       const start = scene.start !== undefined && scene.start !== null ? formatTimecode(scene.start) : "-";
       const end = scene.end !== undefined && scene.end !== null ? formatTimecode(scene.end) : "-";
+      const copyText = `${scene.scene_tag ?? `씬 ${idx + 1}`}\n${actionRaw}\n카메라: ${cameraRaw} · 분위기: ${scene.mood ?? ""}`.trim();
+      const copyAttr = escapeHtml(copyText).replace(/\n/g, "&#10;");
       return `
         <li>
           <header><strong>${tag}</strong> <span>${start} → ${end}</span></header>
           <p>${action}</p>
           <small>카메라: ${camera} · 분위기: ${mood}</small>
           <div class="item-actions">
+            <button type="button" class="secondary copy-btn" data-copy-text="${copyAttr}" data-copy-label="복사">복사</button>
           </div>
         </li>
       `;
@@ -782,10 +1313,7 @@ function renderShortsSceneResults(result) {
 
   container.innerHTML = `
     <article>
-      <header>
-        <h3>쇼츠용 씬 대본</h3>
-        <p class="status">키워드: <strong>${escapeHtml(result.keyword ?? "")}</strong> · 언어: ${escapeHtml(result.language ?? "ko")}</p>
-      </header>
+      ${headerMarkup}
       <div class="grid">
         <section>
           <h4>SRT 구간</h4>
@@ -798,7 +1326,519 @@ function renderShortsSceneResults(result) {
       </div>
     </article>
   `;
+  updateTrimBadge(TOOL_KEYS.SCENES);
   displayAudioResult(TOOL_KEYS.SCENES, state.audioResults[TOOL_KEYS.SCENES]);
+}
+
+function getLanguageDisplayName(code) {
+  const normalized = (code || "").toLowerCase();
+  if (normalized.startsWith("ko")) return "한국어";
+  if (normalized.startsWith("ja")) return "일본어";
+  if (normalized.startsWith("en")) return "영어";
+  if (normalized.startsWith("zh")) return "중국어";
+  if (normalized.startsWith("es")) return "스페인어";
+  if (normalized.startsWith("fr")) return "프랑스어";
+  if (normalized.startsWith("de")) return "독일어";
+  return code ? code.toUpperCase() : "원문 언어";
+}
+
+function determineTargetLanguage(sourceCode) {
+  const normalized = (sourceCode || "").toLowerCase();
+  if (normalized.startsWith("ja")) return "ko";
+  if (normalized.startsWith("ko")) return "ja";
+  if (normalized.startsWith("en")) return "ja";
+  return "ja";
+}
+
+function serializeSubtitlesForPrompt(subtitles) {
+  if (!Array.isArray(subtitles) || !subtitles.length) {
+    return "";
+  }
+  return subtitles
+    .map((segment, idx) => {
+      const index = typeof segment.index === "number" ? segment.index : idx + 1;
+      const lines = [String(index)];
+      const start =
+        segment.start !== undefined && segment.start !== null ? formatTimecode(segment.start) : "00:00:00,000";
+      const end = segment.end !== undefined && segment.end !== null ? formatTimecode(segment.end) : "00:00:00,000";
+      lines.push(`${start} --> ${end}`);
+      const text = typeof segment.text === "string" ? segment.text.trim() : "";
+      if (text) {
+        lines.push(text);
+      }
+      const tag = typeof segment.scene_tag === "string" ? segment.scene_tag.trim() : "";
+      if (tag) {
+        lines.push(`[${tag}]`);
+      }
+      return lines.join("\n");
+    })
+    .join("\n\n")
+    .trim();
+}
+
+function buildSceneTranslationPrompt(result) {
+  if (!result) return null;
+
+  const subtitles = Array.isArray(result.subtitles) ? result.subtitles : [];
+  const scenes = Array.isArray(result.scenes) ? result.scenes : [];
+  const rawScript = typeof result.script === "string" ? result.script.trim() : "";
+
+  const sections = [];
+
+  const srtText = serializeSubtitlesForPrompt(subtitles);
+  if (srtText) {
+    sections.push(`### SRT 자막\n${srtText}`);
+  }
+
+  if (scenes.length) {
+    const scenesText = scenes
+      .map((scene, idx) => {
+        const tag = typeof scene.scene_tag === "string" && scene.scene_tag.trim() ? scene.scene_tag.trim() : `씬 ${idx + 1}`;
+        const hasStart = scene.start !== undefined && scene.start !== null;
+        const hasEnd = scene.end !== undefined && scene.end !== null;
+        const timeParts = [];
+        if (hasStart) {
+          timeParts.push(formatTimecode(scene.start));
+        }
+        if (hasEnd) {
+          const arrow = timeParts.length ? " → " : "";
+          timeParts.push(`${arrow}${formatTimecode(scene.end)}`);
+        }
+        const headline = timeParts.length ? `[${tag}] ${timeParts.join("")}` : `[${tag}]`;
+        const lines = [headline];
+
+        const action = typeof scene.action === "string" ? scene.action.trim() : "";
+        if (action) {
+          lines.push(`대사/연출: ${action}`);
+        }
+        const camera = typeof scene.camera === "string" ? scene.camera.trim() : "";
+        if (camera) {
+          lines.push(`카메라: ${camera}`);
+        }
+        const mood = typeof scene.mood === "string" ? scene.mood.trim() : "";
+        if (mood) {
+          lines.push(`분위기: ${mood}`);
+        }
+
+        return lines.join("\n");
+      })
+      .join("\n\n")
+      .trim();
+
+    if (scenesText) {
+      sections.push(`### 장면 프롬프트\n${scenesText}`);
+    }
+  }
+
+  if (!sections.length && rawScript) {
+    sections.push(`### 원본 스크립트\n${rawScript}`);
+  }
+
+  const scriptBody = sections.join("\n\n").trim();
+  if (!scriptBody) {
+    return null;
+  }
+
+  const sourceLanguage = (result.language || "ko").toLowerCase();
+  const targetLanguage = determineTargetLanguage(sourceLanguage);
+  const sourceLabel = getLanguageDisplayName(sourceLanguage);
+  const targetLabel = getLanguageDisplayName(targetLanguage);
+
+  const instructions = `다음은 ${sourceLabel}로 작성된 유튜브 쇼츠 영상의 씬 대본 전체입니다. 모든 자막과 장면 설명을 ${targetLabel}로 번역하고, 표 형태로 원문과 번역문을 비교해 주세요. 씬 번호, 시간 정보, 카메라/분위기 지시사항도 유지하면서 번역문을 제공합니다.`;
+
+  const clipboardPrompt = `${instructions}\n\n---\n${scriptBody}`;
+  const urlPrompt = `${instructions}\n\n${scriptBody}`;
+  const fallbackPrompt = `유튜브 쇼츠 씬 대본을 ${sourceLabel}에서 ${targetLabel}로 번역하고 원문과 번역문을 표로 비교해 주세요. 전체 텍스트는 곧 붙여넣겠습니다.`;
+
+  return {
+    clipboardPrompt,
+    urlPrompt,
+    fallbackPrompt,
+    sourceLabel,
+    targetLabel
+  };
+}
+
+function buildScriptTranslationPrompt(result) {
+  if (!result) return null;
+
+  const subtitles = Array.isArray(result.subtitles) ? result.subtitles : [];
+  const images = Array.isArray(result.images) ? result.images : [];
+  const summaryItems = Array.isArray(result.summary) ? result.summary : [];
+
+  const sections = [];
+
+  const srtText = serializeSubtitlesForPrompt(subtitles);
+  if (srtText) {
+    sections.push(`### SRT 자막\n${srtText}`);
+  }
+
+  if (images.length) {
+    const imageText = images
+      .map((image, idx) => {
+        const tag = typeof image.tag === "string" && image.tag.trim() ? image.tag.trim() : `이미지 ${idx + 1}`;
+        const description = typeof image.description === "string" ? image.description.trim() : "";
+        return `- [${tag}] ${description}`;
+      })
+      .join("\n")
+      .trim();
+    if (imageText) {
+      sections.push(`### 이미지 장면 묘사\n${imageText}`);
+    }
+  }
+
+  if (summaryItems.length) {
+    const summaryText = summaryItems
+      .map((item) => (typeof item === "string" ? item.trim() : String(item)))
+      .filter(Boolean)
+      .map((item) => `- ${item}`)
+      .join("\n");
+    if (summaryText) {
+      sections.push(`### 요약\n${summaryText}`);
+    }
+  }
+
+  if (!sections.length) {
+    return null;
+  }
+
+  const sourceLanguage = (result.language || "ko").toLowerCase();
+  const targetLanguage = determineTargetLanguage(sourceLanguage);
+  const sourceLabel = getLanguageDisplayName(sourceLanguage);
+  const targetLabel = getLanguageDisplayName(targetLanguage);
+
+  const instructions = `다음은 ${sourceLabel}로 작성된 유튜브 쇼츠용 SRT 자막과 장면 묘사 전체입니다. 모든 자막과 이미지 프롬프트를 ${targetLabel}로 번역하고, 표 형태로 원문과 번역문을 비교해 주세요. 타임라인 번호와 [이미지 #] 태그를 유지하면서 번역문을 제공합니다.`;
+
+  const scriptBody = sections.join("\n\n").trim();
+  const clipboardPrompt = `${instructions}\n\n---\n${scriptBody}`;
+  const urlPrompt = `${instructions}\n\n${scriptBody}`;
+  const fallbackPrompt = `유튜브 쇼츠 SRT 대본을 ${sourceLabel}에서 ${targetLabel}로 번역하고 원문과 번역문을 표로 비교해 주세요. 전체 텍스트는 곧 붙여넣겠습니다.`;
+
+  return {
+    clipboardPrompt,
+    urlPrompt,
+    fallbackPrompt,
+    sourceLabel,
+    targetLabel
+  };
+}
+
+function getTrimEntries(toolKey) {
+  if (!toolKey) return [];
+  return state.videoTrimQueue.filter((entry) => entry.tool === toolKey);
+}
+
+function updateTrimBadge(toolKey) {
+  const alias = getToolAlias(toolKey);
+  if (!alias) return;
+  const badge = document.querySelector(`[data-trim-counter='${alias}']`);
+  if (!badge) return;
+  const count = getTrimEntries(toolKey).length;
+  if (count > 0) {
+    badge.textContent = `✂️ ${count}`;
+    badge.hidden = false;
+  } else {
+    badge.textContent = "";
+    badge.hidden = true;
+  }
+}
+
+function registerVideoTrimOperation(toolKey, mode, payload = {}, result = {}) {
+  const entry = {
+    id: `trim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tool: toolKey,
+    mode,
+    payload,
+    keyword: result?.keyword ?? "",
+    language: result?.language ?? "",
+    created_at: new Date().toISOString()
+  };
+  state.videoTrimQueue.push(entry);
+  updateTrimBadge(toolKey);
+  console.debug("Registered video trim operation:", entry);
+}
+
+function clearTrimQueueForTool(toolKey) {
+  state.videoTrimQueue = state.videoTrimQueue.filter((entry) => entry.tool !== toolKey);
+  updateTrimBadge(toolKey);
+}
+
+function buildResultPreview(toolKey) {
+  const result = state.latestResults[toolKey];
+  if (!result) return null;
+
+  const keyword = escapeHtml(result.keyword ?? "—");
+  const language = escapeHtml(result.language ?? "-");
+  const subtitles = Array.isArray(result.subtitles) ? result.subtitles : [];
+  const images = Array.isArray(result.images) ? result.images : [];
+  const scenes = Array.isArray(result.scenes) ? result.scenes : [];
+  const trims = getTrimEntries(toolKey);
+
+  const sections = [];
+
+  sections.push(`
+    <section class="preview-section">
+      <ul class="preview-meta-list">
+        <li><strong>키워드:</strong> ${keyword || "—"}</li>
+        <li><strong>언어:</strong> ${language || "-"}</li>
+        <li><strong>자막 개수:</strong> ${subtitles.length}</li>
+      </ul>
+    </section>
+  `);
+
+  if (subtitles.length) {
+    const limited = subtitles.slice(0, 10);
+    const items = limited
+      .map((segment, idx) => {
+        const index = typeof segment.index === "number" ? segment.index : idx + 1;
+        const start = toSeconds(segment.start ?? segment.start_time);
+        const end = toSeconds(segment.end ?? segment.end_time);
+        const startLabel = Number.isFinite(start) ? formatTimecode(start) : "-";
+        const endLabel = Number.isFinite(end) ? formatTimecode(end) : "-";
+        const text = escapeHtml(segment.text ?? "");
+        const tag = segment.scene_tag ? `<span class="preview-meta-tag">${escapeHtml(segment.scene_tag)}</span>` : "";
+        return `
+          <li>
+            <div class="preview-row-header">
+              <strong>#${index}</strong>
+              <span>${startLabel} → ${endLabel}</span>
+            </div>
+            <p>${text || "<em>내용 없음</em>"}</p>
+            ${tag ? `<p class="preview-meta">${tag}</p>` : ""}
+          </li>
+        `;
+      })
+      .join("");
+    const remainder = subtitles.length > limited.length ? `<p class="preview-meta">총 ${subtitles.length}개 중 ${limited.length}개만 표시됩니다.</p>` : "";
+    sections.push(`
+      <section class="preview-section">
+        <h4>자막 미리보기</h4>
+        <ul class="preview-list">${items}</ul>
+        ${remainder}
+      </section>
+    `);
+  }
+
+  if (toolKey === TOOL_KEYS.SCRIPT && images.length) {
+    const limited = images.slice(0, 6);
+    const items = limited
+      .map((image, idx) => {
+        const tag = escapeHtml(image.tag ?? `이미지 ${idx + 1}`);
+        const description = escapeHtml(image.description ?? "");
+        const start = toSeconds(image.start);
+        const end = toSeconds(image.end);
+        const startLabel = Number.isFinite(start) ? formatTimecode(start) : "-";
+        const endLabel = Number.isFinite(end) ? formatTimecode(end) : "-";
+        return `
+          <li>
+            <div class="preview-row-header">
+              <strong>${tag}</strong>
+              <span>${startLabel} → ${endLabel}</span>
+            </div>
+            <p>${description || "<em>설명이 없습니다.</em>"}</p>
+          </li>
+        `;
+      })
+      .join("");
+    const remainder = images.length > limited.length ? `<p class="preview-meta">총 ${images.length}개 중 ${limited.length}개만 표시됩니다.</p>` : "";
+    sections.push(`
+      <section class="preview-section">
+        <h4>이미지 장면 프롬프트</h4>
+        <ul class="preview-list">${items}</ul>
+        ${remainder}
+      </section>
+    `);
+  }
+
+  if (toolKey === TOOL_KEYS.SCENES && scenes.length) {
+    const limited = scenes.slice(0, 8);
+    const items = limited
+      .map((scene, idx) => {
+        const tag = escapeHtml(scene.scene_tag ?? `씬 ${idx + 1}`);
+        const start = toSeconds(scene.start);
+        const end = toSeconds(scene.end);
+        const startLabel = Number.isFinite(start) ? formatTimecode(start) : "-";
+        const endLabel = Number.isFinite(end) ? formatTimecode(end) : "-";
+        const action = escapeHtml(scene.action ?? "");
+        const camera = escapeHtml(scene.camera ?? "");
+        const mood = escapeHtml(scene.mood ?? "");
+        return `
+          <li>
+            <div class="preview-row-header">
+              <strong>${tag}</strong>
+              <span>${startLabel} → ${endLabel}</span>
+            </div>
+            <p>${action || "<em>액션 설명 없음</em>"}</p>
+            <p class="preview-meta">${camera ? `카메라: ${camera}` : ""}${camera && mood ? " · " : ""}${mood ? `분위기: ${mood}` : ""}</p>
+          </li>
+        `;
+      })
+      .join("");
+    const remainder = scenes.length > limited.length ? `<p class="preview-meta">총 ${scenes.length}개 중 ${limited.length}개만 표시됩니다.</p>` : "";
+    sections.push(`
+      <section class="preview-section">
+        <h4>영상 장면 프롬프트</h4>
+        <ul class="preview-list">${items}</ul>
+        ${remainder}
+      </section>
+    `);
+  }
+
+  if (typeof result.script === "string" && result.script.trim()) {
+    sections.push(`
+      <section class="preview-section">
+        <h4>원문 스크립트</h4>
+        <pre class="preview-code">${escapeHtml(result.script.trim())}</pre>
+      </section>
+    `);
+  }
+
+  const trimsMarkup = trims.length
+    ? `<ul class="preview-list">${trims
+        .map((entry) => {
+          const label = TRIM_LABELS[entry.mode] || entry.mode;
+          const timestamp = Number.isFinite(entry?.payload?.timestamp)
+            ? formatTimecode(entry.payload.timestamp)
+            : null;
+          const created = formatTimestamp(entry.created_at);
+          return `
+            <li>
+              <div class="preview-row-header">
+                <strong>${label}</strong>
+                <span>${created}</span>
+              </div>
+              ${
+                timestamp
+                  ? `<p class="preview-meta">기준 시간: ${timestamp}</p>`
+                  : ""
+              }
+            </li>
+          `;
+        })
+        .join("")}</ul>`
+    : '<p class="preview-meta">등록된 프레임 자르기 명령이 없습니다.</p>';
+
+  sections.push(`
+    <section class="preview-section">
+      <h4>프레임 자르기 명령</h4>
+      ${trimsMarkup}
+    </section>
+  `);
+
+  const body = sections.join("");
+  const title =
+    toolKey === TOOL_KEYS.SCRIPT ? "쇼츠 SRT 대본 미리보기" : toolKey === TOOL_KEYS.SCENES ? "쇼츠 씬 대본 미리보기" : "결과 미리보기";
+
+  return {
+    title,
+    body
+  };
+}
+
+function showResultPreview(toolAliasOrKey) {
+  const toolKey = resolveToolKey(toolAliasOrKey);
+  if (!toolKey) {
+    showNotification("미리보기를 지원하지 않는 도구입니다.", "error");
+    return;
+  }
+  const preview = buildResultPreview(toolKey);
+  if (!preview) {
+    showNotification("표시할 결과가 없습니다. 먼저 결과를 생성해 주세요.", "error");
+    return;
+  }
+  openPreviewModal(preview.title, preview.body);
+}
+
+function handleVideoTrim(toolAliasOrKey, mode) {
+  const toolKey = resolveToolKey(toolAliasOrKey);
+  if (!toolKey) {
+    showNotification("프레임 자르기를 지원하지 않는 도구입니다.", "error");
+    return;
+  }
+  const result = state.latestResults[toolKey];
+  if (!result) {
+    showNotification("먼저 결과를 생성해 주세요.", "error");
+    return;
+  }
+  const label = TRIM_LABELS[mode] || "프레임";
+  const payload = {};
+  if (mode === "current") {
+    const input = window.prompt("현재 프레임 시간을 초 단위로 입력하세요 (예: 12.5)", "");
+    if (input === null) return;
+    const numeric = Number(input);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      showNotification("올바른 시간을 입력하세요.", "error");
+      return;
+    }
+    payload.timestamp = numeric;
+  }
+  registerVideoTrimOperation(toolKey, mode, payload, result);
+  showNotification(`영상 ${label} 자르기 작업이 추가되었습니다.`, "success");
+}
+
+async function openSceneTranslationComparison() {
+  await openTranslationComparison(
+    state.latestResults[TOOL_KEYS.SCENES],
+    buildSceneTranslationPrompt,
+    "씬 대본"
+  );
+}
+
+async function openScriptTranslationComparison() {
+  await openTranslationComparison(
+    state.latestResults[TOOL_KEYS.SCRIPT],
+    buildScriptTranslationPrompt,
+    "SRT 대본"
+  );
+}
+
+async function openTranslationComparison(result, promptBuilder, label) {
+  if (!result) {
+    showNotification(`생성된 ${label}이 없습니다.`, "error");
+    return;
+  }
+
+  const promptConfig = promptBuilder(result);
+  if (!promptConfig) {
+    showNotification(`${label}에 번역할 내용이 없습니다.`, "error");
+    return;
+  }
+
+  const encodedPrompt = encodeURIComponent(promptConfig.urlPrompt);
+  let chatgptUrl = `https://chatgpt.com/?q=${encodedPrompt}`;
+  let usedFallback = false;
+
+  if (encodedPrompt.length > 1800) {
+    const fallbackQuery = encodeURIComponent(promptConfig.fallbackPrompt);
+    chatgptUrl = `https://chatgpt.com/?q=${fallbackQuery}`;
+    usedFallback = true;
+  }
+
+  window.open(chatgptUrl, "_blank", "width=1200,height=800");
+
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(promptConfig.clipboardPrompt);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = promptConfig.clipboardPrompt;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+
+    const successMessage = usedFallback
+      ? `${promptConfig.sourceLabel} → ${promptConfig.targetLabel} 번역 비교용 프롬프트를 클립보드에 복사했습니다. ChatGPT 창에 붙여넣어 주세요.`
+      : `${promptConfig.sourceLabel} → ${promptConfig.targetLabel} 번역 비교용 프롬프트를 클립보드에 복사했습니다. ChatGPT 창을 확인하세요.`;
+    showNotification(successMessage, "success");
+  } catch (error) {
+    console.error("Failed to copy translation prompt:", error);
+    showNotification("클립보드 복사에 실패했습니다. ChatGPT 창에서 직접 붙여넣어 주세요.", "error");
+  }
 }
 
 const TOOL_CONFIG = {
@@ -1070,7 +2110,7 @@ function handleSavedSectionClick(event) {
   }
 }
 
-async function continueGeneration(tool) {
+async function continueGeneration(tool, modeVariant = null) {
   const endpoint = GENERATION_ENDPOINTS[tool];
   if (!endpoint) {
     alert("이 기능은 지원되지 않습니다.");
@@ -1081,13 +2121,81 @@ async function continueGeneration(tool) {
     alert("먼저 초기 결과를 생성하세요.");
     return;
   }
+
+  const form =
+    tool === TOOL_KEYS.SCRIPT
+      ? document.getElementById("shorts-script-form")
+      : tool === TOOL_KEYS.SCENES
+      ? document.getElementById("shorts-scenes-form")
+      : null;
+  const modeSelect = form ? form.querySelector("select[name='mode']") : null;
+  const currentMode = modeSelect ? modeSelect.value : "api";
+
+  if (currentMode === "chatgpt" && tool === TOOL_KEYS.SCRIPT && modeVariant === "story") {
+    const latest = state.latestResults[TOOL_KEYS.SCRIPT];
+    const subtitles = Array.isArray(latest?.subtitles) ? latest.subtitles : [];
+    if (!subtitles.length) {
+      alert("먼저 자막을 생성하거나 불러오세요.");
+      return;
+    }
+    const keyword = latest?.keyword || request.keyword || "";
+    const language = request.language || "en";
+    const existingSRT = buildExistingSRTString(subtitles);
+    const summaryList = Array.isArray(latest?.summary) ? latest.summary : [];
+    const maxIndex =
+      subtitles.reduce((acc, item, idx) => {
+        if (typeof item.index === "number") {
+          return Math.max(acc, item.index);
+        }
+        return Math.max(acc, idx + 1);
+      }, 0) || subtitles.length;
+    const nextIndex = maxIndex + 1;
+    const existingImageCount =
+      (Array.isArray(latest?.images) ? latest.images.length : 0) ||
+      subtitles.filter((sub) => /\[(?:이미지|image)\s*\d+\]/i.test(sub.scene_tag || "")).length;
+    const nextImage = existingImageCount + 1;
+
+    const lastEndSeconds =
+      subtitles.reduce((acc, item) => {
+        const endValue = item.end;
+        if (typeof endValue === "string") {
+          const converted = parseTimecodeToSeconds(endValue);
+          if (converted !== null) {
+            return Math.max(acc, converted);
+          }
+        } else if (typeof endValue === "number" && !Number.isNaN(endValue)) {
+          return Math.max(acc, endValue);
+        }
+        return acc;
+      }, 0) || 0;
+    const nextStartTimecode = formatTimecode(lastEndSeconds);
+
+    const prompt = createScriptContinuationPrompt({
+      keyword,
+      language,
+      existingSRT,
+      nextIndex,
+      nextImage,
+      nextStartTimecode,
+      summary: summaryList
+    });
+
+    const chatgptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+    window.open(chatgptUrl, "_blank", "width=1200,height=800");
+    return;
+  }
+
   try {
     const options = { method: "POST" };
+    const payload = { ...request };
+    if (modeVariant) {
+      payload.continue_mode = modeVariant;
+    }
     if (endpoint.type === "json") {
-      options.body = JSON.stringify(request);
+      options.body = JSON.stringify(payload);
     } else {
       const formData = new FormData();
-      Object.entries(request).forEach(([key, value]) => {
+      Object.entries(payload).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           formData.append(key, value);
         }
@@ -1100,6 +2208,9 @@ async function continueGeneration(tool) {
     if (tool === TOOL_KEYS.SCRIPT) {
       current.subtitles = [...(current.subtitles || []), ...(fresh.subtitles || [])];
       current.images = [...(current.images || []), ...(fresh.images || [])];
+      if (Array.isArray(fresh.summary) && fresh.summary.length) {
+        current.summary = [...fresh.summary];
+      }
       current.keyword = fresh.keyword || current.keyword;
       current.language = fresh.language || current.language;
       state.latestResults[tool] = current;
@@ -1723,6 +2834,81 @@ function initShortsScriptPage() {
   const englishPromptBtn = form.querySelector("[data-generate-script-english-prompt]");
   const englishPromptTextarea = toolContent ? toolContent.querySelector("#shorts-script-english-prompt") : null;
   const englishPromptCopyBtn = toolContent ? toolContent.querySelector("[data-copy-script-english-prompt]") : null;
+  const koreanPromptBtn = form.querySelector("[data-generate-script-korean-prompt]");
+  const koreanPromptTextarea = toolContent ? toolContent.querySelector("#shorts-script-korean-prompt") : null;
+  const koreanPromptCopyBtn = toolContent ? toolContent.querySelector("[data-copy-script-korean-prompt]") : null;
+  const importChatgptBtn = form.querySelector("[data-import-chatgpt-script]");
+  const modeSelect = form.querySelector("select[name='mode']");
+
+  const updateImportButtonState = () => {
+    if (!importChatgptBtn) return;
+    if (!modeSelect) {
+      importChatgptBtn.disabled = false;
+      return;
+    }
+    importChatgptBtn.disabled = modeSelect.value !== "chatgpt";
+  };
+
+  if (modeSelect && importChatgptBtn) {
+    updateImportButtonState();
+    modeSelect.addEventListener("change", updateImportButtonState);
+  } else if (importChatgptBtn) {
+    importChatgptBtn.disabled = true;
+  }
+
+  const processChatGPTShortsContent = (chatgptResult, keywordValue, languageValue) => {
+    if (!chatgptResult) {
+      alert("ChatGPT 결과를 입력해주세요.");
+      return;
+    }
+
+    console.log("원본 텍스트:", chatgptResult);
+    const parsed = parseChatGPTShortsResult(chatgptResult);
+    console.log("파싱 결과:", parsed);
+
+    if (parsed.subtitles.length === 0 && parsed.images.length === 0) {
+      resultsContainer.innerHTML = `
+        <article>
+          <header>
+            <h3>ChatGPT 결과 (원본)</h3>
+            <p>키워드: <strong>${escapeHtml(keywordValue || "")}</strong></p>
+          </header>
+          <div style="white-space: pre-wrap; font-family: monospace; background: #f5f5f5; padding: 1rem; border-radius: 4px;">
+            ${escapeHtml(chatgptResult)}
+          </div>
+        </article>
+      `;
+      return;
+    }
+
+    const previous = state.latestResults[TOOL_KEYS.SCRIPT] || {};
+    const previousSummary = Array.isArray(previous.summary)
+      ? previous.summary.map((item) => String(item ?? "").trim()).filter(Boolean)
+      : [];
+    let mergedSummary = [...previousSummary];
+    if (Array.isArray(parsed.summary) && parsed.summary.length) {
+      const seen = new Set(previousSummary);
+      parsed.summary.forEach((item) => {
+        const normalised = String(item ?? "").trim();
+        if (normalised && !seen.has(normalised)) {
+          seen.add(normalised);
+          mergedSummary.push(normalised);
+        }
+      });
+    }
+
+    const data = {
+      subtitles: parsed.subtitles,
+      images: parsed.images,
+      summary: mergedSummary,
+      keyword: keywordValue,
+      language: languageValue
+    };
+
+    clearTrimQueueForTool(TOOL_KEYS.SCRIPT);
+    state.latestResults[TOOL_KEYS.SCRIPT] = data;
+    renderShortsScriptResults(data);
+  };
 
   if (englishPromptTextarea) {
     englishPromptTextarea.addEventListener("input", () => {
@@ -1731,6 +2917,17 @@ function initShortsScriptPage() {
         englishPromptCopyBtn.disabled = !hasText;
         if (!hasText) {
           englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }
+      }
+    });
+  }
+  if (koreanPromptTextarea) {
+    koreanPromptTextarea.addEventListener("input", () => {
+      const hasText = koreanPromptTextarea.value.trim().length > 0;
+      if (koreanPromptCopyBtn) {
+        koreanPromptCopyBtn.disabled = !hasText;
+        if (!hasText) {
+          koreanPromptCopyBtn.textContent = "프롬프트 복사";
         }
       }
     });
@@ -1785,6 +2982,48 @@ function initShortsScriptPage() {
       }
     });
   }
+  if (koreanPromptBtn) {
+    koreanPromptBtn.addEventListener("click", async () => {
+      const keywordInput = form.querySelector("input[name='shorts_keyword']");
+      const keyword = keywordInput ? keywordInput.value.trim() : "";
+      if (!keyword) {
+        alert("스토리 키워드를 입력하세요.");
+        return;
+      }
+      try {
+        koreanPromptBtn.disabled = true;
+        koreanPromptBtn.setAttribute("aria-busy", "true");
+        if (koreanPromptTextarea) {
+          koreanPromptTextarea.value = "한국어 프롬프트를 생성 중입니다...";
+        }
+        if (koreanPromptCopyBtn) {
+          koreanPromptCopyBtn.disabled = true;
+          koreanPromptCopyBtn.textContent = "프롬프트 복사";
+        }
+        const data = await api("/api/generate/shorts-script-prompt", {
+          method: "POST",
+          body: JSON.stringify({ keyword, language: "ko" })
+        });
+        if (koreanPromptTextarea) {
+          koreanPromptTextarea.value = data?.prompt || "";
+          koreanPromptTextarea.scrollTop = 0;
+          koreanPromptTextarea.dispatchEvent(new Event("input"));
+          koreanPromptTextarea.focus();
+        }
+      } catch (error) {
+        console.error("Failed to generate Korean prompt:", error);
+        alert(error.message || "한국어 프롬프트 생성에 실패했습니다.");
+        if (koreanPromptTextarea) {
+          koreanPromptTextarea.value = "";
+          koreanPromptTextarea.dispatchEvent(new Event("input"));
+          koreanPromptTextarea.focus();
+        }
+      } finally {
+        koreanPromptBtn.disabled = false;
+        koreanPromptBtn.removeAttribute("aria-busy");
+      }
+    });
+  }
 
   if (englishPromptCopyBtn && englishPromptTextarea) {
     englishPromptCopyBtn.addEventListener("click", async () => {
@@ -1805,6 +3044,25 @@ function initShortsScriptPage() {
       }
     });
   }
+  if (koreanPromptCopyBtn && koreanPromptTextarea) {
+    koreanPromptCopyBtn.addEventListener("click", async () => {
+      const promptText = koreanPromptTextarea.value.trim();
+      if (!promptText) {
+        alert("먼저 한국어 프롬프트를 생성하세요.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(promptText);
+        koreanPromptCopyBtn.textContent = "복사 완료!";
+        setTimeout(() => {
+          koreanPromptCopyBtn.textContent = "프롬프트 복사";
+        }, 2000);
+      } catch (error) {
+        console.error("Failed to copy prompt:", error);
+        alert("클립보드에 복사하지 못했습니다. 직접 복사해 주세요.");
+      }
+    });
+  }
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1817,6 +3075,7 @@ function initShortsScriptPage() {
     }
     const language = String(formData.get("language") || "ko") || "ko";
     const englishPromptText = englishPromptTextarea ? englishPromptTextarea.value.trim() : "";
+    const koreanPromptText = koreanPromptTextarea ? koreanPromptTextarea.value.trim() : "";
 
     // ChatGPT 창 모드 처리
     if (mode === "chatgpt") {
@@ -1825,6 +3084,7 @@ function initShortsScriptPage() {
 
       const prompt =
         englishPromptText ||
+        koreanPromptText ||
         `입력받은 "${keyword}"라는 스토리 키워드를 바탕으로, 아래 기준에 따라 유튜브 Shorts용 60초 분량의 자막과 이미지 장면 묘사를 ${langText}로 생성하세요.
 
 ### 출력 규칙
@@ -1879,41 +3139,7 @@ function initShortsScriptPage() {
 
       processBtn.addEventListener('click', () => {
         const chatgptResult = textarea.value.trim();
-        if (!chatgptResult) {
-          alert('ChatGPT 결과를 입력해주세요.');
-          return;
-        }
-
-        // ChatGPT 결과를 파싱하여 표시
-        console.log('원본 텍스트:', chatgptResult);
-        const parsed = parseChatGPTShortsResult(chatgptResult);
-        console.log('파싱 결과:', parsed);
-
-        // 파싱이 실패한 경우 원본 텍스트를 표시
-        if (parsed.subtitles.length === 0 && parsed.images.length === 0) {
-          resultsContainer.innerHTML = `
-            <article>
-              <header>
-                <h3>ChatGPT 결과 (원본)</h3>
-                <p>키워드: <strong>${escapeHtml(keyword)}</strong></p>
-              </header>
-              <div style="white-space: pre-wrap; font-family: monospace; background: #f5f5f5; padding: 1rem; border-radius: 4px;">
-                ${escapeHtml(chatgptResult)}
-              </div>
-            </article>
-          `;
-          return;
-        }
-
-        const data = {
-          subtitles: parsed.subtitles,
-          images: parsed.images,
-          keyword: keyword,
-          language: language
-        };
-
-        state.latestResults[TOOL_KEYS.SCRIPT] = data;
-        renderShortsScriptResults(data);
+        processChatGPTShortsContent(chatgptResult, keyword, language);
       });
 
       return;
@@ -1932,10 +3158,12 @@ function initShortsScriptPage() {
         method: "POST",
         body: JSON.stringify(payload)
       });
-      state.latestResults[TOOL_KEYS.SCRIPT] = data;
+      const normalizedData = { ...data, summary: Array.isArray(data.summary) ? data.summary : [] };
+      clearTrimQueueForTool(TOOL_KEYS.SCRIPT);
+      state.latestResults[TOOL_KEYS.SCRIPT] = normalizedData;
       state.activeRecords[TOOL_KEYS.SCRIPT] = null;
       state.audioResults[TOOL_KEYS.SCRIPT] = null;
-      renderShortsScriptResults(data);
+      renderShortsScriptResults(normalizedData);
       renderSavedRecords(TOOL_KEYS.SCRIPT);
     } catch (error) {
       resultsContainer.innerHTML = `<div class="placeholder"><p>${escapeHtml(error.message)}</p></div>`;
@@ -1958,6 +3186,9 @@ function initShortsScenesPage() {
   const englishPromptBtn = form.querySelector("[data-generate-english-prompt]");
   const englishPromptTextarea = toolContent ? toolContent.querySelector("#shorts-scenes-english-prompt") : null;
   const englishPromptCopyBtn = toolContent ? toolContent.querySelector("[data-copy-english-prompt]") : null;
+  const koreanPromptBtn = form.querySelector("[data-generate-korean-prompt]");
+  const koreanPromptTextarea = toolContent ? toolContent.querySelector("#shorts-scenes-korean-prompt") : null;
+  const koreanPromptCopyBtn = toolContent ? toolContent.querySelector("[data-copy-korean-prompt]") : null;
 
   if (englishPromptTextarea) {
     englishPromptTextarea.addEventListener("input", () => {
@@ -1966,6 +3197,17 @@ function initShortsScenesPage() {
         englishPromptCopyBtn.disabled = !hasText;
         if (!hasText) {
           englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }
+      }
+    });
+  }
+  if (koreanPromptTextarea) {
+    koreanPromptTextarea.addEventListener("input", () => {
+      const hasText = koreanPromptTextarea.value.trim().length > 0;
+      if (koreanPromptCopyBtn) {
+        koreanPromptCopyBtn.disabled = !hasText;
+        if (!hasText) {
+          koreanPromptCopyBtn.textContent = "프롬프트 복사";
         }
       }
     });
@@ -2020,6 +3262,48 @@ function initShortsScenesPage() {
       }
     });
   }
+  if (koreanPromptBtn) {
+    koreanPromptBtn.addEventListener("click", async () => {
+      const keywordInput = form.querySelector("input[name='scenes_keyword']");
+      const keyword = keywordInput ? keywordInput.value.trim() : "";
+      if (!keyword) {
+        alert("스토리 키워드를 입력하세요.");
+        return;
+      }
+      try {
+        koreanPromptBtn.disabled = true;
+        koreanPromptBtn.setAttribute("aria-busy", "true");
+        if (koreanPromptTextarea) {
+          koreanPromptTextarea.value = "한국어 프롬프트를 생성 중입니다...";
+        }
+        if (koreanPromptCopyBtn) {
+          koreanPromptCopyBtn.disabled = true;
+          koreanPromptCopyBtn.textContent = "프롬프트 복사";
+        }
+        const data = await api("/api/generate/shorts-scenes-prompt", {
+          method: "POST",
+          body: JSON.stringify({ keyword, language: "ko" })
+        });
+        if (koreanPromptTextarea) {
+          koreanPromptTextarea.value = data?.prompt || "";
+          koreanPromptTextarea.scrollTop = 0;
+          koreanPromptTextarea.dispatchEvent(new Event("input"));
+          koreanPromptTextarea.focus();
+        }
+      } catch (error) {
+        console.error("Failed to generate scene Korean prompt:", error);
+        alert(error.message || "한국어 프롬프트 생성에 실패했습니다.");
+        if (koreanPromptTextarea) {
+          koreanPromptTextarea.value = "";
+          koreanPromptTextarea.dispatchEvent(new Event("input"));
+          koreanPromptTextarea.focus();
+        }
+      } finally {
+        koreanPromptBtn.disabled = false;
+        koreanPromptBtn.removeAttribute("aria-busy");
+      }
+    });
+  }
 
   if (englishPromptCopyBtn && englishPromptTextarea) {
     englishPromptCopyBtn.addEventListener("click", async () => {
@@ -2033,6 +3317,25 @@ function initShortsScenesPage() {
         englishPromptCopyBtn.textContent = "복사 완료!";
         setTimeout(() => {
           englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }, 2000);
+      } catch (error) {
+        console.error("Failed to copy prompt:", error);
+        alert("클립보드에 복사하지 못했습니다. 직접 복사해 주세요.");
+      }
+    });
+  }
+  if (koreanPromptCopyBtn && koreanPromptTextarea) {
+    koreanPromptCopyBtn.addEventListener("click", async () => {
+      const promptText = koreanPromptTextarea.value.trim();
+      if (!promptText) {
+        alert("먼저 한국어 프롬프트를 생성하세요.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(promptText);
+        koreanPromptCopyBtn.textContent = "복사 완료!";
+        setTimeout(() => {
+          koreanPromptCopyBtn.textContent = "프롬프트 복사";
         }, 2000);
       } catch (error) {
         console.error("Failed to copy prompt:", error);
@@ -2060,6 +3363,7 @@ function initShortsScenesPage() {
 
       const prompt =
         englishPromptText ||
+        koreanPromptText ||
         `입력받은 "${keyword}"라는 스토리 키워드를 바탕으로, 아래 기준에 따라 유튜브 Shorts용 60초 분량의 영상 장면 대본과 카메라/촬영 지시사항을 ${langText}로 생성하세요.
 
 ### 출력 규칙
@@ -2129,13 +3433,15 @@ function initShortsScenesPage() {
           return;
         }
 
-        // ChatGPT 결과를 파싱하여 표시
+        const parsed = parseChatGPTScenesResult(chatgptResult);
         const data = {
+          ...parsed,
           script: chatgptResult,
           keyword: keyword,
           language: language
         };
 
+        clearTrimQueueForTool(TOOL_KEYS.SCENES);
         state.latestResults[TOOL_KEYS.SCENES] = data;
         renderShortsSceneResults(data);
       });
@@ -2156,6 +3462,7 @@ function initShortsScenesPage() {
         method: "POST",
         body: JSON.stringify(payload)
       });
+      clearTrimQueueForTool(TOOL_KEYS.SCENES);
       state.latestResults[TOOL_KEYS.SCENES] = data;
       state.activeRecords[TOOL_KEYS.SCENES] = null;
       state.audioResults[TOOL_KEYS.SCENES] = null;
@@ -2170,6 +3477,7 @@ function initShortsScenesPage() {
       }
     }
   });
+
 }
 
 function renderProject(project) {
@@ -4323,7 +5631,8 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", () => {
       const tool = button.getAttribute("data-continue");
       if (!tool) return;
-      continueGeneration(tool);
+      const mode = button.getAttribute("data-continue-mode");
+      continueGeneration(tool, mode || null);
     });
   });
 
@@ -4333,6 +5642,42 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!tool) return;
       convertToSpeech(tool);
     });
+  });
+
+  document.querySelectorAll("[data-preview]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tool = button.getAttribute("data-preview");
+      if (!tool) return;
+      showResultPreview(tool);
+    });
+  });
+
+  document.querySelectorAll("[data-trim]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tool = button.getAttribute("data-trim");
+      if (!tool) return;
+      const mode = button.getAttribute("data-trim-mode") || "current";
+      handleVideoTrim(tool, mode);
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    const translateBtn = event.target.closest("[data-action^='gpt-translate-']");
+    if (!translateBtn) return;
+    event.preventDefault();
+    const action = translateBtn.getAttribute("data-action");
+    if (action === "gpt-translate-scenes") {
+      openSceneTranslationComparison();
+    } else if (action === "gpt-translate-script") {
+      openScriptTranslationComparison();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const copyBtn = event.target.closest("[data-copy-text]");
+    if (!copyBtn) return;
+    event.preventDefault();
+    handleCopyButton(copyBtn);
   });
 
   Object.keys(TOOL_CONFIG).forEach((tool) => {

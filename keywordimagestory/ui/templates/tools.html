@@ -179,7 +179,9 @@
           </div>
           <div class="form-actions">
             <button type="button" class="secondary" data-generate-script-english-prompt>영어 프롬프트 생성</button>
+            <button type="button" class="secondary" data-generate-script-korean-prompt>한국어 프롬프트 생성</button>
             <button type="submit" class="contrast">대본 생성</button>
+            <button type="button" class="secondary" data-import-chatgpt-script>대본 가져오기</button>
           </div>
         </form>
 
@@ -190,13 +192,30 @@
           </label>
           <button type="button" class="secondary" data-copy-script-english-prompt style="margin-top: 0.5rem;" disabled>프롬프트 복사</button>
         </div>
+        <div class="prompt-preview" id="script-korean-prompt-container" style="margin-top: 1rem;">
+          <label style="display: block;">
+            한국어 프롬프트
+            <textarea id="shorts-script-korean-prompt" placeholder="버튼을 누르면 한국어 프롬프트가 생성됩니다." style="width: 100%; min-height: 140px; margin-top: 0.5rem; resize: vertical;"></textarea>
+          </label>
+          <button type="button" class="secondary" data-copy-script-korean-prompt style="margin-top: 0.5rem;" disabled>프롬프트 복사</button>
+        </div>
 
         <div class="advanced-actions">
           <div class="action-group">
             <h4>🔧 고급 기능</h4>
+          <div class="action-buttons">
+            <button type="button" data-tts="shorts_script" class="outline">🎤 음성 변환</button>
+            <button type="button" data-continue="shorts_script" data-continue-mode="story" class="outline">➕ 스토리 이어서 생성</button>
+            <button type="button" data-continue="shorts_script" data-continue-mode="image" class="outline">➕ 이미지 이어서 생성</button>
+            <button type="button" data-preview="shorts_script" class="outline">👀 미리보기</button>
+          </div>
+        </div>
+          <div class="action-group">
+            <h4>✂️ 영상 프레임 자르기</h4>
             <div class="action-buttons">
-              <button type="button" data-tts="shorts_script" class="outline">🎤 음성 변환</button>
-              <button type="button" data-continue="shorts_script" class="outline">➕ 이미지 이어서 생성</button>
+              <button type="button" data-trim="shorts_script" data-trim-mode="start" class="outline">⏱️ 맨 앞프레임 자르기</button>
+              <button type="button" data-trim="shorts_script" data-trim-mode="end" class="outline">🏁 맨 뒤프레임 자르기</button>
+              <button type="button" data-trim="shorts_script" data-trim-mode="current" class="outline">🎯 현재 프레임 자르기</button>
             </div>
           </div>
           <div class="action-group">
@@ -264,6 +283,7 @@
           </div>
           <div class="form-actions">
             <button type="button" class="secondary" data-generate-english-prompt>영어 프롬프트 생성</button>
+            <button type="button" class="secondary" data-generate-korean-prompt>한국어 프롬프트 생성</button>
             <button type="submit" class="contrast">장면 생성</button>
           </div>
         </form>
@@ -275,13 +295,30 @@
           </label>
           <button type="button" class="secondary" data-copy-english-prompt style="margin-top: 0.5rem;" disabled>프롬프트 복사</button>
         </div>
+        <div class="prompt-preview" id="scenes-korean-prompt-container" style="margin-top: 1rem;">
+          <label style="display: block;">
+            한국어 프롬프트
+            <textarea id="shorts-scenes-korean-prompt" placeholder="버튼을 누르면 한국어 프롬프트가 생성됩니다." style="width: 100%; min-height: 140px; margin-top: 0.5rem; resize: vertical;"></textarea>
+          </label>
+          <button type="button" class="secondary" data-copy-korean-prompt style="margin-top: 0.5rem;" disabled>프롬프트 복사</button>
+        </div>
 
         <div class="advanced-actions">
           <div class="action-group">
             <h4>🔧 고급 기능</h4>
             <div class="action-buttons">
               <button type="button" data-tts="shorts_scenes" class="outline">🎤 음성 변환</button>
-              <button type="button" data-continue="shorts_scenes" class="outline">➕ 영상 이어서 생성</button>
+              <button type="button" data-continue="shorts_scenes" data-continue-mode="story" class="outline">➕ 스토리 이어서 생성</button>
+              <button type="button" data-continue="shorts_scenes" data-continue-mode="image" class="outline">➕ 영상 이어서 생성</button>
+              <button type="button" data-preview="shorts_scenes" class="outline">👀 미리보기</button>
+            </div>
+          </div>
+          <div class="action-group">
+            <h4>✂️ 영상 프레임 자르기</h4>
+            <div class="action-buttons">
+              <button type="button" data-trim="shorts_scenes" data-trim-mode="start" class="outline">⏱️ 맨 앞프레임 자르기</button>
+              <button type="button" data-trim="shorts_scenes" data-trim-mode="end" class="outline">🏁 맨 뒤프레임 자르기</button>
+              <button type="button" data-trim="shorts_scenes" data-trim-mode="current" class="outline">🎯 현재 프레임 자르기</button>
             </div>
           </div>
           <div class="action-group">

@@ -23,8 +23,11 @@ from keywordimagestory.generators import (
     ShortsScriptGenerator,
 )
 from keywordimagestory.prompts import (
+    PromptTemplate,
     SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE,
+    SHORTS_SCENE_KOREAN_PROMPT_TEMPLATE,
     SHORTS_SCRIPT_ENGLISH_PROMPT_TEMPLATE,
+    SHORTS_SCRIPT_KOREAN_PROMPT_TEMPLATE,
 )
 from keywordimagestory.models import (
     BackgroundMusicSegment,
@@ -68,6 +71,20 @@ def _project_or_404(project_id: str) -> StoryProject:
 
 def _language_label(code: str) -> str:
     return LANGUAGE_LABELS.get((code or "").lower(), code)
+
+
+def _select_script_prompt_template(language: str) -> PromptTemplate:
+    code = (language or settings.default_language).lower()
+    if code.startswith("ko"):
+        return SHORTS_SCRIPT_KOREAN_PROMPT_TEMPLATE
+    return SHORTS_SCRIPT_ENGLISH_PROMPT_TEMPLATE
+
+
+def _select_scene_prompt_template(language: str) -> PromptTemplate:
+    code = (language or settings.default_language).lower()
+    if code.startswith("ko"):
+        return SHORTS_SCENE_KOREAN_PROMPT_TEMPLATE
+    return SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +314,8 @@ async def api_generate_shorts_script_prompt(payload: dict[str, Any] = Body(...))
         raise HTTPException(status_code=400, detail="keyword is required")
 
     language = str(payload.get("language", settings.default_language) or settings.default_language)
-    prompt = SHORTS_SCRIPT_ENGLISH_PROMPT_TEMPLATE.format(
+    template = _select_script_prompt_template(language)
+    prompt = template.format(
         keyword=keyword,
         language_label=_language_label(language),
     )
@@ -315,7 +333,8 @@ async def api_generate_shorts_scenes_prompt(payload: dict[str, Any] = Body(...))
         raise HTTPException(status_code=400, detail="keyword is required")
 
     language = str(payload.get("language", settings.default_language) or settings.default_language)
-    prompt = SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE.format(
+    template = _select_scene_prompt_template(language)
+    prompt = template.format(
         keyword=keyword,
         language_label=_language_label(language),
     )
