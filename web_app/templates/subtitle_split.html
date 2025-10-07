@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>자막 분리 도구</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <h1>자막 분리 도구</h1>
+        <nav class="nav-links">
+            <a href="/ytdl" class="nav-link {% if nav_active == 'ytdl' %}active{% endif %}">⬇️ 다운로드 도구</a>
+            <a href="/subtitle-split" class="nav-link {% if nav_active == 'subtitle_split' %}active{% endif %}">✂️ 자막분리 하기</a>
+            <a href="/analysis" class="nav-link">📊 분석 도구</a>
+            <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
+            <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
+            <a href="/copyright" class="nav-link {% if nav_active == 'copyright' %}active{% endif %}">🛡️ 저작권 검사</a>
+        </nav>
+    </header>
+
+    <section class="panel">
+        <h2>자막 파일 업로드</h2>
+        <p class="panel-sub">SRT 또는 VTT 파일을 업로드하면 각 자막 블록을 시간 정보와 함께 분리해 보여줍니다.</p>
+        <form method="post" enctype="multipart/form-data" class="subtitle-form">
+            <div class="field">
+                <label for="subtitle_file">자막 파일 선택 (SRT / VTT)</label>
+                <input type="file" id="subtitle_file" name="subtitle_file" accept=".srt,.vtt" required>
+            </div>
+            <div class="field inline">
+                <label><input type="checkbox" name="remove_empty" checked> 빈 줄/공백 자막 제거</label>
+            </div>
+            <button type="submit">자막 분리하기</button>
+        </form>
+    </section>
+
+    {% if error %}
+    <div class="alert error">
+        <strong>오류:</strong> {{ error }}
+    </div>
+    {% endif %}
+
+    {% if show_results %}
+    <section class="panel subtitle-results">
+        <h2>분리 결과</h2>
+        <p class="panel-sub">
+            총 <strong>{{ summary.count }}</strong>개의 자막 블록{% if summary.original_filename %} ({{ summary.original_filename }}){% endif %}
+            {% if summary.converted %}<span class="hint-text">* VTT → SRT 자동 변환</span>{% endif %}
+        </p>
+
+        <div class="export-block">
+            <div class="export-header">
+                <h3>텍스트 내보내기</h3>
+                <div class="export-actions">
+                    <button type="button" class="btn-secondary" data-copy-target="plain-text-output">텍스트 복사</button>
+                    <button type="button" class="btn-secondary" data-download-target="plain-text-output" data-filename="subtitle_split.txt">TXT 다운로드</button>
+                </div>
+            </div>
+            <textarea id="plain-text-output" readonly rows="10">{{ plain_text }}</textarea>
+        </div>
+
+        <details class="advanced">
+            <summary>CSV 형식 미리보기</summary>
+            <div class="export-block">
+                <div class="export-header">
+                    <h3>CSV 데이터</h3>
+                    <div class="export-actions">
+                        <button type="button" class="btn-secondary" data-copy-target="csv-output">CSV 복사</button>
+                        <button type="button" class="btn-secondary" data-download-target="csv-output" data-filename="subtitle_split.csv">CSV 다운로드</button>
+                    </div>
+                </div>
+                <textarea id="csv-output" readonly rows="8">{{ csv_preview }}</textarea>
+            </div>
+        </details>
+
+        <div class="subtitle-table-wrapper">
+            <table class="subtitle-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>시작</th>
+                        <th>종료</th>
+                        <th>자막 내용</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in split_result %}
+                    <tr>
+                        <td>{{ entry.index }}</td>
+                        <td>{{ entry.start }}</td>
+                        <td>{{ entry.end }}</td>
+                        <td>
+                            {% for line in entry.text_lines %}
+                                {{ line }}{% if not loop.last %}<br>{% endif %}
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+</div>
+
+<script>
+const copyButtons = document.querySelectorAll('[data-copy-target]');
+copyButtons.forEach(btn => {
+    if (!btn.dataset.originalLabel) {
+        btn.dataset.originalLabel = btn.textContent;
+    }
+    btn.addEventListener('click', () => {
+        const targetId = btn.dataset.copyTarget;
+        const textarea = document.getElementById(targetId);
+        if (!textarea) return;
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        textarea.setSelectionRange(0, 0);
+        textarea.blur();
+        btn.textContent = '복사 완료!';
+        setTimeout(() => btn.textContent = btn.dataset.originalLabel, 1200);
+    });
+});
+
+const downloadButtons = document.querySelectorAll('[data-download-target]');
+downloadButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const targetId = btn.dataset.downloadTarget;
+        const textarea = document.getElementById(targetId);
+        if (!textarea) return;
+        const blob = new Blob([textarea.value], { type: 'text/plain;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = btn.dataset.filename || 'subtitle_split.txt';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    });
+});
+</script>
+</body>
+</html>

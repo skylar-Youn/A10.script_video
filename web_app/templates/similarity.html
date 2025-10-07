@@ -11,6 +11,7 @@
         <h1>영상 유사도 검사</h1>
         <nav class="nav-links">
             <a href="/ytdl" class="nav-link {% if nav_active == 'ytdl' %}active{% endif %}">⬇️ 다운로드 도구</a>
+            <a href="/subtitle-split" class="nav-link {% if nav_active == 'subtitle_split' %}active{% endif %}">✂️ 자막분리 하기</a>
             <a href="/analysis" class="nav-link">📊 분석 도구</a>
             <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
             <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
@@ -190,12 +191,6 @@ document.addEventListener('DOMContentLoaded', () => {
     gap: 10px;
     align-items: center;
     justify-content: flex-end;
-}
-
-.panel-sub {
-    margin: 0;
-    color: #c8d8e8;
-    font-size: 0.95rem;
 }
 
 .weights-row {

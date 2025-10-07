@@ -80,6 +80,7 @@ from ai_shorts_maker.translator import (
     delete_project_segment,
     UPLOADS_DIR,
 )
+from .utils.subtitle_split import SubtitleSplitError, split_subtitle_upload
 from videoanalysis.config import SAVED_RESULTS_DIR
 from youtube.ytdl import download_with_options, parse_sub_langs
 try:
@@ -137,6 +138,7 @@ YTDL_HISTORY_PATH = BASE_DIR / "ytdl_history.json"
 DEFAULT_YTDL_OUTPUT_DIR = (BASE_DIR.parent / "youtube" / "download").resolve()
 COPYRIGHT_UPLOAD_DIR = BASE_DIR / "uploads" / "copyright"
 COPYRIGHT_REPORT_DIR = BASE_DIR / "reports" / "copyright"
+SUBTITLE_UPLOAD_DIR = BASE_DIR / "uploads" / "subtitle_split"
 SIMILARITY_SETTINGS_PATH = BASE_DIR / "similarity_settings.json"
 COPYRIGHT_SETTINGS_PATH = BASE_DIR / "copyright_settings.json"
 DEFAULT_YTDL_SETTINGS: Dict[str, Any] = {
@@ -335,6 +337,7 @@ ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 COPYRIGHT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 COPYRIGHT_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+SUBTITLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="AI Shorts Maker")
 
@@ -1579,6 +1582,66 @@ def save_translator_settings(values: Dict[str, Any]) -> None:
 
 def _split_urls(raw: str) -> List[str]:
     return [line.strip() for line in raw.replace("\r", "\n").splitlines() if line.strip()]
+
+
+@app.get("/subtitle-split", response_class=HTMLResponse)
+async def subtitle_split_index(request: Request) -> HTMLResponse:
+    context = {
+        "request": request,
+        "nav_active": "subtitle_split",
+        "error": None,
+        "split_result": [],
+        "summary": None,
+        "plain_text": "",
+        "csv_preview": "",
+        "show_results": False,
+    }
+    return templates.TemplateResponse("subtitle_split.html", context)
+
+
+@app.post("/subtitle-split", response_class=HTMLResponse)
+async def subtitle_split_process(
+    request: Request,
+    subtitle_file: UploadFile = File(...),
+    remove_empty: Optional[str] = Form(None),
+) -> HTMLResponse:
+    error: Optional[str] = None
+    split_result: List[Dict[str, Any]] = []
+    summary: Optional[Dict[str, Any]] = None
+    plain_text = ""
+    csv_preview = ""
+
+    try:
+        file_bytes = await subtitle_file.read()
+        result = split_subtitle_upload(
+            file_bytes,
+            subtitle_file.filename or "",
+            SUBTITLE_UPLOAD_DIR,
+            remove_empty=remove_empty is not None,
+        )
+        split_result = result.entries
+        summary = result.summary
+        plain_text = result.plain_text
+        csv_preview = result.csv_preview
+    except SubtitleSplitError as exc:
+        error = str(exc)
+    except Exception as exc:  # pragma: no cover - unexpected failure
+        logger.exception("Subtitle split failed: %s", exc)
+        error = f"자막을 분리하는 중 오류가 발생했습니다: {exc}"
+    finally:
+        await subtitle_file.close()
+
+    context = {
+        "request": request,
+        "nav_active": "subtitle_split",
+        "error": error,
+        "split_result": split_result,
+        "summary": summary,
+        "plain_text": plain_text,
+        "csv_preview": csv_preview,
+        "show_results": bool(split_result) and error is None,
+    }
+    return templates.TemplateResponse("subtitle_split.html", context)
 
 
 @app.get("/ytdl", response_class=HTMLResponse)
