@@ -57,6 +57,14 @@ def create_app() -> FastAPI:
     async def ytdl_page(request: Request):
         return templates.TemplateResponse("ytdl.html", {"request": request})
 
+    @app.get("/text-removal", response_class=HTMLResponse)
+    async def text_removal_page(request: Request):
+        context = {
+            "request": request,
+            "nav_active": "text_removal",
+        }
+        return templates.TemplateResponse("text_removal.html", context)
+
     @app.get("/subtitle-split", response_class=HTMLResponse)
     async def subtitle_split_page(request: Request):
         context = {

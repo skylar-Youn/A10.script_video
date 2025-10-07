@@ -1584,6 +1584,15 @@ def _split_urls(raw: str) -> List[str]:
     return [line.strip() for line in raw.replace("\r", "\n").splitlines() if line.strip()]
 
 
+@app.get("/text-removal", response_class=HTMLResponse)
+async def text_removal_page(request: Request) -> HTMLResponse:
+    context = {
+        "request": request,
+        "nav_active": "text_removal",
+    }
+    return templates.TemplateResponse("text_removal.html", context)
+
+
 @app.get("/subtitle-split", response_class=HTMLResponse)
 async def subtitle_split_index(request: Request) -> HTMLResponse:
     context = {

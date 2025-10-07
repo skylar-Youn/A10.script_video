@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>영상에서 글자 지우기</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <h1>영상에서 글자 지우기</h1>
+        <nav class="nav-links">
+            <a href="/ytdl" class="nav-link {% if nav_active == 'ytdl' %}active{% endif %}">⬇️ 다운로드 도구</a>
+            <a href="/text-removal" class="nav-link {% if nav_active == 'text_removal' %}active{% endif %}">🧽 영상에서 글자 지우기</a>
+            <a href="/subtitle-split" class="nav-link {% if nav_active == 'subtitle_split' %}active{% endif %}">✂️ 자막분리 하기</a>
+            <a href="/analysis" class="nav-link">📊 분석 도구</a>
+            <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
+            <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
+            <a href="/copyright" class="nav-link {% if nav_active == 'copyright' %}active{% endif %}">🛡️ 저작권 검사</a>
+        </nav>
+    </header>
+
+    <section class="panel">
+        <h2>AI 인페인팅(Inpainting)으로 텍스트 지우기</h2>
+        <p class="panel-sub">영상 위 텍스트, 워터마크, 로고를 자연스럽게 제거하는 두 가지 대표적인 접근법입니다.</p>
+    </section>
+
+    <section class="panel">
+        <h3>방법 A. Descript / Runway / Pika Labs</h3>
+        <ul>
+            <li>"Remove Object / Text" 기능으로 텍스트 영역을 자동 감지 후 제거.</li>
+            <li>Runway의 "Erase and Replace" 옵션은 인페인팅으로 배경을 복원.</li>
+            <li>요약: 편리하지만 클라우드 사용에 따른 비용/업로드 시간이 발생.</li>
+        </ul>
+    </section>
+
+    <section class="panel">
+        <h3>방법 B. Python + OpenCV + Stable Diffusion</h3>
+        <p class="panel-sub">로컬 환경에서 직접 제어하며 고품질 복원까지 수행할 수 있는 파이프라인입니다.</p>
+        <ol>
+            <li>프레임 단위로 영상 추출</li>
+        </ol>
+<pre><code class="language-python">import cv2
+
+vidcap = cv2.VideoCapture('video.mp4')
+success, image = vidcap.read()
+count = 0
+while success:
+    cv2.imwrite(f"frame_{count}.png", image)
+    success, image = vidcap.read()
+    count += 1
+</code></pre>
+        <ol start="2">
+            <li>각 프레임에서 텍스트 마스크 생성 (Photoshop, GIMP, segment-anything, rembg 등)</li>
+            <li>Stable Diffusion 인페인팅 모델로 복원</li>
+        </ol>
+<pre><code class="language-python">from diffusers import StableDiffusionInpaintPipeline
+import torch
+from PIL import Image
+
+pipe = StableDiffusionInpaintPipeline.from_pretrained(
+    "runwayml/stable-diffusion-inpainting",
+    torch_dtype=torch.float16,
+).to("cuda")
+
+img = Image.open("frame_10.png")
+mask = Image.open("mask_10.png")
+result = pipe(
+    prompt="remove text and restore background",
+    image=img,
+    mask_image=mask,
+).images[0]
+result.save("restored_frame_10.png")
+</code></pre>
+        <ol start="4">
+            <li>복원된 프레임을 다시 영상으로 합치기</li>
+        </ol>
+<pre><code class="language-python">import os
+
+os.system(
+    "ffmpeg -framerate 30 -i restored_frame_%d.png -c:v libx264 -pix_fmt yuv420p restored_video.mp4"
+)
+
+print("자막 구간 분할 도구: http://127.0.0.1:8001/subtitle-split")
+</code></pre>
+        <p class="hint-text">GPU 환경에서 실행하면 속도가 크게 빨라집니다. CPU만 사용한다면 `torch_dtype=torch.float32`로 변경하세요.</p>
+    </section>
+
+    <section class="panel info">
+        <h3>TIP</h3>
+        <ul>
+            <li>마스크는 텍스트가 있는 영역을 흰색(255)으로, 배경은 검은색(0)으로 구성합니다.</li>
+            <li>복잡한 배경일수록 프롬프트에 배경 설명을 추가하면 결과가 좋아집니다.</li>
+            <li>프레임이 많은 영상은 배치 처리 스크립트로 자동화해 작업 시간을 절약하세요.</li>
+        </ul>
+    </section>
+</div>
+</body>
+</html>
