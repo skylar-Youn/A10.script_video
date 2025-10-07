@@ -178,9 +178,18 @@
             </label>
           </div>
           <div class="form-actions">
+            <button type="button" class="secondary" data-generate-script-english-prompt>영어 프롬프트 생성</button>
             <button type="submit" class="contrast">대본 생성</button>
           </div>
         </form>
+
+        <div class="prompt-preview" id="script-english-prompt-container" style="margin-top: 1rem;">
+          <label style="display: block;">
+            영어 프롬프트
+            <textarea id="shorts-script-english-prompt" placeholder="버튼을 누르면 영어 프롬프트가 생성됩니다. 필요하면 ChatGPT 결과를 붙여넣어 수정해도 됩니다." style="width: 100%; min-height: 160px; margin-top: 0.5rem; resize: vertical;"></textarea>
+          </label>
+          <button type="button" class="secondary" data-copy-script-english-prompt style="margin-top: 0.5rem;" disabled>프롬프트 복사</button>
+        </div>
 
         <div class="advanced-actions">
           <div class="action-group">
@@ -254,9 +263,18 @@
             </label>
           </div>
           <div class="form-actions">
+            <button type="button" class="secondary" data-generate-english-prompt>영어 프롬프트 생성</button>
             <button type="submit" class="contrast">장면 생성</button>
           </div>
         </form>
+
+        <div class="prompt-preview" id="scenes-english-prompt-container" style="margin-top: 1rem;">
+          <label style="display: block;">
+            영어 프롬프트
+            <textarea id="shorts-scenes-english-prompt" placeholder="버튼을 누르면 영어 프롬프트가 생성됩니다. 필요하면 ChatGPT 결과를 붙여넣어 수정해도 됩니다." style="width: 100%; min-height: 160px; margin-top: 0.5rem; resize: vertical;"></textarea>
+          </label>
+          <button type="button" class="secondary" data-copy-english-prompt style="margin-top: 0.5rem;" disabled>프롬프트 복사</button>
+        </div>
 
         <div class="advanced-actions">
           <div class="action-group">

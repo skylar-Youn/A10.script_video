@@ -162,6 +162,72 @@ SHORTS_SCENE_TEMPLATE = PromptTemplate(
     ),
 )
 
+SHORTS_SCRIPT_ENGLISH_PROMPT_TEMPLATE = PromptTemplate(
+    name="shorts_script_prompt_en",
+    description="English ChatGPT prompt for Shorts script generation",
+    template=(
+        "Using the story keyword \"{keyword}\", generate a 60-second YouTube Shorts script with SRT subtitles and matching image prompts written in {language_label}.\n\n"
+        "### Output Requirements\n\n"
+        "1. Write subtitles in full SRT format with index, timestamps (00:00:00,000 --> 00:00:05,000), and dialogue or narration.\n"
+        "   - Append a matching [Image #] tag to the end of each subtitle line.\n"
+        "   - Provide 6-10 subtitles so the overall runtime stays close to 60 seconds.\n\n"
+        "2. After the subtitles, list cinematic image descriptions.\n"
+        "   - Use the same [Image #] identifiers referenced in the SRT section.\n"
+        "   - For each image, describe mood, lighting, setting, characters or objects, and key motion in 1-2 vivid sentences.\n\n"
+        "# Output Format\n\n"
+        "**[SRT Subtitles]**\n"
+        "1\n"
+        "00:00:00,000 --> 00:00:05,000\n"
+        "Dialogue... [Image 1]\n\n"
+        "2\n"
+        "00:00:05,000 --> 00:00:10,000\n"
+        "Dialogue... [Image 2]\n\n"
+        "...\n\n"
+        "**[Image Descriptions]**\n"
+        "- [Image 1] ...\n"
+        "- [Image 2] ...\n"
+        "- ...\n\n"
+        "Story keyword: \"{keyword}\"\n"
+        "Write every line in {language_label}."
+    ),
+)
+
+SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE = PromptTemplate(
+    name="shorts_scene_prompt_en",
+    description="English ChatGPT prompt for Shorts scene generation",
+    template=(
+        "Using the story keyword \"{keyword}\", craft a 60-second YouTube Shorts scene script with camera and production directions written in {language_label}.\n\n"
+        "### Output Requirements\n\n"
+        "1. Write the script as sequential scenes. Each scene must include:\n"
+        "   - [Scene #] tag\n"
+        "   - Timestamp (00:00:00,000 --> 00:00:05,000)\n"
+        "   - Dialogue or narration\n"
+        "   - Camera motion and filming instructions\n"
+        "   Compose 6-10 scenes so the total runtime stays near 60 seconds.\n\n"
+        "2. Provide detailed filming directions for each scene:\n"
+        "   - Camera angle (close-up, wide shot, medium shot, etc.)\n"
+        "   - Camera movement (pan, tilt, dolly, zoom, tracking, etc.)\n"
+        "   - Lighting and color tone\n"
+        "   - Background elements and props\n"
+        "   - Character or object actions and expressions\n\n"
+        "# Output Format\n\n"
+        "**[Video Scene Script]**\n\n"
+        "[Scene 1] 00:00:00,000 --> 00:00:06,000\n"
+        "Dialogue: ...\n"
+        "Camera: ...\n\n"
+        "[Scene 2] 00:00:06,000 --> 00:00:12,000\n"
+        "Dialogue: ...\n"
+        "Camera: ...\n\n"
+        "...\n\n"
+        "**[Filming Directions]**\n"
+        "- [Scene 1] Detailed angle, lighting, mood, action notes\n"
+        "- [Scene 2] Detailed angle, lighting, mood, action notes\n"
+        "- ...\n\n"
+        "Story keyword: \"{keyword}\"\n"
+        "Write every line in {language_label}."
+    ),
+)
+
 TRANSITION_TEMPLATE = PromptTemplate(
     name="transition",
     description="Bridge between two story chapters",

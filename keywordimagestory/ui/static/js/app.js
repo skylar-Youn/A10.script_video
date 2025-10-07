@@ -332,7 +332,7 @@ function parseChatGPTResult(text) {
 
   for (const line of lines) {
     // 숫자로 시작하는 줄을 찾아서 제목으로 추출
-    const match = line.match(/^(\d+)\.?\s*(.+)/);
+    const match = line.match(/^(\d+)[.)\-:]?\s*(.+)/);
     if (match) {
       const [, index, title] = match;
       items.push({
@@ -358,8 +358,121 @@ function parseChatGPTResult(text) {
 }
 
 function parseChatGPTImageResult(text) {
-  // 이미지 결과도 동일한 파싱 로직 사용
-  return parseChatGPTResult(text);
+  const lines = text
+    .split('\n')
+    .map((line) => line.replace(/\r/g, '').trim())
+    .filter((line) => line.length > 0);
+
+  const groups = [];
+  let buffer = [];
+
+  const flush = () => {
+    if (!buffer.length) return;
+
+    const first = buffer[0];
+    const match = first.match(/^(\d+)(?:[.)\]\-:：）])?\s*(.*)$/);
+    if (!match) {
+      buffer = [];
+      return;
+    }
+
+    const index = parseInt(match[1], 10);
+    const remainder = match[2].trim();
+    const contentLines = [];
+    if (remainder) {
+      contentLines.push(remainder);
+    }
+    if (buffer.length > 1) {
+      contentLines.push(...buffer.slice(1));
+    }
+
+    const cleanedLines = contentLines
+      .map((line) =>
+        line
+          .replace(/^[\-\*\u2022•·●▪▹►▶□■☑︎❖⦿\s]+/, '')
+          .trim()
+      )
+      .filter((line) => line.length > 0);
+
+    if (!cleanedLines.length) {
+      const fallbackTitle = `항목 ${index}`;
+      groups.push({
+        index,
+        title: fallbackTitle,
+        description: '',
+        text: fallbackTitle,
+      });
+      buffer = [];
+      return;
+    }
+
+    let titlePart = '';
+    const descriptionParts = [];
+
+    cleanedLines.forEach((line) => {
+      const normalised = line.replace(/\s+/g, ' ').trim();
+      const titleMatch = normalised.match(/^(제목|타이틀|title)\s*[:：\-]\s*(.+)$/i);
+      if (titleMatch) {
+        if (!titlePart) {
+          titlePart = titleMatch[2].trim();
+        }
+        return;
+      }
+
+      const descriptionMatch = normalised.match(/^(씬\s*묘사|장면\s*묘사|이미지\s*묘사|묘사|설명|description|scene\s*description)\s*[:：\-]\s*(.+)$/i);
+      if (descriptionMatch) {
+        descriptionParts.push(descriptionMatch[2].trim());
+        return;
+      }
+
+      if (!titlePart) {
+        titlePart = normalised;
+      } else {
+        descriptionParts.push(normalised);
+      }
+    });
+
+    if (!titlePart) {
+      titlePart = cleanedLines[0].trim();
+    }
+
+    const descriptionPart = descriptionParts.join(' ').trim();
+    const combinedText = [titlePart, descriptionPart].filter(Boolean).join(' ').trim();
+
+    groups.push({
+      index,
+      title: titlePart.trim(),
+      description: descriptionPart,
+      text: combinedText || titlePart.trim(),
+    });
+    buffer = [];
+  };
+
+  lines.forEach((line) => {
+    if (/^\d+/.test(line)) {
+      flush();
+      buffer = [line];
+    } else if (buffer.length) {
+      buffer.push(line);
+    }
+  });
+  flush();
+
+  if (groups.length) {
+    return groups.map((item) => ({
+      index: item.index,
+      title: (item.title && item.title.trim()) || item.text,
+      description: item.description ? item.description.trim() : '',
+      text: item.text,
+    }));
+  }
+
+  return parseChatGPTResult(text).map((item) => ({
+    index: item.index,
+    title: item.text,
+    description: '',
+    text: item.text,
+  }));
 }
 
 function parseChatGPTShortsResult(text) {
@@ -368,8 +481,8 @@ function parseChatGPTShortsResult(text) {
 
   // 먼저 [SRT 자막] 섹션 찾기 (여러 형태 지원)
   let srtText = "";
-  const srtMatch1 = text.match(/\*\*\[SRT 자막\]\*\*([\s\S]*?)(?=\*\*\[이미지 장면 묘사\]\*\*|$)/);
-  const srtMatch2 = text.match(/\[SRT 자막\]([\s\S]*?)(?=\[이미지 장면 묘사\]|$)/);
+  const srtMatch1 = text.match(/\*\*\[SRT 자막\]\*\*([\s\S]*?)(?=\*\*\[(?:이미지 장면 묘사|이미지 프롬프트|image scene description|image prompts)\]\*\*|$)/i);
+  const srtMatch2 = text.match(/\[SRT 자막\]([\s\S]*?)(?=\[(?:이미지 장면 묘사|이미지 프롬프트|image scene description|image prompts)\]|$)/i);
 
   if (srtMatch1) {
     srtText = srtMatch1[1];
@@ -410,8 +523,8 @@ function parseChatGPTShortsResult(text) {
           const fullText = textLines.join(' ');
 
           // [이미지 #] 태그 추출
-          const imageTagMatch = fullText.match(/\[이미지\s*(\d+)\]/);
-          const cleanText = fullText.replace(/\[이미지\s*\d+\]/, '').trim();
+          const imageTagMatch = fullText.match(/\[(?:이미지|image)\s*(\d+)\]/i);
+          const cleanText = fullText.replace(/\[(?:이미지|image)\s*\d+\]/gi, '').trim();
 
           subtitles.push({
             index: index,
@@ -428,20 +541,26 @@ function parseChatGPTShortsResult(text) {
 
   // 이미지 장면 묘사 부분 추출 (여러 형태 지원)
   let imageText = "";
-  const imageMatch1 = text.match(/\*\*\[이미지 장면 묘사\]\*\*([\s\S]*?)$/);
-  const imageMatch2 = text.match(/\[이미지 장면 묘사\]([\s\S]*?)$/);
+  const imageSectionPatterns = [
+    /\*\*\[(?:이미지 장면 묘사|이미지 프롬프트|image scene description|image prompts)\]\*\*([\s\S]*?)$/i,
+    /\[(?:이미지 장면 묘사|이미지 프롬프트|image scene description|image prompts)\]([\s\S]*?)$/i
+  ];
 
-  if (imageMatch1) {
-    imageText = imageMatch1[1];
-  } else if (imageMatch2) {
-    imageText = imageMatch2[1];
+  for (const pattern of imageSectionPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      imageText = match[1];
+      break;
+    }
   }
 
   if (imageText) {
-    const imageLines = imageText.split('\n').filter(line => line.trim().match(/^\-?\s*\[이미지\s*\d+\]/));
+    const imageLines = imageText
+      .split('\n')
+      .filter((line) => line.trim().match(/^\-?\s*\[(?:이미지|image)\s*\d+\]/i));
 
     imageLines.forEach((line, idx) => {
-      const match = line.match(/^\-?\s*\[이미지\s*(\d+)\]\s*(.+)/);
+      const match = line.match(/^\-?\s*\[(?:이미지|image)\s*(\d+)\]\s*(.+)/i);
       if (match) {
         const imageNum = parseInt(match[1]);
         const description = match[2].trim();
@@ -505,8 +624,10 @@ function renderImageStoryResults(result) {
   const listMarkup = items
     .map((item, index) => {
       const label = typeof item.index === "number" ? item.index : index + 1;
-      const title = escapeHtml(item.title ?? "");
-      const description = escapeHtml(item.description ?? "");
+      const rawTitle = item.title ?? item.text ?? item.name ?? "";
+      const rawDescription = item.description ?? item.desc ?? item.text_detail ?? "";
+      const title = escapeHtml(String(rawTitle));
+      const description = escapeHtml(String(rawDescription));
       return `
         <li>
           <header><strong>${label}. ${title}</strong></header>
@@ -1598,6 +1719,93 @@ function initShortsScriptPage() {
   if (!form || !resultsContainer) return;
 
   const submitButton = form.querySelector("button[type='submit']");
+  const toolContent = form.closest(".tool-content");
+  const englishPromptBtn = form.querySelector("[data-generate-script-english-prompt]");
+  const englishPromptTextarea = toolContent ? toolContent.querySelector("#shorts-script-english-prompt") : null;
+  const englishPromptCopyBtn = toolContent ? toolContent.querySelector("[data-copy-script-english-prompt]") : null;
+
+  if (englishPromptTextarea) {
+    englishPromptTextarea.addEventListener("input", () => {
+      const hasText = englishPromptTextarea.value.trim().length > 0;
+      if (englishPromptCopyBtn) {
+        englishPromptCopyBtn.disabled = !hasText;
+        if (!hasText) {
+          englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }
+      }
+    });
+  }
+
+  if (englishPromptBtn) {
+    englishPromptBtn.addEventListener("click", async () => {
+      const keywordInput = form.querySelector("input[name='shorts_keyword']");
+      const keyword = keywordInput ? keywordInput.value.trim() : "";
+      if (!keyword) {
+        alert("스토리 키워드를 입력하세요.");
+        return;
+      }
+
+      const formData = new FormData(form);
+      const language = String(formData.get("language") || "ko") || "ko";
+
+      try {
+        englishPromptBtn.disabled = true;
+        englishPromptBtn.setAttribute("aria-busy", "true");
+        if (englishPromptTextarea) {
+          englishPromptTextarea.value = "영어 프롬프트를 생성 중입니다...";
+        }
+        if (englishPromptCopyBtn) {
+          englishPromptCopyBtn.disabled = true;
+          englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }
+
+        const data = await api("/api/generate/shorts-script-prompt", {
+          method: "POST",
+          body: JSON.stringify({ keyword, language })
+        });
+
+        if (englishPromptTextarea) {
+          englishPromptTextarea.value = data?.prompt || "";
+          englishPromptTextarea.scrollTop = 0;
+          englishPromptTextarea.dispatchEvent(new Event("input"));
+          englishPromptTextarea.focus();
+          englishPromptTextarea.select();
+        }
+      } catch (error) {
+        console.error("Failed to generate English prompt:", error);
+        alert(error.message || "영어 프롬프트 생성에 실패했습니다.");
+        if (englishPromptTextarea) {
+          englishPromptTextarea.value = "";
+          englishPromptTextarea.dispatchEvent(new Event("input"));
+          englishPromptTextarea.focus();
+        }
+      } finally {
+        englishPromptBtn.disabled = false;
+        englishPromptBtn.removeAttribute("aria-busy");
+      }
+    });
+  }
+
+  if (englishPromptCopyBtn && englishPromptTextarea) {
+    englishPromptCopyBtn.addEventListener("click", async () => {
+      const promptText = englishPromptTextarea.value.trim();
+      if (!promptText) {
+        alert("먼저 영어 프롬프트를 생성하세요.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(promptText);
+        englishPromptCopyBtn.textContent = "복사 완료!";
+        setTimeout(() => {
+          englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }, 2000);
+      } catch (error) {
+        console.error("Failed to copy prompt:", error);
+        alert("클립보드에 복사하지 못했습니다. 직접 복사해 주세요.");
+      }
+    });
+  }
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
@@ -1608,13 +1816,16 @@ function initShortsScriptPage() {
       return;
     }
     const language = String(formData.get("language") || "ko") || "ko";
+    const englishPromptText = englishPromptTextarea ? englishPromptTextarea.value.trim() : "";
 
     // ChatGPT 창 모드 처리
     if (mode === "chatgpt") {
       const languageMap = { ko: "한국어", en: "영어", ja: "일본어" };
       const langText = languageMap[language] || "한국어";
 
-      const prompt = `입력받은 "${keyword}"라는 스토리 키워드를 바탕으로, 아래 기준에 따라 유튜브 Shorts용 60초 분량의 자막과 이미지 장면 묘사를 ${langText}로 생성하세요.
+      const prompt =
+        englishPromptText ||
+        `입력받은 "${keyword}"라는 스토리 키워드를 바탕으로, 아래 기준에 따라 유튜브 Shorts용 60초 분량의 자막과 이미지 장면 묘사를 ${langText}로 생성하세요.
 
 ### 출력 규칙
 
@@ -1743,6 +1954,93 @@ function initShortsScenesPage() {
   if (!form || !resultsContainer) return;
 
   const submitButton = form.querySelector("button[type='submit']");
+  const toolContent = form.closest(".tool-content");
+  const englishPromptBtn = form.querySelector("[data-generate-english-prompt]");
+  const englishPromptTextarea = toolContent ? toolContent.querySelector("#shorts-scenes-english-prompt") : null;
+  const englishPromptCopyBtn = toolContent ? toolContent.querySelector("[data-copy-english-prompt]") : null;
+
+  if (englishPromptTextarea) {
+    englishPromptTextarea.addEventListener("input", () => {
+      const hasText = englishPromptTextarea.value.trim().length > 0;
+      if (englishPromptCopyBtn) {
+        englishPromptCopyBtn.disabled = !hasText;
+        if (!hasText) {
+          englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }
+      }
+    });
+  }
+
+  if (englishPromptBtn) {
+    englishPromptBtn.addEventListener("click", async () => {
+      const keywordInput = form.querySelector("input[name='scenes_keyword']");
+      const keyword = keywordInput ? keywordInput.value.trim() : "";
+      if (!keyword) {
+        alert("스토리 키워드를 입력하세요.");
+        return;
+      }
+
+      const formData = new FormData(form);
+      const language = String(formData.get("language") || "ko") || "ko";
+
+      try {
+        englishPromptBtn.disabled = true;
+        englishPromptBtn.setAttribute("aria-busy", "true");
+        if (englishPromptTextarea) {
+          englishPromptTextarea.value = "영어 프롬프트를 생성 중입니다...";
+        }
+        if (englishPromptCopyBtn) {
+          englishPromptCopyBtn.disabled = true;
+          englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }
+
+        const data = await api("/api/generate/shorts-scenes-prompt", {
+          method: "POST",
+          body: JSON.stringify({ keyword, language })
+        });
+
+        if (englishPromptTextarea) {
+          englishPromptTextarea.value = data?.prompt || "";
+          englishPromptTextarea.scrollTop = 0;
+          englishPromptTextarea.dispatchEvent(new Event("input"));
+          englishPromptTextarea.focus();
+          englishPromptTextarea.select();
+        }
+      } catch (error) {
+        console.error("Failed to generate scene English prompt:", error);
+        alert(error.message || "영어 프롬프트 생성에 실패했습니다.");
+        if (englishPromptTextarea) {
+          englishPromptTextarea.value = "";
+          englishPromptTextarea.dispatchEvent(new Event("input"));
+          englishPromptTextarea.focus();
+        }
+      } finally {
+        englishPromptBtn.disabled = false;
+        englishPromptBtn.removeAttribute("aria-busy");
+      }
+    });
+  }
+
+  if (englishPromptCopyBtn && englishPromptTextarea) {
+    englishPromptCopyBtn.addEventListener("click", async () => {
+      const promptText = englishPromptTextarea.value.trim();
+      if (!promptText) {
+        alert("먼저 영어 프롬프트를 생성하세요.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(promptText);
+        englishPromptCopyBtn.textContent = "복사 완료!";
+        setTimeout(() => {
+          englishPromptCopyBtn.textContent = "프롬프트 복사";
+        }, 2000);
+      } catch (error) {
+        console.error("Failed to copy prompt:", error);
+        alert("클립보드에 복사하지 못했습니다. 직접 복사해 주세요.");
+      }
+    });
+  }
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
@@ -1753,13 +2051,16 @@ function initShortsScenesPage() {
       return;
     }
     const language = String(formData.get("language") || "ko") || "ko";
+    const englishPromptText = englishPromptTextarea ? englishPromptTextarea.value.trim() : "";
 
     // ChatGPT 창 모드 처리
     if (mode === "chatgpt") {
       const languageMap = { ko: "한국어", en: "영어", ja: "일본어" };
       const langText = languageMap[language] || "한국어";
 
-      const prompt = `입력받은 "${keyword}"라는 스토리 키워드를 바탕으로, 아래 기준에 따라 유튜브 Shorts용 60초 분량의 영상 장면 대본과 카메라/촬영 지시사항을 ${langText}로 생성하세요.
+      const prompt =
+        englishPromptText ||
+        `입력받은 "${keyword}"라는 스토리 키워드를 바탕으로, 아래 기준에 따라 유튜브 Shorts용 60초 분량의 영상 장면 대본과 카메라/촬영 지시사항을 ${langText}로 생성하세요.
 
 ### 출력 규칙
 
@@ -6170,6 +6471,3 @@ function trimGap(gapIndex) {
 
   showNotification(`갭 길이가 ${duration}초로 조정되었습니다.`, 'success');
 }
-
-
-

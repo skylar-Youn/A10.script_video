@@ -22,6 +22,10 @@ from keywordimagestory.generators import (
     ShortsSceneGenerator,
     ShortsScriptGenerator,
 )
+from keywordimagestory.prompts import (
+    SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE,
+    SHORTS_SCRIPT_ENGLISH_PROMPT_TEMPLATE,
+)
 from keywordimagestory.models import (
     BackgroundMusicSegment,
     ImagePrompt,
@@ -44,6 +48,12 @@ templates = Jinja2Templates(directory=str(settings.templates_dir))
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 app.mount("/outputs", StaticFiles(directory=str(settings.outputs_dir)), name="outputs")
 
+LANGUAGE_LABELS = {
+    "ko": "Korean",
+    "en": "English",
+    "ja": "Japanese",
+}
+
 
 # ---------------------------------------------------------------------------
 # Utility helpers
@@ -54,6 +64,10 @@ def _project_or_404(project_id: str) -> StoryProject:
         return editor_service.get_project(project_id)
     except KeyError as exc:  # pragma: no cover - runtime path
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _language_label(code: str) -> str:
+    return LANGUAGE_LABELS.get((code or "").lower(), code)
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +287,42 @@ async def api_generate_shorts_scenes(payload: dict[str, Any] = Body(...)) -> dic
         "language": language,
         "subtitles": [segment.dict() for segment in subtitles],
         "scenes": [prompt.dict() for prompt in scenes],
+    }
+
+
+@app.post("/api/generate/shorts-script-prompt")
+async def api_generate_shorts_script_prompt(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    keyword = str(payload.get("keyword", "")).strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword is required")
+
+    language = str(payload.get("language", settings.default_language) or settings.default_language)
+    prompt = SHORTS_SCRIPT_ENGLISH_PROMPT_TEMPLATE.format(
+        keyword=keyword,
+        language_label=_language_label(language),
+    )
+    return {
+        "keyword": keyword,
+        "language": language,
+        "prompt": prompt,
+    }
+
+
+@app.post("/api/generate/shorts-scenes-prompt")
+async def api_generate_shorts_scenes_prompt(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    keyword = str(payload.get("keyword", "")).strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword is required")
+
+    language = str(payload.get("language", settings.default_language) or settings.default_language)
+    prompt = SHORTS_SCENE_ENGLISH_PROMPT_TEMPLATE.format(
+        keyword=keyword,
+        language_label=_language_label(language),
+    )
+    return {
+        "keyword": keyword,
+        "language": language,
+        "prompt": prompt,
     }
 
 
