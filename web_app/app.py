@@ -1644,6 +1644,7 @@ async def text_removal_page(request: Request) -> HTMLResponse:
     context = {
         "request": request,
         "nav_active": "text_removal",
+        "torch_cuda_available": torch.cuda.is_available(),
     }
     return templates.TemplateResponse("text_removal.html", context)
 

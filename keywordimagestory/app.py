@@ -1,13 +1,16 @@
 """FastAPI application providing UI and API for story generation."""
 from __future__ import annotations
 
-import logging
-import os
+import base64
 import glob
+import logging
 import mimetypes
+import os
+import re
 from datetime import datetime
-from typing import Any
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -53,6 +56,7 @@ app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="stat
 app.mount("/outputs", StaticFiles(directory=str(settings.outputs_dir)), name="outputs")
 
 DOWNLOAD_ROOT = Path("/home/sk/ws/A10.script_video/youtube/download").resolve()
+FRAME_OUTPUT_DIR = settings.outputs_dir / "frames"
 
 LANGUAGE_LABELS = {
     "ko": "Korean",
@@ -336,6 +340,42 @@ async def api_generate_long_script(payload: dict[str, Any] = Body(...)) -> dict[
         "content": script_text,
         "subtitles": [segment.dict() for segment in subtitles],
         "images": [prompt.dict() for prompt in images],
+    }
+
+
+@app.post("/api/tools/frames")
+async def api_save_trimmed_frame(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    data_url = str(payload.get("data_url", "")).strip()
+    if not data_url:
+        raise HTTPException(status_code=400, detail="data_url is required")
+
+    match = re.match(r"^data:(image/\w+);base64,(.+)$", data_url)
+    if not match:
+        raise HTTPException(status_code=400, detail="Invalid data_url format")
+
+    mime_type, encoded = match.groups()
+    extension_map = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/webp": "webp",
+    }
+    ext = extension_map.get(mime_type, "png")
+
+    try:
+        binary = base64.b64decode(encoded)
+    except (base64.binascii.Error, ValueError) as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=400, detail="Failed to decode image data") from exc
+
+    FRAME_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"frame-{uuid4().hex}.{ext}"
+    target_path = FRAME_OUTPUT_DIR / filename
+    target_path.write_bytes(binary)
+
+    url_path = f"/outputs/frames/{filename}"
+    return {
+        "filename": filename,
+        "url": url_path,
     }
 
 

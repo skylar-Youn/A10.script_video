@@ -153,10 +153,15 @@
                 <label>Mask Dilate (px)
                     <input type="number" min="0" max="32" id="dilate" value="4">
                 </label>
-                <label>Device
+                <label>디바이스
                     <select id="device">
+                        {% if torch_cuda_available %}
                         <option value="cuda">cuda (GPU)</option>
                         <option value="cpu">cpu</option>
+                        {% else %}
+                        <option value="cpu" selected>cpu</option>
+                        <option value="cuda" disabled>cuda (GPU)</option>
+                        {% endif %}
                     </select>
                 </label>
                 <label>dtype
@@ -467,7 +472,7 @@
         formData.append('video', fileInput.files[0]);
         setStatus(previewStatus, '미리보기를 생성하는 중...', '');
         previewProgress.textContent = '진행 중...';
-        previewForm.querySelector('button').disabled = true;
+        previewSubmit.disabled = true;
         splitMediaBtn.disabled = true;
 
         try {

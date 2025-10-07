@@ -97,6 +97,7 @@ const TRIM_LABELS = {
   end: "맨 뒤 프레임",
   current: "현재 프레임"
 };
+const DEFAULT_TRIM_SECONDS = 0.5;
 
 let pendingRecordSelection = null;
 
@@ -107,6 +108,67 @@ const STORAGE_KEY = "kis-selected-record";
 let activePreviewModal = null;
 let allowLongScriptFormSync = true;
 const videoLoaderInputs = new Map();
+let pendingTrimPreviewTool = null;
+
+async function captureFrameAt(video, time) {
+  return new Promise((resolve, reject) => {
+    if (!video) {
+      reject(new Error("영상이 준비되지 않았습니다."));
+      return;
+    }
+
+    const drawFrame = () => {
+      try {
+        const width = video.videoWidth || video.clientWidth || 1280;
+        const height = video.videoHeight || video.clientHeight || 720;
+        if (!width || !height) {
+          throw new Error("영상 해상도 정보를 가져오지 못했습니다.");
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          throw new Error("캔버스를 초기화하지 못했습니다.");
+        }
+        context.drawImage(video, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/png");
+        resolve({ dataUrl, width, height });
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    const cleanupAndReject = (error) => {
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+      reject(error);
+    };
+
+    const onSeeked = () => {
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+      requestAnimationFrame(drawFrame);
+    };
+
+    const onError = () => {
+      cleanupAndReject(new Error("영상 프레임을 캡처하는 중 오류가 발생했습니다."));
+    };
+
+    if (Math.abs(video.currentTime - time) < 0.01) {
+      requestAnimationFrame(drawFrame);
+      return;
+    }
+
+    video.addEventListener("seeked", onSeeked, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    try {
+      video.currentTime = Math.max(time, 0);
+    } catch (error) {
+      cleanupAndReject(error);
+    }
+  });
+}
 
 function getVideoToolLabel(tool) {
   switch (tool) {
@@ -173,6 +235,7 @@ function closePreviewModal() {
       } catch (error) {
         console.warn("Failed to pause preview video:", error);
       }
+      detachTrimBehavior(video);
       video.removeAttribute("src");
       video.load();
     }
@@ -276,20 +339,24 @@ function handleVideoFileSelection(tool, file) {
     <div class="video-preview-wrapper">
       <video controls preload="metadata" style="width: 100%; max-height: 480px; background: #000;" data-video-player></video>
       <p class="video-preview-meta">${safeName}${sizeLabel ? ` · ${escapeHtml(sizeLabel)}` : ""}</p>
+      <p class="video-preview-trim" data-video-trim-info hidden></p>
     </div>
   `;
   const modal = openPreviewModal(title, body);
   if (modal) {
     modal.dataset.videoObjectUrl = objectUrl;
+    setupPreviewModalInteractions(modal, tool);
     const video = modal.querySelector("[data-video-player]");
     if (video) {
+      detachTrimBehavior(video);
       video.src = objectUrl;
+      attachTrimBehavior(tool, video);
       video.load();
       video.play().catch(() => {});
     }
-    setupPreviewModalInteractions(modal);
     const messageLabel = label === "영상" ? "영상" : `${label} 영상`;
     showNotification(`${messageLabel}을 불러왔습니다.`, "success");
+    applyTrimToActivePreview(tool);
   } else {
     URL.revokeObjectURL(objectUrl);
   }
@@ -320,11 +387,20 @@ function handleVideoUrlLoad(tool, url) {
     <div class="video-preview-wrapper">
       <video controls preload="metadata" style="width: 100%; max-height: 480px; background: #000;" src="${escapeHtml(safeUrl)}"></video>
       <p class="video-preview-meta">${escapeHtml(safeUrl)}</p>
+      <p class="video-preview-trim" data-video-trim-info hidden></p>
     </div>
   `;
   const modal = openPreviewModal(title, body);
   if (modal) {
-    setupPreviewModalInteractions(modal);
+    setupPreviewModalInteractions(modal, tool);
+    if (tool) {
+      const video = modal.querySelector("video");
+      if (video) {
+        detachTrimBehavior(video);
+        attachTrimBehavior(tool, video);
+      }
+      applyTrimToActivePreview(tool);
+    }
     const messageLabel = label === "영상" ? "영상" : `${label} 영상`;
     showNotification(`${messageLabel}을 불러왔습니다.`, "success");
   }
@@ -343,11 +419,12 @@ function openVideoLoadDialog(tool) {
         <button type="button" class="outline" data-video-load-file>내 컴퓨터에서 선택</button>
         <button type="button" class="secondary" data-video-load-url>URL 입력</button>
       </div>
+      <p class="video-preview-trim" data-video-trim-info hidden></p>
     </div>
   `;
   const modal = openPreviewModal(`${titleLabel} 불러오기`, body);
   if (!modal) return;
-  setupPreviewModalInteractions(modal);
+  setupPreviewModalInteractions(modal, tool);
 
   const fileButton = modal.querySelector("[data-video-load-file]");
   if (fileButton) {
@@ -372,6 +449,172 @@ function openVideoLoadDialog(tool) {
       closePreviewModal();
       handleVideoUrlLoad(tool, value);
     });
+  }
+}
+
+async function openTrimPreview(toolAliasOrKey) {
+  const toolKey = resolveToolKey(toolAliasOrKey);
+  if (!toolKey) {
+    showNotification("프레임 자르기 미리보기를 지원하지 않는 도구입니다.", "error");
+    return;
+  }
+  const entries = getTrimEntries(toolKey);
+  if (!entries.length) {
+    showNotification("등록된 프레임 자르기 명령이 없습니다.", "error");
+    return;
+  }
+  pendingTrimPreviewTool = toolKey;
+  try {
+    const modal = await showResultPreview(toolKey);
+    if (modal) {
+      setTimeout(() => {
+        const playerSection = modal.querySelector("[data-video-player]");
+        if (playerSection) {
+          playerSection.hidden = false;
+          playerSection.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 200);
+    }
+  } catch (error) {
+    console.error("Failed to open trim preview:", error);
+    showNotification(error.message || "프레임 자르기 미리보기를 여는 중 오류가 발생했습니다.", "error");
+  } finally {
+    pendingTrimPreviewTool = null;
+  }
+}
+
+async function openTrimImagePreview(toolAliasOrKey, mode = "current") {
+  const toolKey = resolveToolKey(toolAliasOrKey);
+  if (!toolKey) {
+    showNotification("이미지 미리보기를 지원하지 않는 도구입니다.", "error");
+    return;
+  }
+  const result = state.latestResults[toolKey];
+  if (!result) {
+    showNotification("먼저 결과를 생성하세요.", "error");
+    return;
+  }
+
+  pendingTrimPreviewTool = toolKey;
+  try {
+    const modal = await showResultPreview(toolKey);
+    if (!modal) return;
+
+    const ensureVisible = () => {
+      const playerSection = modal.querySelector("[data-video-player]");
+      if (playerSection) {
+        playerSection.hidden = false;
+      }
+      modal.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    setTimeout(ensureVisible, 200);
+
+    const focusOnFrame = async () => {
+      const video = modal.querySelector("video");
+      if (!video) {
+        showNotification("영상 미리보기를 찾을 수 없습니다. 영상을 먼저 선택하세요.", "error");
+        return;
+      }
+
+      const duration = Number.isFinite(video.duration) ? video.duration : null;
+      const { start, end, startTrimmed, endTrimmed } = computeTrimBounds(toolKey, duration);
+
+      let targetTime = 0;
+      if (mode === "start") {
+        targetTime = startTrimmed && Number.isFinite(start) ? start : start || 0;
+      } else if (mode === "end") {
+        const fallbackEnd = endTrimmed && end != null && Number.isFinite(end) ? end : duration;
+        targetTime = Number.isFinite(fallbackEnd) ? Math.max(fallbackEnd - 0.1, 0) : start || 0;
+      } else {
+        const effectiveStart = startTrimmed && Number.isFinite(start) ? start : start || 0;
+        const effectiveEnd = endTrimmed && end != null && Number.isFinite(end)
+          ? end
+          : Number.isFinite(duration)
+            ? duration
+            : effectiveStart;
+        const span = Math.max(effectiveEnd - effectiveStart, 0);
+        targetTime = Math.max(effectiveStart + span / 2, 0);
+      }
+
+      const capture = async () => {
+        const previousTime = Number.isFinite(video.currentTime) ? video.currentTime : null;
+        const wasPaused = video.paused;
+        try {
+          video.pause();
+          const frame = await captureFrameAt(video, targetTime);
+          const label = mode === "start" ? "앞" : mode === "end" ? "뒤" : "현재";
+          const timeLabel = formatTimecode(Math.max(targetTime, 0));
+          const content = modal.querySelector(".preview-content") || modal;
+          let gallery = modal.querySelector("[data-trim-image-gallery]");
+          if (!gallery) {
+            gallery = document.createElement("section");
+            gallery.className = "preview-section trim-image-gallery";
+            gallery.dataset.trimImageGallery = "true";
+            gallery.innerHTML = `
+              <h4>캡처한 이미지</h4>
+              <div class="trim-image-list" data-trim-image-list></div>
+            `;
+            content.insertBefore(gallery, content.firstChild);
+          }
+          const list = gallery.querySelector("[data-trim-image-list]");
+          if (list) {
+            const item = document.createElement("article");
+            item.className = "trim-image-card";
+            item.innerHTML = `
+              <figure>
+                <img src="${frame.dataUrl}" alt="${label} 이미지" loading="lazy" />
+                <figcaption>${label} 지점 · ${timeLabel}</figcaption>
+              </figure>
+              <div class="trim-image-actions">
+                <a href="${frame.dataUrl}" download="${toolKey}-${mode}-frame.png" class="outline">PNG 다운로드</a>
+                <button type="button" class="secondary" data-save-frame>서버에 저장</button>
+              </div>
+            `;
+            list.prepend(item);
+            const saveButton = item.querySelector("[data-save-frame]");
+            if (saveButton) {
+              saveButton.dataset.frameData = frame.dataUrl;
+              saveButton.dataset.frameLabel = label;
+              saveButton.dataset.frameTime = timeLabel;
+              saveButton.dataset.frameTool = toolKey;
+            }
+          }
+          showNotification(`${label} 이미지 프레임을 캡처했습니다.`, "success");
+        } catch (error) {
+          console.error("Failed to capture frame:", error);
+          showNotification(error.message || "이미지를 캡처하지 못했습니다.", "error");
+        } finally {
+          if (previousTime !== null) {
+            try {
+              video.currentTime = previousTime;
+            } catch (error) {
+              console.warn("Failed to restore video time after capture:", error);
+            }
+          }
+          if (!wasPaused) {
+            video.play().catch(() => {});
+          }
+        }
+      };
+
+      if (video.readyState >= 1) {
+        capture();
+      } else {
+        video.addEventListener("loadedmetadata", () => capture(), { once: true });
+      }
+    };
+
+    setTimeout(() => {
+      focusOnFrame().catch((error) => {
+        console.error("Failed to focus on trim frame:", error);
+        showNotification(error.message || "이미지를 캡처하지 못했습니다.", "error");
+      });
+    }, 350);
+  } catch (error) {
+    console.error("Failed to open trim image preview:", error);
+    showNotification(error.message || "이미지 미리보기를 여는 중 오류가 발생했습니다.", "error");
+  } finally {
+    pendingTrimPreviewTool = null;
   }
 }
 
@@ -1825,11 +2068,183 @@ function registerVideoTrimOperation(toolKey, mode, payload = {}, result = {}) {
   state.videoTrimQueue.push(entry);
   updateTrimBadge(toolKey);
   console.debug("Registered video trim operation:", entry);
+  applyTrimToActivePreview(toolKey);
 }
 
 function clearTrimQueueForTool(toolKey) {
   state.videoTrimQueue = state.videoTrimQueue.filter((entry) => entry.tool !== toolKey);
   updateTrimBadge(toolKey);
+  applyTrimToActivePreview(toolKey);
+}
+
+function computeTrimBounds(toolKey, duration = null) {
+  const entries = getTrimEntries(toolKey);
+  let start = 0;
+  let end = Number.isFinite(duration) ? duration : null;
+  let startTrimmed = false;
+  let endTrimmed = false;
+
+  entries.forEach((entry) => {
+    const rawOffset = Number(entry?.payload?.offset);
+    const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : DEFAULT_TRIM_SECONDS;
+    if (entry.mode === "start") {
+      start += offset;
+      startTrimmed = true;
+    } else if (entry.mode === "end") {
+      if (end != null && Number.isFinite(end)) {
+        end = Math.max(0, end - offset);
+      } else if (Number.isFinite(duration)) {
+        end = Math.max(0, duration - offset);
+      }
+      endTrimmed = true;
+    } else if (entry.mode === "current") {
+      const timestamp = Number(entry?.payload?.timestamp);
+      if (Number.isFinite(timestamp)) {
+        start = Math.max(start, timestamp);
+        startTrimmed = true;
+      }
+    }
+  });
+
+  if (!Number.isFinite(start) || start < 0) {
+    start = 0;
+  }
+  if (end != null && Number.isFinite(end) && end < start) {
+    end = start;
+  }
+
+  return { start, end, startTrimmed, endTrimmed };
+}
+
+function applyTrimToVideoElement(toolKey, videoElement) {
+  if (!videoElement || !toolKey) return;
+  const duration = Number.isFinite(videoElement.duration) ? videoElement.duration : null;
+  const { start, end, startTrimmed, endTrimmed } = computeTrimBounds(toolKey, duration);
+
+  if (startTrimmed && Number.isFinite(start)) {
+    videoElement.dataset.trimStart = String(Math.max(start, 0));
+  } else {
+    delete videoElement.dataset.trimStart;
+  }
+
+  if (endTrimmed && end != null && Number.isFinite(end)) {
+    videoElement.dataset.trimEnd = String(Math.max(end, 0));
+  } else {
+    delete videoElement.dataset.trimEnd;
+  }
+
+  if (duration != null && Number.isFinite(start)) {
+    const clamped = Math.min(Math.max(start, 0), duration);
+    try {
+      if (!Number.isFinite(videoElement.currentTime) || Math.abs(videoElement.currentTime - clamped) > 0.01) {
+        videoElement.currentTime = clamped;
+      }
+    } catch (error) {
+      console.warn("Failed to adjust video currentTime for trimming:", error);
+    }
+  }
+
+  updateVideoTrimInfo(toolKey, videoElement);
+}
+
+function detachTrimBehavior(videoElement) {
+  if (!videoElement || !videoElement._trimHandlers) return;
+  const handlers = videoElement._trimHandlers;
+  videoElement.removeEventListener("loadedmetadata", handlers.loadedmetadata);
+  videoElement.removeEventListener("timeupdate", handlers.timeupdate);
+  videoElement.removeEventListener("seeking", handlers.seeking);
+  delete videoElement._trimHandlers;
+}
+
+function attachTrimBehavior(toolKey, videoElement) {
+  if (!videoElement || !toolKey) return;
+  detachTrimBehavior(videoElement);
+
+  const enforceBounds = () => {
+    const startAttr = videoElement.dataset.trimStart;
+    const endAttr = videoElement.dataset.trimEnd;
+    const start = startAttr !== undefined ? Number(startAttr) : NaN;
+    const end = endAttr !== undefined ? Number(endAttr) : NaN;
+
+    if (Number.isFinite(start) && videoElement.currentTime < start - 0.01) {
+      try {
+        videoElement.currentTime = start;
+      } catch (error) {
+        console.warn("Failed to enforce trim start bound:", error);
+      }
+    }
+
+    if (Number.isFinite(end) && videoElement.currentTime > end + 0.01) {
+      try {
+        videoElement.currentTime = end;
+      } catch (error) {
+        console.warn("Failed to enforce trim end bound:", error);
+      }
+      videoElement.pause();
+    }
+  };
+
+  const handlers = {
+    loadedmetadata: () => {
+      applyTrimToVideoElement(toolKey, videoElement);
+      enforceBounds();
+    },
+    timeupdate: enforceBounds,
+    seeking: enforceBounds
+  };
+
+  videoElement.addEventListener("loadedmetadata", handlers.loadedmetadata);
+  videoElement.addEventListener("timeupdate", handlers.timeupdate);
+  videoElement.addEventListener("seeking", handlers.seeking);
+
+  videoElement._trimHandlers = handlers;
+
+  if (videoElement.readyState >= 1) {
+    handlers.loadedmetadata();
+  }
+}
+
+function applyTrimToActivePreview(toolKey) {
+  if (!toolKey || !activePreviewModal || !activePreviewModal.modal) return;
+  const { modal } = activePreviewModal;
+  const modalTool = modal.dataset.tool || "";
+  if (modalTool !== toolKey) return;
+  const videos = modal.querySelectorAll("video");
+  videos.forEach((video) => attachTrimBehavior(toolKey, video));
+  updateVideoTrimInfo(toolKey, videos[0] || null);
+}
+
+function updateVideoTrimInfo(toolKey, videoElement) {
+  if (!activePreviewModal || !activePreviewModal.modal) return;
+  const info = activePreviewModal.modal.querySelector("[data-video-trim-info]");
+  if (!info) return;
+
+  let targetVideo = videoElement;
+  if (!targetVideo) {
+    targetVideo = activePreviewModal.modal.querySelector("video");
+  }
+
+  const duration = targetVideo && Number.isFinite(targetVideo.duration) ? targetVideo.duration : null;
+  const { start, end, startTrimmed, endTrimmed } = computeTrimBounds(toolKey, duration);
+
+  if (!startTrimmed && !endTrimmed) {
+    info.textContent = "";
+    info.hidden = true;
+    return;
+  }
+
+  const startSeconds = startTrimmed && Number.isFinite(start) ? start : 0;
+  let endSeconds = null;
+  if (endTrimmed && end != null && Number.isFinite(end)) {
+    endSeconds = end;
+  } else if (duration != null && Number.isFinite(duration)) {
+    endSeconds = duration;
+  }
+
+  const startLabel = formatTimecode(Math.max(startSeconds, 0));
+  const endLabel = endSeconds != null ? formatTimecode(Math.max(endSeconds, 0)) : null;
+  info.textContent = endLabel ? `재생 구간: ${startLabel} → ${endLabel}` : `재생 시작: ${startLabel}`;
+  info.hidden = false;
 }
 
 function getVideoCandidates(downloads = [], query = "") {
@@ -1934,8 +2349,15 @@ function buildVideoSearchSection(result, downloads) {
   `;
 }
 
-function setupPreviewModalInteractions(modal) {
+function setupPreviewModalInteractions(modal, toolKey = null) {
   if (!modal) return;
+  if (toolKey) {
+    modal.dataset.tool = toolKey;
+  } else if (!modal.dataset.tool) {
+    modal.dataset.tool = "";
+  }
+  const resolvedTool = modal.dataset.tool || "";
+
   const queryInput = modal.querySelector("[data-video-query]");
   const resultsContainer = modal.querySelector("[data-video-results]");
   const searchButton = modal.querySelector("[data-video-search-btn]");
@@ -1945,8 +2367,21 @@ function setupPreviewModalInteractions(modal) {
   const pathLabel = modal.querySelector("[data-video-path]");
   const openButton = modal.querySelector("[data-video-open]");
   const detailsContainer = modal.querySelector("[data-preview-details]");
+  const trimInfo = modal.querySelector("[data-video-trim-info]");
 
-  if (!resultsContainer || !queryInput) return;
+  if (!resultsContainer || !queryInput) {
+    if (resolvedTool) {
+      const inlineVideos = modal.querySelectorAll("video");
+      inlineVideos.forEach((video) => attachTrimBehavior(resolvedTool, video));
+      applyTrimToActivePreview(resolvedTool);
+      updateVideoTrimInfo(resolvedTool, modal.querySelector("video"));
+    }
+    return;
+  }
+
+  if (resolvedTool) {
+    updateVideoTrimInfo(resolvedTool, videoElement || null);
+  }
 
   const toggleDetails = (visible) => {
     if (!detailsContainer) return;
@@ -1960,6 +2395,7 @@ function setupPreviewModalInteractions(modal) {
       } catch (error) {
         console.warn("Failed to pause preview video:", error);
       }
+      detachTrimBehavior(videoElement);
       videoElement.removeAttribute("src");
       videoElement.load();
     }
@@ -1973,6 +2409,9 @@ function setupPreviewModalInteractions(modal) {
     if (playerSection) {
       playerSection.hidden = true;
     }
+    if (resolvedTool) {
+      updateVideoTrimInfo(resolvedTool, null);
+    }
   };
 
   toggleDetails(false);
@@ -1985,12 +2424,16 @@ function setupPreviewModalInteractions(modal) {
     const path = button.getAttribute("data-video-path");
     if (!path) return;
     const title = button.getAttribute("data-video-title") || "";
-    const filename = button.getAttribute("data-video-filename") || "";
+   const filename = button.getAttribute("data-video-filename") || "";
     const videoUrl = `/api/video?path=${encodeURIComponent(path)}`;
 
     if (videoElement) {
+      detachTrimBehavior(videoElement);
       videoElement.src = videoUrl;
       videoElement.load();
+      if (resolvedTool) {
+        attachTrimBehavior(resolvedTool, videoElement);
+      }
     }
     if (pathLabel) {
       const pieces = [];
@@ -2009,6 +2452,9 @@ function setupPreviewModalInteractions(modal) {
     }
     toggleDetails(true);
     resultsContainer.dataset.selectedPath = path;
+    if (resolvedTool) {
+      updateVideoTrimInfo(resolvedTool, videoElement || null);
+    }
   };
 
   const updateResults = (query, options = {}) => {
@@ -2044,6 +2490,10 @@ function setupPreviewModalInteractions(modal) {
         : '<p class="preview-meta">다운로드된 영상이 없습니다.</p>';
       resultsContainer.setAttribute("data-empty", "true");
       delete resultsContainer.dataset.selectedPath;
+    }
+
+    if (resolvedTool) {
+      updateVideoTrimInfo(resolvedTool, videoElement || null);
     }
   };
 
@@ -2090,6 +2540,10 @@ function setupPreviewModalInteractions(modal) {
 
   // 초기 검색 결과 표시 (영상 선택 전까지 미리보기는 숨김)
   updateResults(queryInput.value.trim(), { keepSelection: true });
+
+  if (resolvedTool) {
+    applyTrimToActivePreview(resolvedTool);
+  }
 }
 
 function buildResultPreview(toolKey, downloads = []) {
@@ -2291,7 +2745,9 @@ async function showResultPreview(toolAliasOrKey) {
     return;
   }
   const modal = openPreviewModal(preview.title, preview.body);
-  setupPreviewModalInteractions(modal);
+  setupPreviewModalInteractions(modal, toolKey);
+  applyTrimToActivePreview(toolKey);
+  return modal;
 }
 
 function handleVideoTrim(toolAliasOrKey, mode) {
@@ -2316,6 +2772,19 @@ function handleVideoTrim(toolAliasOrKey, mode) {
       return;
     }
     payload.timestamp = numeric;
+  } else {
+    const defaultValue = DEFAULT_TRIM_SECONDS;
+    const promptLabel = mode === "start"
+      ? "앞부분에서 잘라낼 시간을 초 단위로 입력하세요 (예: 0.5)"
+      : "뒷부분에서 잘라낼 시간을 초 단위로 입력하세요 (예: 0.5)";
+    const input = window.prompt(promptLabel, String(defaultValue));
+    if (input === null) return;
+    const numeric = Number(input);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      showNotification("올바른 시간을 입력하세요.", "error");
+      return;
+    }
+    payload.offset = numeric;
   }
   registerVideoTrimOperation(toolKey, mode, payload, result);
   showNotification(`영상 ${label} 자르기 작업이 추가되었습니다.`, "success");
@@ -6518,7 +6987,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", (event) => {
     const copyBtn = event.target.closest("[data-copy-text]");
     if (!copyBtn) return;
-    event.preventDefault();
+   event.preventDefault();
     handleCopyButton(copyBtn);
   });
 
@@ -6529,6 +6998,68 @@ document.addEventListener("DOMContentLoaded", () => {
     const tool = loadVideoBtn.getAttribute("data-load-video");
     if (!tool) return;
     openVideoLoadDialog(tool);
+  });
+
+  document.addEventListener("click", async (event) => {
+    const trimPreviewBtn = event.target.closest("[data-preview-trim]");
+    if (!trimPreviewBtn) return;
+    event.preventDefault();
+    const tool = trimPreviewBtn.getAttribute("data-preview-trim");
+    if (!tool) return;
+    await openTrimPreview(tool);
+  });
+
+  document.addEventListener("click", async (event) => {
+    const imageBtn = event.target.closest("[data-preview-trim-image]");
+    if (!imageBtn) return;
+    event.preventDefault();
+    const tool = imageBtn.getAttribute("data-preview-trim-image");
+    if (!tool) return;
+    const mode = imageBtn.getAttribute("data-trim-image-mode") || "current";
+    await openTrimImagePreview(tool, mode);
+  });
+
+  document.addEventListener("click", async (event) => {
+    const saveBtn = event.target.closest("[data-save-frame]");
+    if (!saveBtn) return;
+    event.preventDefault();
+    const dataUrl = saveBtn.dataset.frameData;
+    if (!dataUrl) {
+      showNotification("저장할 이미지 데이터를 찾을 수 없습니다.", "error");
+      return;
+    }
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "저장 중...";
+      const response = await api("/api/tools/frames", {
+        method: "POST",
+        body: JSON.stringify({ data_url: dataUrl })
+      });
+      const url = response?.url;
+      if (url) {
+        saveBtn.textContent = "저장 완료";
+        saveBtn.classList.add("success");
+        const actions = saveBtn.closest(".trim-image-actions");
+        if (actions && !actions.querySelector("[data-frame-link]")) {
+          const link = document.createElement("a");
+          link.href = url;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = "저장본 열기";
+          link.className = "outline";
+          link.dataset.frameLink = "true";
+          actions.appendChild(link);
+        }
+        showNotification("이미지를 파일로 저장했습니다.", "success");
+      } else {
+        throw new Error("서버 응답에 URL이 없습니다.");
+      }
+    } catch (error) {
+      console.error("Failed to save frame:", error);
+      saveBtn.disabled = false;
+      saveBtn.textContent = "서버에 저장";
+      showNotification(error.message || "이미지 저장에 실패했습니다.", "error");
+    }
   });
 
   Object.keys(TOOL_CONFIG).forEach((tool) => {

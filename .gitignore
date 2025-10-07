@@ -40,3 +40,4 @@ youtube/saved_results/*
 트랙*.json
 .venvvideotxtremover/*
 *.ipynb
+meta.json

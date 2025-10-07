@@ -176,18 +176,29 @@ def run_text_removal(config: RemovalConfig) -> None:
         cap.release()
         raise RuntimeError("VideoWriter 초기화에 실패했습니다. codec/FPS 설정을 확인하세요.")
 
-    torch_device = config.device or "cuda"
-    torch_dtype = (
-        torch.float16
-        if config.dtype == "float16" and torch_device.startswith("cuda")
-        else torch.float32
-    )
+    requested_device = (config.device or "cuda").lower()
+    has_cuda = torch.cuda.is_available()
+    if requested_device.startswith("cuda") and not has_cuda:
+        torch_device = "cpu"
+    else:
+        torch_device = requested_device
+
+    if config.dtype == "float16" and torch_device.startswith("cuda"):
+        torch_dtype = torch.float16
+    else:
+        torch_dtype = torch.float32
 
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
         config.model_id,
         torch_dtype=torch_dtype,
+        safety_checker=None,
+        feature_extractor=None,
         low_cpu_mem_usage=False,
     )
+    if hasattr(pipe, "safety_checker"):
+        pipe.safety_checker = None
+    if hasattr(pipe, "feature_extractor"):
+        pipe.feature_extractor = None
     pipe = pipe.to(torch_device)
     pipe.enable_attention_slicing()
     if pipe.device.type == "cuda":  # pragma: no branch - optional path
