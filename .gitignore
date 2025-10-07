@@ -38,3 +38,4 @@ __pycache__/*
 archive/*
 youtube/saved_results/*
 트랙*.json
+.venvvideotxtremover/*
