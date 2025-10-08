@@ -110,6 +110,27 @@
                     <span class="progress" id="split-progress"></span>
                 </button>
             </div>
+            <div class="trim-controls">
+                <div class="trim-inputs">
+                    <label>시작 시간(초)
+                        <input type="number" id="trim-start" value="0" min="0" step="0.1">
+                    </label>
+                    <label>잘라낼 길이(초)
+                        <input type="number" id="trim-duration" value="4" min="0.1" step="0.1">
+                    </label>
+                    <button type="button" id="trim-preview" class="secondary" disabled>
+                        <span class="label">선택 영상 미리보기 및 자르기</span>
+                        <span class="progress" id="trim-progress"></span>
+                    </button>
+                    <button type="button" id="trim-download" class="secondary" disabled>
+                        <span class="label">다른 이름으로 저장</span>
+                    </button>
+                </div>
+                <p id="trim-status" class="status-text"></p>
+                <div id="trim-preview-wrapper" class="trim-preview hidden">
+                    <video id="trim-video" controls preload="metadata"></video>
+                </div>
+            </div>
             <p id="preview-status" class="status-text"></p>
         </form>
 
@@ -228,9 +249,19 @@
     const fillProgress = document.getElementById('fill-progress');
     const splitLabel = splitMediaBtn.querySelector('.label');
     const splitProgress = document.getElementById('split-progress');
+    const trimButton = document.getElementById('trim-preview');
+    const trimLabel = trimButton.querySelector('.label');
+    const trimProgress = document.getElementById('trim-progress');
+    const trimDownloadButton = document.getElementById('trim-download');
+    const trimStatus = document.getElementById('trim-status');
+    const trimStartInput = document.getElementById('trim-start');
+    const trimDurationInput = document.getElementById('trim-duration');
+    const trimWrapper = document.getElementById('trim-preview-wrapper');
+    const trimVideo = document.getElementById('trim-video');
     const DEFAULT_PROCESS_LABEL = processLabel.textContent.trim();
     const DEFAULT_FILL_LABEL = fillLabel.textContent.trim();
     const DEFAULT_SPLIT_LABEL = splitLabel.textContent.trim();
+    const DEFAULT_TRIM_LABEL = trimLabel.textContent.trim();
 
     const promptInput = document.getElementById('prompt');
     const negativePromptInput = document.getElementById('negative-prompt');
@@ -264,11 +295,12 @@
         }
     }
 
-    function setProcessingState(mode, message = '') {
-        processingMode = mode;
-        const isDiffusion = mode === 'diffusion';
-        const isFill = mode === 'fill';
-        const isSplit = mode === 'split';
+function setProcessingState(mode, message = '') {
+    processingMode = mode;
+    const isDiffusion = mode === 'diffusion';
+    const isFill = mode === 'fill';
+    const isSplit = mode === 'split';
+    const isTrim = mode === 'trim';
 
         processLabel.textContent = isDiffusion ? (message || '복원 중...') : DEFAULT_PROCESS_LABEL;
         processProgress.textContent = isDiffusion ? '진행 중...' : '';
@@ -282,18 +314,51 @@
         splitProgress.textContent = isSplit ? '진행 중...' : '';
         splitMediaBtn.classList.toggle('is-processing', isSplit);
 
+        trimLabel.textContent = isTrim ? (message || '자르는 중...') : DEFAULT_TRIM_LABEL;
+        trimProgress.textContent = isTrim ? '진행 중...' : '';
+        trimButton.classList.toggle('is-processing', isTrim);
+
         if (mode) {
             processSubmit.disabled = true;
             fillBackgroundBtn.disabled = true;
             previewSubmit.disabled = true;
             splitMediaBtn.disabled = true;
+            trimButton.disabled = true;
+            trimDownloadButton.disabled = true;
         } else {
             const disabled = !sessionId || boxes.length === 0;
             processSubmit.disabled = disabled;
             fillBackgroundBtn.disabled = disabled;
             previewSubmit.disabled = false;
             splitMediaBtn.disabled = !sessionId;
+            trimButton.disabled = !sessionId;
+            trimDownloadButton.disabled = !trimVideo.src;
         }
+}
+
+    function resetTrimPreview() {
+        if (!trimVideo.paused) {
+            trimVideo.pause();
+        }
+        trimVideo.removeAttribute('src');
+        trimVideo.load();
+        trimWrapper.classList.add('hidden');
+        setStatus(trimStatus, '');
+        trimDownloadButton.disabled = true;
+        delete trimDownloadButton.dataset.downloadUrl;
+    }
+
+    async function parseJSONResponse(response) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            try {
+                return await response.json();
+            } catch (error) {
+                return { detail: '서버 응답을 해석하지 못했습니다.' };
+            }
+        }
+        const text = await response.text();
+        return { detail: text || response.statusText || '요청 처리 중 오류가 발생했습니다.' };
     }
 
     function renderResultLink(links, defaultLabel = '처리된 영상 내려받기') {
@@ -461,6 +526,10 @@
         setStatus(processStatus, '');
         processSubmit.disabled = true;
         fillBackgroundBtn.disabled = true;
+        resetTrimPreview();
+        trimStartInput.value = '0';
+        trimDurationInput.value = '4';
+        trimButton.disabled = true;
 
         const fileInput = document.getElementById('video-file');
         if (!fileInput.files || fileInput.files.length === 0) {
@@ -481,9 +550,12 @@
                 body: formData,
             });
 
-            const data = await response.json();
+            const data = await parseJSONResponse(response);
             if (!response.ok) {
-                throw new Error(data.detail || '미리보기를 생성하지 못했습니다.');
+                const message = (data && typeof data === 'object' && data.detail)
+                    ? data.detail
+                    : '미리보기를 생성하지 못했습니다.';
+                throw new Error(message);
             }
 
             sessionId = data.session_id;
@@ -507,6 +579,7 @@
             previewProgress.textContent = '완료';
             previewSubmit.disabled = false;
             splitMediaBtn.disabled = false;
+            trimButton.disabled = false;
         } catch (error) {
             sessionId = null;
             sessionInput.value = '';
@@ -517,8 +590,89 @@
             previewProgress.textContent = '';
             previewSubmit.disabled = false;
             splitMediaBtn.disabled = true;
+            trimButton.disabled = true;
+            resetTrimPreview();
         }
     });
+
+trimButton.addEventListener('click', async () => {
+        if (!sessionId) {
+            setStatus(trimStatus, '먼저 영상을 업로드하고 미리보기를 생성하세요.', 'error');
+            return;
+        }
+
+        const start = Number(trimStartInput.value ?? 0);
+        const duration = Number(trimDurationInput.value ?? 0);
+        if (Number.isNaN(start) || start < 0) {
+            setStatus(trimStatus, '시작 시간은 0 이상이어야 합니다.', 'error');
+            return;
+        }
+        if (Number.isNaN(duration) || duration <= 0) {
+            setStatus(trimStatus, '잘라낼 길이는 0보다 커야 합니다.', 'error');
+            return;
+        }
+
+        resetTrimPreview();
+        setStatus(trimStatus, '영상 자르는 중...', '');
+        setProcessingState('trim', '트리밍 중...');
+
+        try {
+            const response = await fetch('/api/text-removal/trim', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    start,
+                    duration,
+                }),
+            });
+            const data = await parseJSONResponse(response);
+            if (!response.ok) {
+                const message = (data && typeof data === 'object' && data.detail)
+                    ? data.detail
+                    : '영상 자르기에 실패했습니다.';
+                throw new Error(message);
+            }
+
+            const videoUrl = `${data.video_url}?v=${Date.now()}`;
+            trimStartInput.value = (data.start ?? start).toString();
+            trimDurationInput.value = (data.duration ?? duration).toString();
+            trimVideo.src = videoUrl;
+            trimVideo.load();
+            trimWrapper.classList.remove('hidden');
+            trimVideo.play().catch(() => {});
+            setStatus(
+                trimStatus,
+                `시작 ${Number(trimStartInput.value).toFixed(2)}초, 길이 ${Number(trimDurationInput.value).toFixed(2)}초로 잘랐습니다.`,
+                'success',
+            );
+            trimDownloadButton.disabled = false;
+            trimDownloadButton.dataset.downloadUrl = videoUrl;
+        } catch (error) {
+            setStatus(trimStatus, error.message || '영상 자르기에 실패했습니다.', 'error');
+        } finally {
+            setProcessingState(null);
+        }
+});
+
+trimDownloadButton.addEventListener('click', () => {
+    if (!trimDownloadButton.dataset.downloadUrl) {
+        return;
+    }
+
+    const url = trimDownloadButton.dataset.downloadUrl;
+    const fileName = prompt('저장할 파일 이름을 입력하세요 (확장자 제외)', 'trimmed_clip');
+    if (fileName === null) {
+        return;
+    }
+
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${fileName || 'trimmed_clip'}.mp4`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+});
 
     splitMediaBtn.addEventListener('click', async () => {
         if (!sessionId) {
@@ -541,9 +695,12 @@
                 }),
             });
 
-            const data = await response.json();
+            const data = await parseJSONResponse(response);
             if (!response.ok) {
-                throw new Error(data.detail || '미디어 분리에 실패했습니다.');
+                const message = (data && typeof data === 'object' && data.detail)
+                    ? data.detail
+                    : '미디어 분리에 실패했습니다.';
+                throw new Error(message);
             }
 
             setStatus(processStatus, '음성·영상·자막 분리가 완료되었습니다!', 'success');
@@ -595,9 +752,12 @@
                 body: JSON.stringify(payload),
             });
 
-            const data = await response.json();
+            const data = await parseJSONResponse(response);
             if (!response.ok) {
-                throw new Error(data.detail || '영상 복원에 실패했습니다.');
+                const message = (data && typeof data === 'object' && data.detail)
+                    ? data.detail
+                    : '영상 복원에 실패했습니다.';
+                throw new Error(message);
             }
 
             setStatus(processStatus, '영상 복원이 완료되었습니다!', 'success');
@@ -638,9 +798,12 @@
                 body: JSON.stringify(payload),
             });
 
-            const data = await response.json();
+            const data = await parseJSONResponse(response);
             if (!response.ok) {
-                throw new Error(data.detail || '배경 채우기에 실패했습니다.');
+                const message = (data && typeof data === 'object' && data.detail)
+                    ? data.detail
+                    : '배경 채우기에 실패했습니다.';
+                throw new Error(message);
             }
 
             setStatus(processStatus, '배경 가리기가 완료되었습니다!', 'success');

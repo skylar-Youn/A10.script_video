@@ -24,9 +24,13 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 try:  # pragma: no cover - optional dependency
     import av
     AV_IMPORT_ERROR: Optional[Exception] = None
+    _pyav_error = getattr(av, "AVError", None) or getattr(av, "FFmpegError", None)
 except ImportError as exc:  # pragma: no cover - handled at runtime
     av = None  # type: ignore[assignment]
     AV_IMPORT_ERROR = exc
+    _pyav_error = None
+
+PyAVError = _pyav_error if _pyav_error is not None else Exception
 
 
 @dataclass
@@ -70,6 +74,103 @@ class TrackerUnavailableError(RuntimeError):
 
 class DiffusionUnavailableError(RuntimeError):
     """Raised when diffusers/torch dependencies are missing."""
+
+
+def trim_video_clip(
+    source_path: Path,
+    target_path: Path,
+    duration: float = 4.0,
+    start: float = 0.0,
+) -> Tuple[Path, Path]:
+    """Create a re-encoded clip limited to the desired duration.
+
+    Returns:
+        A tuple of (trimmed_path, effective_source_path). The effective source path
+        reflects the input file actually used for trimming (may differ from
+        ``source_path`` if a fallback transcode was required).
+    """
+
+    if duration <= 0:
+        raise ValueError("duration must be greater than zero.")
+    if start < 0:
+        raise ValueError("start must be zero or positive.")
+    if not source_path.exists():
+        raise FileNotFoundError(f"원본 영상을 찾을 수 없습니다: {source_path}")
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.exists():
+        target_path.unlink()
+
+    effective_source = source_path
+    alt_source: Optional[Path] = None
+
+    def _build_cmd(input_path: Path) -> Sequence[str]:
+        return [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(round(start, 3)),
+            "-i",
+            str(input_path),
+            "-t",
+            str(duration),
+            "-vf",
+            "scale='if(gt(iw,ih),min(1080,iw),-2)':'if(gt(ih,iw),min(1080,ih),-2)',format=yuv420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-profile:v",
+            "high",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
+            str(target_path),
+        ]
+
+    for attempt in range(2):
+        cmd = _build_cmd(effective_source)
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode == 0 and target_path.exists() and target_path.stat().st_size > 0:
+            return target_path, effective_source
+
+        stderr = proc.stderr.strip() or proc.stdout.strip() or "ffmpeg 트리밍에 실패했습니다."
+        lower_err = stderr.lower()
+        needs_av1_fallback = (
+            "av1" in lower_err
+            or "no decoder" in lower_err
+            or "codec av1" in lower_err
+        )
+        no_video_stream = "does not contain any stream" in lower_err or "input file does not contain" in lower_err
+
+        if no_video_stream:
+            raise RuntimeError(
+                "영상 파일에서 비디오 스트림을 찾을 수 없습니다. 파일이 손상되었거나 영상이 포함되어 있지 않습니다."
+            )
+
+        if attempt == 0 and needs_av1_fallback:
+            if av is None:
+                raise RuntimeError(
+                    "AV1 코덱을 디코드할 수 없습니다. 'av' 패키지가 설치되어 있어야 합니다."
+                ) from AV_IMPORT_ERROR
+            alt_source = source_path.parent / f"{source_path.stem}_h264.mp4"
+            try:
+                _transcode_with_av(source_path, alt_source)
+            except Exception as exc:  # pragma: no cover - propagate detailed error
+                raise RuntimeError(str(exc)) from exc
+            effective_source = alt_source
+            continue
+
+        raise RuntimeError(stderr)
+
+    raise RuntimeError("트리밍 과정에서 알 수 없는 오류가 발생했습니다.")
 
 
 def _create_tracker() -> cv2.Tracker:
@@ -162,9 +263,30 @@ def run_text_removal(config: RemovalConfig) -> None:
         cap.release()
         raise RuntimeError("첫 번째 프레임을 읽지 못했습니다.")
 
+    frame_height, frame_width = first_frame.shape[:2]
+
+    def _sanitize_roi(roi_tuple):
+        x, y, w, h = [float(value) for value in roi_tuple]
+        x0 = max(x, 0.0)
+        y0 = max(y, 0.0)
+        x1 = min(x0 + w, frame_width - 1.0)
+        y1 = min(y0 + h, frame_height - 1.0)
+        width = max(x1 - x0, 1.0)
+        height = max(y1 - y0, 1.0)
+        return x0, y0, width, height
+
+    sanitized_boxes = []
     multi_tracker = _create_multitracker()
     for roi in boxes:
-        multi_tracker.add(_create_tracker(), first_frame, tuple(map(float, roi)))
+        roi_sanitized = tuple(_sanitize_roi(roi))
+        multi_tracker.add(_create_tracker(), first_frame, roi_sanitized)
+        sanitized_boxes.append(roi_sanitized)
+
+    if not sanitized_boxes:
+        cap.release()
+        raise ValueError("적어도 한 개 이상의 유효한 박스를 지정해야 합니다.")
+
+    boxes = sanitized_boxes
 
     fps = config.fps_override or cap.get(cv2.CAP_PROP_FPS) or 30.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -243,7 +365,27 @@ def run_text_removal(config: RemovalConfig) -> None:
             ).images[0]
 
             restored = cv2.cvtColor(np.array(result), cv2.COLOR_RGB2BGR)
-            writer.write(restored)
+
+            # Stable Diffusion can occasionally emit non-uint8 or resized frames;
+            # normalise them before handing off to the video writer.
+            if restored.dtype != np.uint8:
+                restored = np.clip(restored, 0, 255).astype(np.uint8)
+
+            if restored.ndim == 2:  # grayscale -> colour
+                restored = cv2.cvtColor(restored, cv2.COLOR_GRAY2BGR)
+            elif restored.ndim == 3 and restored.shape[2] > 3:
+                restored = restored[:, :, :3]
+
+            expected_width = width or current_frame.shape[1]
+            expected_height = height or current_frame.shape[0]
+            if restored.shape[1] != expected_width or restored.shape[0] != expected_height:
+                restored = cv2.resize(
+                    restored,
+                    (int(expected_width), int(expected_height)),
+                    interpolation=cv2.INTER_LANCZOS4,
+                )
+
+            writer.write(np.ascontiguousarray(restored))
 
             ret, next_frame = cap.read()
             if not ret:
@@ -332,7 +474,7 @@ def _transcode_with_av(video_path: Path, output_path: Path) -> None:
 
                 for packet in out_stream.encode():
                     output_container.mux(packet)
-    except av.AVError as exc:  # pragma: no cover - runtime decode failure
+    except PyAVError as exc:  # pragma: no cover - runtime decode failure
         raise RuntimeError(f"PyAV 변환에 실패했습니다: {exc}") from exc
     except Exception as exc:  # pragma: no cover - guarded for unexpected runtime errors
         raise RuntimeError(f"PyAV 변환 중 오류가 발생했습니다: {exc}") from exc
@@ -512,11 +654,18 @@ def prepare_video_preview(video_path: Path, session_dir: Path) -> Tuple[np.ndarr
         str(transcoded_path),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
+    if proc.returncode != 0 or not transcoded_path.exists() or transcoded_path.stat().st_size == 0:
         stderr = proc.stderr.strip() or proc.stdout.strip() or "ffmpeg 변환에 실패했습니다."
         lower_err = stderr.lower()
-        av1_related = "av1" in lower_err or "libdav1d" in lower_err or "libaom" in lower_err
-        if av1_related:
+        needs_av1 = "av1" in lower_err or "libdav1d" in lower_err or "libaom" in lower_err
+        no_stream = "does not contain any stream" in lower_err or "input file does not contain" in lower_err
+        if transcoded_path.exists() and transcoded_path.stat().st_size == 0:
+            transcoded_path.unlink()
+        if no_stream:
+            raise RuntimeError(
+                "영상 파일에서 비디오 스트림을 찾을 수 없습니다. 파일이 손상되었거나 영상이 포함되어 있지 않습니다."
+            )
+        if needs_av1:
             try:
                 _transcode_with_av(video_path, transcoded_path)
             except RuntimeError as av_exc:

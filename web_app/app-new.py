@@ -29,8 +29,13 @@ from .utils.text_removal import (
     TrackerUnavailableError,
     prepare_video_preview,
     run_text_removal,
+    trim_video_clip,
 )
-from .app import TextRemovalBox, TextRemovalProcessRequest  # 재사용
+from .app import (
+    TextRemovalBox,
+    TextRemovalProcessRequest,
+    TextRemovalTrimRequest,
+)  # 재사용
 
 
 logger = logging.getLogger(__name__)
@@ -180,14 +185,58 @@ def create_app() -> FastAPI:
         if not processed_path_str:
             raise HTTPException(status_code=400, detail="업로드된 영상 파일을 찾을 수 없습니다.")
 
-        video_path = Path(processed_path_str)
-        if not video_path.exists():
+        source_path = Path(processed_path_str)
+        if not source_path.exists():
+            source_path = Path(meta.get("input_path", processed_path_str))
+        if not source_path.exists():
             raise HTTPException(status_code=400, detail="업로드된 영상 파일을 찾을 수 없습니다.")
+
+        trim_start = float(meta.get("trim_start", 0.0) or 0.0)
+        trim_duration = float(meta.get("trim_duration", 4.0) or 4.0)
+        trimmed_path_str = meta.get("trimmed_path")
+        trimmed_path = Path(trimmed_path_str) if trimmed_path_str else session_dir / "input_trimmed.mp4"
+
+        effective_source = source_path
+        if not trimmed_path.exists():
+            try:
+                trimmed_path, effective_source = trim_video_clip(
+                    source_path, trimmed_path, duration=trim_duration, start=trim_start
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.exception("Failed to trim video clip: %s", exc)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"영상 트리밍에 실패했습니다: {exc}",
+                ) from exc
+
+        if trimmed_path.exists() and trimmed_path.stat().st_size == 0:
+            trimmed_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=500,
+                detail="트리밍된 클립이 비어 있습니다. 시작 시간과 길이를 조정해 다시 시도하세요.",
+            )
+
+        if effective_source != source_path:
+            meta["processed_path"] = str(effective_source)
+
+        if trimmed_path.exists():
+            meta.update(
+                {
+                    "trimmed_path": str(trimmed_path),
+                    "trim_start": trim_start,
+                    "trim_duration": trim_duration,
+                }
+            )
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        video_path = trimmed_path if trimmed_path.exists() else effective_source
 
         if not payload.boxes:
             raise HTTPException(status_code=400, detail="인페인팅할 영역을 최소 1개 이상 지정하세요.")
 
         output_path = session_dir / "restored.mp4"
+
+        effective_max_frames = payload.max_frames if payload.max_frames and payload.max_frames > 0 else None
 
         config = RemovalConfig(
             video_path=video_path,
@@ -204,7 +253,7 @@ def create_app() -> FastAPI:
             dtype=payload.dtype,
             seed=payload.seed,
             fps_override=payload.fps,
-            max_frames=payload.max_frames,
+            max_frames=effective_max_frames,
         )
 
         try:
@@ -220,6 +269,9 @@ def create_app() -> FastAPI:
                 detail=f"영상 처리 중 오류가 발생했습니다: {exc}",
             ) from exc
 
+        if effective_source != source_path:
+            meta["processed_path"] = str(effective_source)
+
         meta.update(
             {
                 "output_path": str(output_path),
@@ -230,6 +282,10 @@ def create_app() -> FastAPI:
                 "guidance_scale": payload.guidance_scale,
                 "num_inference_steps": payload.num_inference_steps,
                 "dilate": payload.dilate,
+                "max_frames": effective_max_frames,
+                "trimmed_path": str(trimmed_path),
+                "trim_start": trim_start,
+                "trim_duration": trim_duration,
             }
         )
         meta_path.write_text(
@@ -261,6 +317,95 @@ def create_app() -> FastAPI:
         download_name = f"{stem}_restored{output_path.suffix}"
 
         return FileResponse(output_path, filename=download_name)
+
+    @app.post("/api/text-removal/trim")
+    async def api_text_removal_trim(payload: TextRemovalTrimRequest):
+        session_dir = TEXT_REMOVAL_UPLOAD_DIR / payload.session_id
+        if not session_dir.exists():
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다. 먼저 영상을 업로드하세요.")
+
+        meta_path = session_dir / "meta.json"
+        if not meta_path.exists():
+            raise HTTPException(status_code=400, detail="세션 정보가 손상되었습니다. 다시 시도하세요.")
+
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="세션 정보를 읽을 수 없습니다.") from exc
+
+        processed_path_str = meta.get("processed_path") or meta.get("input_path")
+        if not processed_path_str:
+            raise HTTPException(status_code=400, detail="업로드된 영상 파일을 찾을 수 없습니다.")
+
+        source_path = Path(processed_path_str)
+        if not source_path.exists():
+            source_path = Path(meta.get("input_path", processed_path_str))
+        if not source_path.exists():
+            raise HTTPException(status_code=400, detail="업로드된 영상 파일을 찾을 수 없습니다.")
+
+        duration = float(payload.duration or 0.0)
+        if duration <= 0:
+            raise HTTPException(status_code=400, detail="잘라낼 길이가 0보다 커야 합니다.")
+
+        start = float(payload.start or 0.0)
+        if start < 0:
+            raise HTTPException(status_code=400, detail="시작 시간은 0 이상이어야 합니다.")
+
+        trimmed_path = session_dir / "input_trimmed.mp4"
+        effective_source = source_path
+        try:
+            trimmed_path, effective_source = trim_video_clip(
+                source_path, trimmed_path, duration=duration, start=start
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Trim preview failed: %s", exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"영상 자르기에 실패했습니다: {exc}",
+            ) from exc
+
+        if trimmed_path.exists() and trimmed_path.stat().st_size == 0:
+            trimmed_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail="트리밍된 영상이 비어 있습니다. 다른 구간을 시도하세요.")
+
+        if effective_source != source_path:
+            meta["processed_path"] = str(effective_source)
+
+        meta.update(
+            {
+                "trimmed_path": str(trimmed_path),
+                "trim_start": start,
+                "trim_duration": duration,
+            }
+        )
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        return {
+            "session_id": payload.session_id,
+            "video_url": f"/api/text-removal/download/trim/{payload.session_id}",
+            "message": "트리밍한 미리보기 영상을 준비했습니다.",
+            "start": start,
+            "duration": duration,
+        }
+
+    @app.get("/api/text-removal/download/trim/{session_id}")
+    async def api_text_removal_download_trim(session_id: str):
+        session_dir = TEXT_REMOVAL_UPLOAD_DIR / session_id
+        meta_path = session_dir / "meta.json"
+        if not session_dir.exists() or not meta_path.exists():
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        target_path = Path(meta.get("trimmed_path", session_dir / "input_trimmed.mp4"))
+        if not target_path.exists():
+            raise HTTPException(status_code=404, detail="트리밍된 영상을 찾을 수 없습니다.")
+
+        original_name = meta.get("original_filename", target_path.name)
+        stem = Path(original_name).stem or "clip"
+        download_name = f"{stem}_trimmed{target_path.suffix}"
+        return FileResponse(target_path, filename=download_name)
 
     return app
 
