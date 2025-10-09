@@ -41,3 +41,5 @@ youtube/saved_results/*
 .venvvideotxtremover/*
 *.ipynb
 meta.json
+old/*
+gitignore
