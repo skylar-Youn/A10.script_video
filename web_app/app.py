@@ -160,13 +160,13 @@ class TextRemovalBox(BaseModel):
 
 class TextRemovalProcessRequest(BaseModel):
     session_id: str
-    prompt: str = "remove text and restore background"
-    negative_prompt: str = "text, watermark, caption"
+    prompt: str = "clean smooth surface, natural background, seamless texture"
+    negative_prompt: str = "text, watermark, caption, letters, words, characters"
     model_id: str = "runwayml/stable-diffusion-inpainting"
-    strength: float = 0.75
+    strength: float = 0.9
     guidance_scale: float = 7.5
     num_inference_steps: int = 30
-    dilate: int = 4
+    dilate: int = 10
     device: str = "cuda"
     dtype: Literal["float16", "float32"] = "float16"
     seed: Optional[int] = None
