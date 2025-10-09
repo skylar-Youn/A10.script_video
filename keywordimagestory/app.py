@@ -379,6 +379,105 @@ async def api_save_trimmed_frame(payload: dict[str, Any] = Body(...)) -> dict[st
     }
 
 
+@app.post("/api/tools/extract-frames")
+async def api_extract_frames(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """영상에서 지정된 간격으로 프레임을 추출합니다."""
+    import cv2
+
+    video_path = str(payload.get("video_path", "")).strip()
+    interval = payload.get("interval", 10)  # 기본값 10초
+
+    if not video_path:
+        raise HTTPException(status_code=400, detail="video_path is required")
+
+    video_file = Path(video_path).expanduser().resolve()
+    if not video_file.exists():
+        raise HTTPException(status_code=404, detail=f"Video file not found: {video_path}")
+
+    try:
+        # OpenCV로 영상 열기
+        cap = cv2.VideoCapture(str(video_file))
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="Failed to open video file")
+
+        # 영상 정보 가져오기
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+
+        # 프레임 간격 계산
+        frame_interval = int(fps * interval)
+
+        # 프레임 추출
+        FRAME_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        extracted_frames = []
+        frame_count = 0
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # 지정된 간격마다 프레임 저장
+            if frame_count % frame_interval == 0:
+                timestamp = frame_count / fps
+                filename = f"extracted-{uuid4().hex}.jpg"
+                target_path = FRAME_OUTPUT_DIR / filename
+
+                # 프레임을 JPEG로 저장
+                cv2.imwrite(str(target_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+                extracted_frames.append({
+                    "filename": filename,
+                    "url": f"/outputs/frames/{filename}",
+                    "timestamp": round(timestamp, 2),
+                    "frame_number": frame_count
+                })
+
+            frame_count += 1
+
+        cap.release()
+
+        return {
+            "success": True,
+            "video_path": str(video_file),
+            "interval": interval,
+            "fps": fps,
+            "duration": round(duration, 2),
+            "total_frames": total_frames,
+            "extracted_count": len(extracted_frames),
+            "frames": extracted_frames
+        }
+
+    except Exception as exc:
+        logger.exception("Frame extraction failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Frame extraction failed: {str(exc)}") from exc
+
+
+@app.get("/api/tools/list-extracted-frames")
+async def api_list_extracted_frames() -> dict[str, Any]:
+    """추출된 프레임 목록을 반환합니다."""
+    if not FRAME_OUTPUT_DIR.exists():
+        return {
+            "frames": [],
+            "count": 0
+        }
+
+    frames = []
+    for file_path in sorted(FRAME_OUTPUT_DIR.glob("extracted-*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True):
+        frames.append({
+            "filename": file_path.name,
+            "url": f"/outputs/frames/{file_path.name}",
+            "size": file_path.stat().st_size,
+            "modified": file_path.stat().st_mtime
+        })
+
+    return {
+        "frames": frames,
+        "count": len(frames)
+    }
+
+
 @app.post("/api/generate/shorts-script-prompt")
 async def api_generate_shorts_script_prompt(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     keyword = str(payload.get("keyword", "")).strip()

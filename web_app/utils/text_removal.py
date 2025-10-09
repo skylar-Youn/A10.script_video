@@ -232,7 +232,7 @@ def run_text_removal(config: RemovalConfig) -> None:
     """Execute the full tracking + inpainting loop."""
 
     try:
-        from diffusers import StableDiffusionInpaintPipeline
+        from diffusers import StableDiffusionInpaintPipeline, AutoPipelineForInpainting
         import torch
     except ImportError as exc:  # pragma: no cover - runtime dependency check
         raise DiffusionUnavailableError(
@@ -310,17 +310,25 @@ def run_text_removal(config: RemovalConfig) -> None:
     else:
         torch_dtype = torch.float32
 
-    pipe = StableDiffusionInpaintPipeline.from_pretrained(
-        config.model_id,
-        torch_dtype=torch_dtype,
-        safety_checker=None,
-        feature_extractor=None,
-        low_cpu_mem_usage=False,
-    )
-    if hasattr(pipe, "safety_checker"):
-        pipe.safety_checker = None
-    if hasattr(pipe, "feature_extractor"):
-        pipe.feature_extractor = None
+    # Kandinsky 모델은 AutoPipelineForInpainting 사용
+    if "kandinsky" in config.model_id.lower():
+        pipe = AutoPipelineForInpainting.from_pretrained(
+            config.model_id,
+            torch_dtype=torch_dtype,
+        )
+    else:
+        pipe = StableDiffusionInpaintPipeline.from_pretrained(
+            config.model_id,
+            torch_dtype=torch_dtype,
+            safety_checker=None,
+            feature_extractor=None,
+            low_cpu_mem_usage=False,
+        )
+        if hasattr(pipe, "safety_checker"):
+            pipe.safety_checker = None
+        if hasattr(pipe, "feature_extractor"):
+            pipe.feature_extractor = None
+
     pipe = pipe.to(torch_device)
     pipe.enable_attention_slicing()
     if pipe.device.type == "cuda":  # pragma: no branch - optional path

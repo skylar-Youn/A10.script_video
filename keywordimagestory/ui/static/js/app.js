@@ -340,6 +340,15 @@ function handleVideoFileSelection(tool, file) {
       <video controls preload="metadata" style="width: 100%; max-height: 480px; background: #000;" data-video-player></video>
       <p class="video-preview-meta">${safeName}${sizeLabel ? ` · ${escapeHtml(sizeLabel)}` : ""}</p>
       <p class="video-preview-trim" data-video-trim-info hidden></p>
+      <div style="margin-top: 1rem; text-align: center; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+        <button type="button" class="outline" data-trim-start-frame>⏱️ 맨 앞 자르기</button>
+        <button type="button" class="outline" data-trim-end-frame>🏁 맨 뒤 자르기</button>
+        <button type="button" class="outline" data-capture-current-frame>📸 현재 위치 캡처</button>
+      </div>
+      <div class="trim-image-gallery" data-preview-frame-gallery hidden style="margin-top: 1rem;">
+        <h4>캡처한 이미지</h4>
+        <div class="trim-image-list" data-preview-frame-list></div>
+      </div>
     </div>
   `;
   const modal = openPreviewModal(title, body);
@@ -388,6 +397,15 @@ function handleVideoUrlLoad(tool, url) {
       <video controls preload="metadata" style="width: 100%; max-height: 480px; background: #000;" src="${escapeHtml(safeUrl)}"></video>
       <p class="video-preview-meta">${escapeHtml(safeUrl)}</p>
       <p class="video-preview-trim" data-video-trim-info hidden></p>
+      <div style="margin-top: 1rem; text-align: center; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+        <button type="button" class="outline" data-trim-start-frame>⏱️ 맨 앞 자르기</button>
+        <button type="button" class="outline" data-trim-end-frame>🏁 맨 뒤 자르기</button>
+        <button type="button" class="outline" data-capture-current-frame>📸 현재 위치 캡처</button>
+      </div>
+      <div class="trim-image-gallery" data-preview-frame-gallery hidden style="margin-top: 1rem;">
+        <h4>캡처한 이미지</h4>
+        <div class="trim-image-list" data-preview-frame-list></div>
+      </div>
     </div>
   `;
   const modal = openPreviewModal(title, body);
@@ -7059,6 +7077,373 @@ document.addEventListener("DOMContentLoaded", () => {
       saveBtn.disabled = false;
       saveBtn.textContent = "서버에 저장";
       showNotification(error.message || "이미지 저장에 실패했습니다.", "error");
+    }
+  });
+
+  // 10초 간격 프레임 추출
+  document.addEventListener("click", async (event) => {
+    const extractBtn = event.target.closest("[data-extract-frames]");
+    if (!extractBtn) return;
+    event.preventDefault();
+
+    const tool = extractBtn.getAttribute("data-extract-frames");
+    const interval = parseInt(extractBtn.getAttribute("data-interval") || "10", 10);
+
+    if (!tool) return;
+
+    const result = state.latestResults[tool];
+    if (!result) {
+      showNotification("먼저 결과를 생성하세요.", "error");
+      return;
+    }
+
+    // 영상 경로 찾기
+    let videoPath = null;
+    if (result.videoFiles && result.videoFiles.length > 0) {
+      videoPath = result.videoFiles[0];
+    } else if (result.video_path) {
+      videoPath = result.video_path;
+    }
+
+    if (!videoPath) {
+      showNotification("영상 파일을 찾을 수 없습니다. 먼저 영상을 불러오세요.", "error");
+      return;
+    }
+
+    try {
+      extractBtn.disabled = true;
+      extractBtn.textContent = "프레임 추출 중...";
+
+      const response = await api("/api/tools/extract-frames", {
+        method: "POST",
+        body: JSON.stringify({
+          video_path: videoPath,
+          interval: interval
+        })
+      });
+
+      if (response?.success) {
+        extractBtn.textContent = `${response.extracted_count}개 프레임 추출 완료`;
+        extractBtn.classList.add("success");
+        showNotification(`${response.extracted_count}개의 프레임을 ${interval}초 간격으로 추출했습니다.`, "success");
+
+        // 추출 완료 후 자동으로 갤러리 표시
+        setTimeout(() => {
+          const viewBtn = document.querySelector(`[data-view-extracted-frames="${tool}"]`);
+          if (viewBtn) viewBtn.click();
+        }, 500);
+      } else {
+        throw new Error("프레임 추출에 실패했습니다.");
+      }
+    } catch (error) {
+      console.error("Failed to extract frames:", error);
+      showNotification(error.message || "프레임 추출에 실패했습니다.", "error");
+    } finally {
+      extractBtn.disabled = false;
+      setTimeout(() => {
+        extractBtn.textContent = `⏱️ ${interval}초 간격 자르기`;
+        extractBtn.classList.remove("success");
+      }, 3000);
+    }
+  });
+
+  // 추출된 이미지 갤러리 보기
+  document.addEventListener("click", async (event) => {
+    const viewBtn = event.target.closest("[data-view-extracted-frames]");
+    if (!viewBtn) return;
+    event.preventDefault();
+
+    const tool = viewBtn.getAttribute("data-view-extracted-frames");
+    if (!tool) return;
+
+    try {
+      viewBtn.disabled = true;
+      viewBtn.textContent = "불러오는 중...";
+
+      const response = await api("/api/tools/list-extracted-frames");
+
+      if (!response?.frames || response.frames.length === 0) {
+        showNotification("추출된 이미지가 없습니다. 먼저 프레임을 추출하세요.", "info");
+        return;
+      }
+
+      // 모달 생성
+      const modal = document.createElement("dialog");
+      modal.className = "extracted-frames-modal";
+      modal.style.maxWidth = "90vw";
+      modal.style.maxHeight = "90vh";
+      modal.style.overflow = "auto";
+
+      const galleryHtml = response.frames.map((frame, index) => `
+        <article class="trim-image-card" style="display: inline-block; margin: 1rem; width: 280px; vertical-align: top;">
+          <figure>
+            <img src="${frame.url}" alt="추출된 프레임 ${index + 1}" loading="lazy" style="width: 100%; height: auto;" />
+            <figcaption>프레임 #${index + 1}</figcaption>
+          </figure>
+          <div class="trim-image-actions">
+            <a href="${frame.url}" download="${frame.filename}" class="outline">다운로드</a>
+            <a href="${frame.url}" target="_blank" class="secondary">새 탭에서 열기</a>
+          </div>
+        </article>
+      `).join('');
+
+      modal.innerHTML = `
+        <article style="padding: 2rem;">
+          <header style="margin-bottom: 1rem;">
+            <h3>📁 추출된 이미지 (총 ${response.count}개)</h3>
+            <button class="secondary" style="float: right;" data-close-modal>닫기</button>
+          </header>
+          <div style="clear: both; text-align: center;">
+            ${galleryHtml}
+          </div>
+        </article>
+      `;
+
+      document.body.appendChild(modal);
+      modal.showModal();
+
+      // 닫기 버튼 이벤트
+      modal.querySelector("[data-close-modal]")?.addEventListener("click", () => {
+        modal.close();
+        modal.remove();
+      });
+
+      // 배경 클릭시 닫기
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          modal.close();
+          modal.remove();
+        }
+      });
+
+    } catch (error) {
+      console.error("Failed to view extracted frames:", error);
+      showNotification(error.message || "이미지 목록을 불러오지 못했습니다.", "error");
+    } finally {
+      viewBtn.disabled = false;
+      viewBtn.textContent = "📁 자른 이미지 보기";
+    }
+  });
+
+  // 미리보기에서 현재 위치 캡처
+  document.addEventListener("click", async (event) => {
+    const captureBtn = event.target.closest("[data-capture-current-frame]");
+    if (!captureBtn) return;
+    event.preventDefault();
+
+    // 모달 내의 비디오 요소 찾기
+    const modal = captureBtn.closest(".preview-modal");
+    if (!modal) {
+      showNotification("미리보기 창을 찾을 수 없습니다.", "error");
+      return;
+    }
+
+    const video = modal.querySelector("video");
+    if (!video) {
+      showNotification("영상을 찾을 수 없습니다.", "error");
+      return;
+    }
+
+    const currentTime = video.currentTime;
+    const timeLabel = formatTimecode(currentTime);
+
+    try {
+      captureBtn.disabled = true;
+      const originalText = captureBtn.textContent;
+      captureBtn.textContent = "캡처 중...";
+
+      // 현재 위치에서 프레임 캡처
+      const frame = await captureFrameAt(video, currentTime);
+
+      // 갤러리 표시
+      let gallery = modal.querySelector("[data-preview-frame-gallery]");
+      if (gallery) {
+        gallery.hidden = false;
+      }
+
+      const list = modal.querySelector("[data-preview-frame-list]");
+      if (list) {
+        const item = document.createElement("article");
+        item.className = "trim-image-card";
+        item.style.display = "inline-block";
+        item.style.margin = "1rem";
+        item.style.width = "280px";
+        item.style.verticalAlign = "top";
+
+        item.innerHTML = `
+          <figure>
+            <img src="${frame.dataUrl}" alt="캡처 프레임" loading="lazy" style="width: 100%; height: auto;" />
+            <figcaption>${timeLabel}</figcaption>
+          </figure>
+          <div class="trim-image-actions">
+            <a href="${frame.dataUrl}" download="frame-${timeLabel.replace(/:/g, '-')}.png" class="outline">PNG 다운로드</a>
+            <button type="button" class="secondary" data-save-frame data-frame-data="${frame.dataUrl}">서버에 저장</button>
+          </div>
+        `;
+
+        list.prepend(item);
+
+        // 저장 버튼 이벤트 설정
+        const saveButton = item.querySelector("[data-save-frame]");
+        if (saveButton) {
+          saveButton.dataset.frameData = frame.dataUrl;
+          saveButton.dataset.frameLabel = "캡처";
+          saveButton.dataset.frameTime = timeLabel;
+        }
+      }
+
+      showNotification(`${timeLabel} 위치의 프레임을 캡처했습니다.`, "success");
+      captureBtn.textContent = originalText;
+
+    } catch (error) {
+      console.error("Failed to capture current frame:", error);
+      showNotification(error.message || "프레임 캡처에 실패했습니다.", "error");
+    } finally {
+      captureBtn.disabled = false;
+    }
+  });
+
+  // 맨 앞 자르기 버튼 핸들러
+  document.addEventListener("click", async (event) => {
+    const trimStartBtn = event.target.closest("[data-trim-start-frame]");
+    if (!trimStartBtn) return;
+    event.preventDefault();
+
+    const modal = trimStartBtn.closest(".preview-modal");
+    if (!modal) {
+      showNotification("미리보기 창을 찾을 수 없습니다.", "error");
+      return;
+    }
+
+    const video = modal.querySelector("video");
+    if (!video) {
+      showNotification("영상을 찾을 수 없습니다.", "error");
+      return;
+    }
+
+    try {
+      trimStartBtn.disabled = true;
+      const originalText = trimStartBtn.textContent;
+      trimStartBtn.textContent = "캡처 중...";
+
+      // 첫 프레임으로 이동하여 캡처
+      video.currentTime = 0;
+
+      // 비디오가 첫 프레임을 로드할 때까지 대기
+      await new Promise((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        video.addEventListener('seeked', onSeeked);
+      });
+
+      const frame = await captureFrameAt(video, 0);
+
+      const gallery = document.getElementById("captured-frames-gallery");
+      if (gallery) {
+        const container = document.createElement("div");
+        container.className = "captured-frame-item";
+        container.innerHTML = `
+          <img src="${frame}" alt="맨 앞 프레임" />
+          <div class="frame-info">
+            <span class="frame-time">00:00:00</span>
+            <button type="button" class="remove-frame" title="삭제">×</button>
+          </div>
+        `;
+        gallery.appendChild(container);
+
+        const removeBtn = container.querySelector(".remove-frame");
+        removeBtn.addEventListener("click", () => {
+          container.remove();
+          if (gallery.children.length === 0) {
+            gallery.style.display = "none";
+          }
+        });
+
+        gallery.style.display = "grid";
+      }
+
+      showNotification("맨 앞 프레임을 캡처했습니다.", "success");
+      trimStartBtn.textContent = originalText;
+    } catch (error) {
+      console.error("Failed to capture first frame:", error);
+      showNotification(error.message || "맨 앞 프레임 캡처에 실패했습니다.", "error");
+    } finally {
+      trimStartBtn.disabled = false;
+    }
+  });
+
+  // 맨 뒤 자르기 버튼 핸들러
+  document.addEventListener("click", async (event) => {
+    const trimEndBtn = event.target.closest("[data-trim-end-frame]");
+    if (!trimEndBtn) return;
+    event.preventDefault();
+
+    const modal = trimEndBtn.closest(".preview-modal");
+    if (!modal) {
+      showNotification("미리보기 창을 찾을 수 없습니다.", "error");
+      return;
+    }
+
+    const video = modal.querySelector("video");
+    if (!video) {
+      showNotification("영상을 찾을 수 없습니다.", "error");
+      return;
+    }
+
+    try {
+      trimEndBtn.disabled = true;
+      const originalText = trimEndBtn.textContent;
+      trimEndBtn.textContent = "캡처 중...";
+
+      // 마지막 프레임으로 이동하여 캡처 (duration - 0.1초)
+      const lastFrameTime = Math.max(0, video.duration - 0.1);
+      video.currentTime = lastFrameTime;
+
+      // 비디오가 마지막 프레임을 로드할 때까지 대기
+      await new Promise((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        video.addEventListener('seeked', onSeeked);
+      });
+
+      const frame = await captureFrameAt(video, lastFrameTime);
+      const timeLabel = formatTimecode(lastFrameTime);
+
+      const gallery = document.getElementById("captured-frames-gallery");
+      if (gallery) {
+        const container = document.createElement("div");
+        container.className = "captured-frame-item";
+        container.innerHTML = `
+          <img src="${frame}" alt="맨 뒤 프레임" />
+          <div class="frame-info">
+            <span class="frame-time">${timeLabel}</span>
+            <button type="button" class="remove-frame" title="삭제">×</button>
+          </div>
+        `;
+        gallery.appendChild(container);
+
+        const removeBtn = container.querySelector(".remove-frame");
+        removeBtn.addEventListener("click", () => {
+          container.remove();
+          if (gallery.children.length === 0) {
+            gallery.style.display = "none";
+          }
+        });
+
+        gallery.style.display = "grid";
+      }
+
+      showNotification(`맨 뒤 프레임(${timeLabel})을 캡처했습니다.`, "success");
+      trimEndBtn.textContent = originalText;
+    } catch (error) {
+      console.error("Failed to capture last frame:", error);
+      showNotification(error.message || "맨 뒤 프레임 캡처에 실패했습니다.", "error");
+    } finally {
+      trimEndBtn.disabled = false;
     }
   });
 
