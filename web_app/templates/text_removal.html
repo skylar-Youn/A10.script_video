@@ -160,7 +160,11 @@
                     <input type="text" id="negative-prompt" value="text, watermark, caption, letters, words, characters">
                 </label>
                 <label>모델 ID
-                    <input type="text" id="model-id" value="runwayml/stable-diffusion-inpainting">
+                    <select id="model-id">
+                        <option value="stabilityai/stable-diffusion-2-inpainting" selected>SD 2.0 Inpainting (추천, 고품질)</option>
+                        <option value="runwayml/stable-diffusion-inpainting">SD 1.5 Inpainting (빠름)</option>
+                        <option value="diffusers/stable-diffusion-xl-1.0-inpainting-0.1">SDXL Inpainting (최고품질, 느림)</option>
+                    </select>
                 </label>
                 <label>Guidance Scale
                     <input type="number" step="0.1" id="guidance-scale" value="7.5">
@@ -390,7 +394,7 @@ function setProcessingState(mode, message = '') {
             session_id: sessionId,
             prompt: promptInput.value.trim() || 'clean smooth surface, natural background, seamless texture',
             negative_prompt: negativePromptInput.value.trim() || 'text, watermark, caption, letters, words, characters',
-            model_id: modelInput.value.trim() || 'runwayml/stable-diffusion-inpainting',
+            model_id: modelInput.value.trim() || 'stabilityai/stable-diffusion-2-inpainting',
             guidance_scale: parseFloat(guidanceInput.value) || 7.5,
             strength: Math.min(Math.max(parseFloat(strengthInput.value) || 0.9, 0), 1),
             num_inference_steps: Math.max(parseInt(stepsInput.value, 10) || 30, 1),

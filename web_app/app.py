@@ -162,7 +162,7 @@ class TextRemovalProcessRequest(BaseModel):
     session_id: str
     prompt: str = "clean smooth surface, natural background, seamless texture"
     negative_prompt: str = "text, watermark, caption, letters, words, characters"
-    model_id: str = "runwayml/stable-diffusion-inpainting"
+    model_id: str = "stabilityai/stable-diffusion-2-inpainting"
     strength: float = 0.9
     guidance_scale: float = 7.5
     num_inference_steps: int = 30
