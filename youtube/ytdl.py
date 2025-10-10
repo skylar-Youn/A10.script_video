@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
+import logging
 from pathlib import Path
 from typing import Iterable, List, Sequence
+
+logging.basicConfig(level=logging.INFO)
 
 
 DEFAULT_DOWNLOAD_DIR = (Path(__file__).resolve().parent / "download").resolve()
@@ -160,6 +164,25 @@ def download(
         "writeautomaticsub": download_subs and auto_subs,
         "subtitleslangs": sub_langs,
         "subtitlesformat": sub_format,
+        # Rate limiting and retry options
+        "sleep_interval": 3,  # 각 다운로드 사이에 3초 대기
+        "max_sleep_interval": 10,  # 최대 대기 시간
+        "sleep_interval_subtitles": 2,  # 자막 다운로드 사이 2초 대기
+        "retries": 5,  # 5번 재시도
+        "fragment_retries": 5,
+        # 브라우저 모방 (Chrome으로 위장)
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding": "gzip, deflate",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        },
+        # 자막 다운로드 실패해도 계속 진행
+        "ignoreerrors": True,
+        "continuedl": True,
     }
 
     if progress_hook:
@@ -169,38 +192,54 @@ def download(
     seen: set[Path] = set()
 
     with YoutubeDL(ydl_opts) as ydl:
-        for url in urls:
-            info = ydl.extract_info(url, download=not skip_download)
-            for entry in _flatten_entries(info):
-                filepath = Path(ydl.prepare_filename(entry))
-                if filepath not in seen:
-                    downloaded.append(filepath)
-                    seen.add(filepath)
+        for idx, url in enumerate(urls):
+            # 여러 URL 다운로드 시 사이에 추가 대기
+            if idx > 0:
+                wait_time = 5
+                logging.info(f"다음 다운로드까지 {wait_time}초 대기 중...")
+                time.sleep(wait_time)
 
-                if not download_subs:
-                    continue
+            try:
+                info = ydl.extract_info(url, download=not skip_download)
+                for entry in _flatten_entries(info):
+                    filepath = Path(ydl.prepare_filename(entry))
+                    if filepath not in seen:
+                        downloaded.append(filepath)
+                        seen.add(filepath)
 
-                for subtitle in (entry.get("requested_subtitles") or {}).values():
-                    sub_path = subtitle.get("filepath")
-                    if sub_path:
-                        path_obj = Path(sub_path)
-                        if path_obj not in seen:
-                            downloaded.append(path_obj)
-                            seen.add(path_obj)
+                    if not download_subs:
+                        continue
 
-                for subtitle_group in (entry.get("automatic_captions") or {}).values():
-                    candidates = []
-                    if isinstance(subtitle_group, dict):
-                        candidates.append(subtitle_group)
-                    elif isinstance(subtitle_group, list):
-                        candidates.extend(item for item in subtitle_group if isinstance(item, dict))
-                    for candidate in candidates:
-                        sub_path = candidate.get("filepath")
+                    for subtitle in (entry.get("requested_subtitles") or {}).values():
+                        sub_path = subtitle.get("filepath")
                         if sub_path:
                             path_obj = Path(sub_path)
                             if path_obj not in seen:
                                 downloaded.append(path_obj)
                                 seen.add(path_obj)
+
+                    for subtitle_group in (entry.get("automatic_captions") or {}).values():
+                        candidates = []
+                        if isinstance(subtitle_group, dict):
+                            candidates.append(subtitle_group)
+                        elif isinstance(subtitle_group, list):
+                            candidates.extend(item for item in subtitle_group if isinstance(item, dict))
+                        for candidate in candidates:
+                            sub_path = candidate.get("filepath")
+                            if sub_path:
+                                path_obj = Path(sub_path)
+                                if path_obj not in seen:
+                                    downloaded.append(path_obj)
+                                    seen.add(path_obj)
+
+            except Exception as e:
+                logging.error(f"'{url}' 다운로드 중 오류 발생: {e}")
+                # 자막만 실패한 경우 계속 진행
+                if "subtitle" in str(e).lower():
+                    logging.warning("자막 다운로드는 실패했지만 영상 다운로드는 계속 진행됩니다.")
+                else:
+                    # 영상 다운로드 자체가 실패한 경우만 예외 발생
+                    raise
 
     return downloaded
 

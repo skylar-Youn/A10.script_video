@@ -1,5 +1,21 @@
 [
   {
+    "timestamp": "2025-10-11T07:55:13.414990",
+    "urls": [
+      "https://www.youtube.com/shorts/zHCA0kALewI"
+    ],
+    "files": [
+      "/home/sk/ws/youtubeanalysis/youtube/download/Raja Running Around The Living Room #outdoorsavannah [zHCA0kALewI].webm",
+      "/home/sk/ws/youtubeanalysis/youtube/download/Raja Running Around The Living Room #outdoorsavannah [zHCA0kALewI].ko.srt"
+    ],
+    "settings": {
+      "output_dir": "/home/sk/ws/youtubeanalysis/youtube/download",
+      "sub_langs": "ko",
+      "download_subs": true,
+      "auto_subs": true
+    }
+  },
+  {
     "timestamp": "2025-10-09T22:48:59.152603",
     "urls": [
       "https://www.youtube.com/watch?v=n6o2fEnvWTU"
