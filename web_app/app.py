@@ -410,6 +410,12 @@ COPYRIGHT_REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="AI Shorts Maker")
 
+# 다운로드 진행 상태 추적
+download_tasks: Dict[str, Dict[str, Any]] = {}
+
+# 영상 자르기 진행 상태 추적
+cut_video_tasks: Dict[str, Dict[str, Any]] = {}
+
 # CORS 설정 추가
 app.add_middleware(
     CORSMiddleware,
@@ -2197,6 +2203,862 @@ async def ytdl_index(request: Request) -> HTMLResponse:
         "nav_active": "ytdl",
     }
     return templates.TemplateResponse("ytdl.html", context)
+
+
+@app.get("/video-analyzer", response_class=HTMLResponse)
+async def video_analyzer_index(request: Request) -> HTMLResponse:
+    """영상 분석기 페이지."""
+    context = {
+        "request": request,
+        "form_values": {
+            "video_path": "",
+            "search_directory": "",
+            "auto_search": True,
+        },
+        "result": None,
+        "error": None,
+        "nav_active": "video_analyzer",
+    }
+    return templates.TemplateResponse("video_analyzer.html", context)
+
+
+@app.post("/video-analyzer", response_class=HTMLResponse)
+async def video_analyzer_process(
+    request: Request,
+    video_file: Optional[UploadFile] = File(None),
+    subtitle_file: Optional[UploadFile] = File(None),
+    video_path: str = Form(""),
+    search_directory: str = Form(""),
+    auto_search: bool = Form(False),
+) -> HTMLResponse:
+    """영상에서 자막 추출 및 분석."""
+    context = {
+        "request": request,
+        "form_values": {
+            "video_path": video_path,
+            "search_directory": search_directory,
+            "auto_search": auto_search,
+        },
+        "result": None,
+        "error": None,
+        "nav_active": "video_analyzer",
+    }
+
+    try:
+        # 영상 파일 처리
+        video_file_path = None
+        if video_file and video_file.filename:
+            # 업로드된 파일 저장
+            upload_dir = Path("temp_uploads")
+            upload_dir.mkdir(exist_ok=True)
+            video_file_path = upload_dir / f"{uuid4()}_{video_file.filename}"
+            with open(video_file_path, "wb") as f:
+                content = await video_file.read()
+                f.write(content)
+        elif video_path:
+            # 경로로 지정된 파일
+            video_file_path = Path(video_path)
+            if not video_file_path.exists():
+                raise ValueError(f"영상 파일을 찾을 수 없습니다: {video_path}")
+
+        if not video_file_path:
+            raise ValueError("영상 파일을 선택하거나 경로를 입력하세요.")
+
+        # 자막 파일 찾기
+        subtitle_path = None
+        subtitles_data = []
+
+        # 업로드된 자막 파일이 있는 경우
+        if subtitle_file and subtitle_file.filename:
+            upload_dir = Path("temp_uploads")
+            upload_dir.mkdir(exist_ok=True)
+            subtitle_path = upload_dir / f"{uuid4()}_{subtitle_file.filename}"
+            with open(subtitle_path, "wb") as f:
+                content = await subtitle_file.read()
+                f.write(content)
+        else:
+            # 자막 파일 자동 검색
+            search_paths = []
+
+            # 영상 파일과 같은 디렉토리에서 검색
+            if video_file_path:
+                import re
+                video_dir = video_file_path.parent
+                video_stem = video_file_path.stem
+                video_id = None
+                video_id_match = re.search(r'\[([a-zA-Z0-9_-]+)\]', video_file_path.name)
+                if video_id_match:
+                    video_id = video_id_match.group(1)
+
+                # 정확히 일치하는 자막 파일 우선 검색
+                exact_match_paths = [
+                    video_dir / f"{video_stem}.srt",
+                    video_dir / f"{video_stem}.vtt",
+                    video_dir / f"{video_stem}.ko.srt",
+                    video_dir / f"{video_stem}.en.srt",
+                ]
+
+                # 정확히 일치하는 파일이 있는지 먼저 확인
+                for path in exact_match_paths:
+                    if path.exists() and path.is_file():
+                        subtitle_path = path
+                        break
+
+                # 정확한 매칭이 없으면, 비디오 ID 매칭 시도
+                if not subtitle_path and video_id:
+                    # 같은 비디오 ID를 가진 자막 파일 찾기
+                    for ext in [".srt", ".vtt", ".ko.srt", ".en.srt"]:
+                        matching_subtitles = list(video_dir.glob(f"*[{video_id}]*{ext}"))
+                        if matching_subtitles:
+                            subtitle_path = matching_subtitles[0]
+                            break
+
+                # 비디오 ID 매칭도 실패하면, 검색 디렉토리에서 찾기
+                if not subtitle_path and search_directory and auto_search:
+                    search_dir = Path(search_directory)
+                    if search_dir.exists() and search_dir.is_dir():
+                        # 먼저 비디오 ID로 검색
+                        if video_id:
+                            for ext in [".srt", ".vtt", ".ko.srt", ".en.srt"]:
+                                matching_subtitles = list(search_dir.glob(f"*[{video_id}]*{ext}"))
+                                if matching_subtitles:
+                                    subtitle_path = matching_subtitles[0]
+                                    break
+
+                        # 비디오 ID 매칭 실패 시, 파일명 유사도로 찾기
+                        if not subtitle_path:
+                            all_subtitle_files = []
+                            for ext in [".srt", ".vtt", ".ass", ".ssa"]:
+                                all_subtitle_files.extend(search_dir.glob(f"*{ext}"))
+
+                            # 파일명 유사도 계산 (가장 긴 공통 부분 문자열)
+                            best_match = None
+                            best_score = 0
+
+                            for sub_file in all_subtitle_files:
+                                # 비디오 파일명과 자막 파일명의 유사도 계산
+                                common_length = len(set(video_stem.lower().split()) &
+                                                    set(sub_file.stem.lower().split()))
+                                if common_length > best_score:
+                                    best_score = common_length
+                                    best_match = sub_file
+
+                            if best_match and best_score > 0:
+                                subtitle_path = best_match
+
+        # 자막 파일 파싱
+        if subtitle_path and subtitle_path.exists():
+            with open(subtitle_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # 개선된 SRT 파싱
+            if subtitle_path.suffix.lower() == ".srt":
+                import re
+
+                # 정규식으로 자막 블록 추출
+                # 패턴: 숫자 -> 시간 코드 -> 텍스트 (한 줄 이상)
+                subtitle_pattern = r'(\d+)\s*\n(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})\s*\n((?:(?!\d+\s*\n\d{2}:\d{2}:).+\n?)+)'
+
+                matches = re.finditer(subtitle_pattern, content, re.MULTILINE)
+
+                for match in matches:
+                    index = match.group(1)
+                    start = match.group(2)
+                    end = match.group(3)
+                    text = match.group(4).strip()
+
+                    # 텍스트 정리
+                    # 1. 줄 단위로 분리
+                    lines = text.split('\n')
+                    # 2. 단독 숫자만 있는 줄 제거 (자막 번호가 섞인 경우)
+                    lines = [line.strip() for line in lines if line.strip() and not line.strip().isdigit()]
+                    # 3. 공백으로 연결
+                    text = ' '.join(lines)
+
+                    if text:  # 빈 텍스트가 아닌 경우만 추가
+                        subtitles_data.append({
+                            "start": start.strip(),
+                            "end": end.strip(),
+                            "text": text.strip(),
+                        })
+
+        if not subtitle_path:
+            raise ValueError("자막 파일을 찾을 수 없습니다. 자막 파일을 직접 업로드하거나 검색 폴더를 지정하세요.")
+
+        context["result"] = {
+            "video_name": video_file_path.name,
+            "subtitle_file": subtitle_path.name if subtitle_path else None,
+            "subtitle_count": len(subtitles_data),
+            "subtitles": subtitles_data,
+            "download_url": None,  # 필요시 구현
+        }
+
+    except ValueError as e:
+        context["error"] = str(e)
+    except Exception as e:
+        logging.exception("영상 분석 중 오류 발생")
+        context["error"] = f"처리 중 오류가 발생했습니다: {str(e)}"
+
+    return templates.TemplateResponse("video_analyzer.html", context)
+
+
+@app.get("/api/video-analyzer/videos")
+async def api_get_video_files(folder: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get list of available video files.
+
+    Args:
+        folder: Optional folder path to search. If provided, only searches this folder.
+    """
+    video_files = []
+    video_extensions = {".mp4", ".webm", ".mkv", ".avi", ".mov", ".flv", ".m4v", ".wmv"}
+
+    # 폴더 파라미터가 제공된 경우 해당 폴더만 검색
+    if folder:
+        search_dirs = [Path(folder)]
+        max_depth = 1  # 지정된 폴더는 하위 폴더를 검색하지 않음 (성능 향상)
+    else:
+        # 기본 검색 폴더들
+        search_dirs = [
+            Path("/home/sk/ws/youtubeanalysis/youtube/download"),  # 기본 폴더
+        ]
+        max_depth = 1  # 하위 폴더 검색하지 않음 (성능 향상)
+
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+
+        try:
+            # 모든 경우에 직접 하위 파일만 검색 (하위 폴더 검색 안 함)
+            for item in search_dir.iterdir():
+                if item.is_file() and item.suffix.lower() in video_extensions:
+                    try:
+                        stat_info = item.stat()
+                        video_files.append({
+                            "name": item.name,
+                            "path": str(item.absolute()),
+                            "size": stat_info.st_size,
+                            "size_mb": round(stat_info.st_size / (1024 * 1024), 2),
+                            "modified": datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
+                            "directory": str(item.parent),
+                        })
+                    except (OSError, PermissionError):
+                        continue
+        except (OSError, PermissionError):
+            continue
+
+    # 수정 날짜 기준으로 최신순 정렬
+    video_files.sort(key=lambda x: x["modified"], reverse=True)
+
+    # 최대 100개로 제한
+    return video_files[:100]
+
+
+@app.get("/api/video-analyzer/stream")
+async def api_stream_video(path: str):
+    """Stream video file for preview.
+
+    Args:
+        path: Absolute path to the video file.
+    """
+    video_path = Path(path)
+
+    # 보안: 파일이 존재하고 실제 파일인지 확인
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
+
+    # 비디오 확장자 확인
+    video_extensions = {".mp4", ".webm", ".mkv", ".avi", ".mov", ".flv", ".m4v", ".wmv"}
+    if video_path.suffix.lower() not in video_extensions:
+        raise HTTPException(status_code=400, detail="지원하지 않는 비디오 형식입니다.")
+
+    # MIME 타입 결정
+    mime_types = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+        ".avi": "video/x-msvideo",
+        ".mov": "video/quicktime",
+        ".flv": "video/x-flv",
+        ".m4v": "video/mp4",
+        ".wmv": "video/x-ms-wmv",
+    }
+    media_type = mime_types.get(video_path.suffix.lower(), "video/mp4")
+
+    return FileResponse(
+        path=str(video_path),
+        media_type=media_type,
+        filename=video_path.name,
+    )
+
+
+@app.post("/api/video-analyzer/extract-frame")
+async def api_extract_frame(payload: Dict[str, Any] = Body(...)):
+    """Extract a single frame from video.
+
+    Args:
+        payload: {
+            "video_path": str,
+            "frame_type": "first" | "last"
+        }
+    """
+    import cv2
+    import base64
+
+    video_path = Path(payload["video_path"])
+    frame_type = payload["frame_type"]
+
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
+
+    try:
+        cap = cv2.VideoCapture(str(video_path))
+
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="비디오 파일을 열 수 없습니다.")
+
+        if frame_type == "first":
+            # 첫 프레임
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret, frame = cap.read()
+            timestamp = 0.0
+        elif frame_type == "last":
+            # 마지막 프레임
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total_frames > 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, total_frames - 1)
+                ret, frame = cap.read()
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                timestamp = round((total_frames - 1) / fps, 2) if fps > 0 else 0.0
+            else:
+                raise HTTPException(status_code=400, detail="비디오에 프레임이 없습니다.")
+        else:
+            raise HTTPException(status_code=400, detail="잘못된 frame_type입니다.")
+
+        cap.release()
+
+        if not ret:
+            raise HTTPException(status_code=400, detail="프레임을 읽을 수 없습니다.")
+
+        # JPEG로 인코딩
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+
+        return {
+            "frame_data": frame_base64,
+            "timestamp": timestamp
+        }
+
+    except Exception as e:
+        logging.exception("프레임 추출 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
+
+
+@app.post("/api/video-analyzer/extract-frames-interval")
+async def api_extract_frames_interval(payload: Dict[str, Any] = Body(...)):
+    """Extract frames at regular intervals from video.
+
+    Args:
+        payload: {
+            "video_path": str,
+            "interval": int (seconds)
+        }
+    """
+    import cv2
+    import base64
+
+    video_path = Path(payload["video_path"])
+    interval = payload.get("interval", 10)
+
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
+
+    try:
+        cap = cv2.VideoCapture(str(video_path))
+
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="비디오 파일을 열 수 없습니다.")
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+
+        frames_data = []
+        times = []
+
+        # 간격마다 시간 추가
+        current_time = 0
+        while current_time < duration:
+            times.append(current_time)
+            current_time += interval
+
+        # 마지막 프레임 추가 (duration이 interval의 배수가 아닐 경우)
+        if len(times) == 0 or times[-1] < duration - 0.1:
+            times.append(duration - 0.1)
+
+        # 모든 프레임 추출
+        for time in times:
+            frame_number = int(time * fps)
+
+            if frame_number >= total_frames:
+                frame_number = total_frames - 1
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+
+            if ret:
+                # JPEG로 인코딩
+                _, buffer = cv2.imencode('.jpg', frame)
+                frame_base64 = base64.b64encode(buffer).decode('utf-8')
+
+                frames_data.append({
+                    "frame_data": frame_base64,
+                    "timestamp": round(time, 2)
+                })
+
+        cap.release()
+
+        return {
+            "frames": frames_data,
+            "total_duration": round(duration, 2)
+        }
+
+    except Exception as e:
+        logging.exception("프레임 추출 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
+
+
+@app.post("/api/video-analyzer/get-subtitle-times")
+async def api_get_subtitle_times(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """자막 파일에서 시작 시간 추출"""
+    try:
+        subtitle_path = Path(payload.get("subtitle_path", ""))
+
+        if not subtitle_path.exists():
+            raise HTTPException(status_code=404, detail="자막 파일을 찾을 수 없습니다.")
+
+        times = []
+
+        # 파일 확장자에 따라 처리
+        file_ext = subtitle_path.suffix.lower()
+
+        with open(subtitle_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        if file_ext == '.srt':
+            # SRT 형식 파싱
+            import re
+            # 시간 패턴: 00:00:00,000 --> 00:00:02,000
+            time_pattern = r'(\d{2}):(\d{2}):(\d{2})[,\.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,\.](\d{3})'
+            matches = re.findall(time_pattern, content)
+
+            for match in matches:
+                # 시작 시간만 추출
+                hours, minutes, seconds, milliseconds = int(match[0]), int(match[1]), int(match[2]), int(match[3])
+                time_in_seconds = hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+                times.append(time_in_seconds)
+
+        elif file_ext == '.vtt':
+            # VTT 형식 파싱
+            import re
+            # 시간 패턴: 00:00:00.000 --> 00:00:02.000
+            time_pattern = r'(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})'
+            matches = re.findall(time_pattern, content)
+
+            for match in matches:
+                # 시작 시간만 추출
+                hours, minutes, seconds, milliseconds = int(match[0]), int(match[1]), int(match[2]), int(match[3])
+                time_in_seconds = hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+                times.append(time_in_seconds)
+
+        else:
+            raise HTTPException(status_code=400, detail="지원하지 않는 자막 파일 형식입니다. (.srt, .vtt 지원)")
+
+        # 중복 제거 및 정렬
+        times = sorted(list(set(times)))
+
+        return {
+            "times": times,
+            "count": len(times)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("자막 시간 추출 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"자막 시간 추출 실패: {str(e)}")
+
+
+@app.post("/api/video-analyzer/cut-by-subtitles-start")
+async def api_cut_video_by_subtitles_start(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """자막 시간 기준으로 영상 자르기 시작 (백그라운드)"""
+    import threading
+    from uuid import uuid4 as generate_uuid
+
+    task_id = str(generate_uuid())
+    video_path_str = payload.get("video_path", "")
+    subtitle_path_str = payload.get("subtitle_path", "")
+
+    # 초기 상태 설정
+    cut_video_tasks[task_id] = {
+        "status": "starting",
+        "progress": 0,
+        "total": 0,
+        "current": 0,
+        "message": "자막 파일 분석 중...",
+        "zip_path": None,
+        "error": None,
+        "completed": False,
+    }
+
+    def run_cut_video():
+        """백그라운드 스레드에서 영상 자르기 실행"""
+        import subprocess
+        import zipfile
+        import tempfile
+        import re
+        from pathlib import Path
+
+        try:
+            video_path = Path(video_path_str)
+            subtitle_path = Path(subtitle_path_str)
+
+            if not video_path.exists():
+                raise Exception("영상 파일을 찾을 수 없습니다.")
+
+            if not subtitle_path.exists():
+                raise Exception("자막 파일을 찾을 수 없습니다.")
+
+            cut_video_tasks[task_id]["message"] = "자막 파일 파싱 중..."
+
+            # 자막 파일에서 시간 구간 추출
+            file_ext = subtitle_path.suffix.lower()
+            time_ranges = []
+
+            with open(subtitle_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            if file_ext == '.srt':
+                # SRT 형식 파싱
+                time_pattern = r'(\d{2}):(\d{2}):(\d{2})[,\.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,\.](\d{3})'
+                matches = re.findall(time_pattern, content)
+
+                for match in matches:
+                    # 시작 시간
+                    start_h, start_m, start_s, start_ms = int(match[0]), int(match[1]), int(match[2]), int(match[3])
+                    start_time = start_h * 3600 + start_m * 60 + start_s + start_ms / 1000
+
+                    # 종료 시간
+                    end_h, end_m, end_s, end_ms = int(match[4]), int(match[5]), int(match[6]), int(match[7])
+                    end_time = end_h * 3600 + end_m * 60 + end_s + end_ms / 1000
+
+                    time_ranges.append((start_time, end_time))
+
+            elif file_ext == '.vtt':
+                # VTT 형식 파싱
+                time_pattern = r'(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})'
+                matches = re.findall(time_pattern, content)
+
+                for match in matches:
+                    # 시작 시간
+                    start_h, start_m, start_s, start_ms = int(match[0]), int(match[1]), int(match[2]), int(match[3])
+                    start_time = start_h * 3600 + start_m * 60 + start_s + start_ms / 1000
+
+                    # 종료 시간
+                    end_h, end_m, end_s, end_ms = int(match[4]), int(match[5]), int(match[6]), int(match[7])
+                    end_time = end_h * 3600 + end_m * 60 + end_s + end_ms / 1000
+
+                    time_ranges.append((start_time, end_time))
+            else:
+                raise Exception("지원하지 않는 자막 파일 형식입니다. (.srt, .vtt 지원)")
+
+            if not time_ranges:
+                raise Exception("자막 시간 정보를 찾을 수 없습니다.")
+
+            cut_video_tasks[task_id]["total"] = len(time_ranges)
+            cut_video_tasks[task_id]["status"] = "cutting"
+            cut_video_tasks[task_id]["message"] = f"영상 자르기 시작 (총 {len(time_ranges)}개 클립)"
+
+            # 영구 임시 디렉토리 생성 (다운로드 완료될 때까지 유지)
+            temp_dir = tempfile.mkdtemp()
+            temp_path = Path(temp_dir)
+            clip_files = []
+
+            # 각 시간 구간마다 영상 자르기
+            for idx, (start, end) in enumerate(time_ranges):
+                duration = end - start
+                if duration <= 0:
+                    continue
+
+                cut_video_tasks[task_id]["current"] = idx + 1
+                cut_video_tasks[task_id]["progress"] = int((idx + 1) / len(time_ranges) * 100)
+                cut_video_tasks[task_id]["message"] = f"클립 {idx + 1}/{len(time_ranges)} 처리 중..."
+
+                output_file = temp_path / f"clip_{idx:04d}.mp4"
+
+                # ffmpeg 명령어 실행
+                cmd = [
+                    "ffmpeg",
+                    "-ss", str(start),
+                    "-i", str(video_path),
+                    "-t", str(duration),
+                    "-c", "copy",  # re-encoding 없이 빠르게 자르기
+                    "-y",  # 덮어쓰기
+                    str(output_file)
+                ]
+
+                result = subprocess.run(cmd, capture_output=True, text=True)
+
+                if result.returncode != 0:
+                    logging.error(f"ffmpeg 오류: {result.stderr}")
+                    continue
+
+                if output_file.exists():
+                    clip_files.append(output_file)
+
+            if not clip_files:
+                raise Exception("영상 클립을 생성할 수 없습니다.")
+
+            cut_video_tasks[task_id]["message"] = "ZIP 파일 생성 중..."
+            cut_video_tasks[task_id]["progress"] = 95
+
+            # ZIP 파일 생성
+            zip_path = temp_path / f"{video_path.stem}_clips.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for clip_file in clip_files:
+                    zipf.write(clip_file, clip_file.name)
+
+            cut_video_tasks[task_id].update({
+                "status": "completed",
+                "progress": 100,
+                "message": f"완료! {len(clip_files)}개 클립 생성됨",
+                "zip_path": str(zip_path),
+                "completed": True,
+            })
+
+        except Exception as e:
+            logging.exception("영상 자르기 중 오류 발생")
+            cut_video_tasks[task_id].update({
+                "status": "error",
+                "message": f"오류 발생: {str(e)}",
+                "error": str(e),
+                "completed": True,
+            })
+
+    # 백그라운드 스레드로 시작
+    thread = threading.Thread(target=run_cut_video, daemon=True)
+    thread.start()
+
+    return {
+        "task_id": task_id,
+        "message": "영상 자르기 작업이 시작되었습니다.",
+    }
+
+
+@app.get("/api/video-analyzer/cut-status/{task_id}")
+async def api_get_cut_video_status(task_id: str) -> Dict[str, Any]:
+    """영상 자르기 진행 상태 조회"""
+    if task_id not in cut_video_tasks:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    return cut_video_tasks[task_id]
+
+
+@app.get("/api/video-analyzer/cut-download/{task_id}")
+async def api_download_cut_video(task_id: str):
+    """완료된 영상 클립 ZIP 파일 다운로드"""
+    if task_id not in cut_video_tasks:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    task = cut_video_tasks[task_id]
+
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail="작업이 아직 완료되지 않았습니다.")
+
+    zip_path = task.get("zip_path")
+    if not zip_path or not Path(zip_path).exists():
+        raise HTTPException(status_code=404, detail="ZIP 파일을 찾을 수 없습니다.")
+
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=Path(zip_path).name,
+    )
+
+
+@app.post("/api/video-analyzer/extract-frames-by-times")
+async def api_extract_frames_by_times(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """특정 시간 목록에 대해 프레임 추출"""
+    try:
+        video_path = Path(payload.get("video_path", ""))
+        times = payload.get("times", [])
+
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="영상 파일을 찾을 수 없습니다.")
+
+        if not times:
+            raise HTTPException(status_code=400, detail="추출할 시간 목록이 필요합니다.")
+
+        # OpenCV로 영상 열기
+        cap = cv2.VideoCapture(str(video_path))
+
+        if not cap.isOpened():
+            raise HTTPException(status_code=500, detail="영상 파일을 열 수 없습니다.")
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+
+        frames_data = []
+
+        for time in times:
+            frame_number = int(time * fps)
+
+            if frame_number >= total_frames:
+                frame_number = total_frames - 1
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+
+            if not ret:
+                continue
+
+            # JPEG로 인코딩
+            success, buffer = cv2.imencode('.jpg', frame)
+
+            if not success:
+                continue
+
+            # Base64 인코딩
+            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+
+            frames_data.append({
+                "frame_data": frame_base64,
+                "timestamp": round(time, 2)
+            })
+
+        cap.release()
+
+        return {
+            "frames": frames_data,
+            "total_extracted": len(frames_data)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("프레임 추출 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
+
+
+@app.post("/api/ytdl/start")
+async def api_start_download(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """백그라운드로 다운로드 시작"""
+    import asyncio
+    import threading
+    from uuid import uuid4 as generate_uuid
+
+    task_id = str(generate_uuid())
+    urls_str = payload.get("urls", "")
+    output_dir = payload.get("output_dir", "")
+    sub_langs = payload.get("sub_langs", "ko")
+    sub_format = payload.get("sub_format", "srt/best")
+    download_subs_enabled = payload.get("download_subs", True)
+    auto_subs_enabled = payload.get("auto_subs", True)
+    dry_run_enabled = payload.get("dry_run", False)
+
+    parsed_urls = _split_urls(urls_str)
+
+    if not parsed_urls:
+        raise HTTPException(status_code=400, detail="최소 하나의 유효한 URL을 입력하세요.")
+
+    # 초기 상태 설정
+    download_tasks[task_id] = {
+        "status": "starting",
+        "progress": 0,
+        "total": len(parsed_urls),
+        "current": 0,
+        "message": "다운로드 준비 중...",
+        "files": [],
+        "error": None,
+        "completed": False,
+    }
+
+    def progress_callback(d):
+        """yt-dlp progress hook"""
+        if d["status"] == "downloading":
+            # 진행율 계산
+            downloaded = d.get("downloaded_bytes", 0)
+            total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
+
+            if total > 0:
+                percent = (downloaded / total) * 100
+                download_tasks[task_id]["progress"] = round(percent, 1)
+                download_tasks[task_id]["message"] = f"다운로드 중... {percent:.1f}%"
+        elif d["status"] == "finished":
+            download_tasks[task_id]["message"] = "다운로드 완료, 처리 중..."
+
+    def run_download():
+        """백그라운드 스레드에서 다운로드 실행"""
+        try:
+            download_tasks[task_id]["status"] = "downloading"
+            download_tasks[task_id]["message"] = "다운로드 중..."
+
+            files = download_with_options(
+                parsed_urls,
+                output_dir or None,
+                skip_download=dry_run_enabled,
+                download_subs=download_subs_enabled,
+                auto_subs=auto_subs_enabled,
+                sub_langs=sub_langs,
+                sub_format=sub_format,
+                progress_hook=progress_callback,
+            )
+
+            # 다운로드 기록에 추가
+            if not dry_run_enabled and files:
+                form_values = {
+                    "output_dir": output_dir,
+                    "sub_langs": sub_langs,
+                    "sub_format": sub_format,
+                    "download_subs": download_subs_enabled,
+                    "auto_subs": auto_subs_enabled,
+                    "dry_run": dry_run_enabled,
+                }
+                add_to_download_history(parsed_urls, files, form_values)
+
+            download_tasks[task_id].update({
+                "status": "completed",
+                "progress": 100,
+                "message": "다운로드 완료",
+                "files": [str(f) for f in files],
+                "completed": True,
+            })
+        except Exception as e:
+            logging.exception("다운로드 중 오류 발생")
+            download_tasks[task_id].update({
+                "status": "error",
+                "message": f"오류 발생: {str(e)}",
+                "error": str(e),
+                "completed": True,
+            })
+
+    # 백그라운드 스레드로 다운로드 시작
+    thread = threading.Thread(target=run_download, daemon=True)
+    thread.start()
+
+    return {
+        "task_id": task_id,
+        "message": "다운로드가 시작되었습니다.",
+    }
+
+
+@app.get("/api/ytdl/status/{task_id}")
+async def api_get_download_status(task_id: str) -> Dict[str, Any]:
+    """다운로드 진행 상태 조회"""
+    if task_id not in download_tasks:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    return download_tasks[task_id]
 
 
 @app.get("/api/ytdl/history")

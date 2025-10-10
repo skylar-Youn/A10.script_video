@@ -112,6 +112,7 @@ def download_with_options(
     auto_subs: bool = True,
     sub_langs: Iterable[str] | str = ("all",),
     sub_format: str = "best",
+    progress_hook=None,
 ) -> List[Path]:
     """Helper for programmatic usage (web UI, other scripts)."""
 
@@ -136,6 +137,7 @@ def download_with_options(
         auto_subs=auto_subs,
         sub_langs=languages,
         sub_format=sub_format,
+        progress_hook=progress_hook,
     )
 
 
@@ -148,6 +150,7 @@ def download(
     auto_subs: bool,
     sub_langs: List[str],
     sub_format: str,
+    progress_hook=None,
 ) -> List[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     ydl_opts = {
@@ -158,6 +161,9 @@ def download(
         "subtitleslangs": sub_langs,
         "subtitlesformat": sub_format,
     }
+
+    if progress_hook:
+        ydl_opts["progress_hooks"] = [progress_hook]
 
     downloaded: List[Path] = []
     seen: set[Path] = set()

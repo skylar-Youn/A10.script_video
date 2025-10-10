@@ -12,6 +12,7 @@
         <nav class="nav-links">
             <a href="/ytdl" class="nav-link {% if nav_active == 'ytdl' %}active{% endif %}">⬇️ 다운로드 도구</a>
             <a href="/text-removal" class="nav-link {% if nav_active == 'text_removal' %}active{% endif %}">🧽 영상에서 글자 지우기</a>
+            <a href="/video-analyzer" class="nav-link {% if nav_active == 'video_analyzer' %}active{% endif %}">📹 영상 분석기</a>
             <a href="/analysis" class="nav-link">📊 영상메이커</a>
             <a href="/" class="nav-link">🏠 AI 쇼츠 메이커</a>
             <a href="/similarity" class="nav-link {% if nav_active == 'similarity' %}active{% endif %}">🎞️ 영상 유사도 검사</a>
@@ -21,7 +22,7 @@
 
     <section class="panel">
         <h2>다운로드 설정</h2>
-        <form method="post" action="/ytdl" class="ytdl-form">
+        <form id="ytdl-form" method="post" action="/ytdl" class="ytdl-form">
             <div class="field">
                 <label for="urls">유튜브 URL (여러 줄 입력 가능)</label>
                 <textarea id="urls" name="urls" rows="4">{{ form_values.urls }}</textarea>
@@ -35,13 +36,27 @@
                 <input type="text" id="sub_format" name="sub_format" value="{{ form_values.sub_format }}">
             </div>
             <div class="field inline">
-                <label><input type="checkbox" name="download_subs" {% if form_values.download_subs %}checked{% endif %}> 자막 다운로드</label>
-                <label><input type="checkbox" name="auto_subs" {% if form_values.auto_subs %}checked{% endif %}> 자동 생성 자막 포함</label>
-                <label><input type="checkbox" name="dry_run" {% if form_values.dry_run %}checked{% endif %}> 드라이런(미리보기)</label>
+                <label><input type="checkbox" id="download_subs" name="download_subs" {% if form_values.download_subs %}checked{% endif %}> 자막 다운로드</label>
+                <label><input type="checkbox" id="auto_subs" name="auto_subs" {% if form_values.auto_subs %}checked{% endif %}> 자동 생성 자막 포함</label>
+                <label><input type="checkbox" id="dry_run" name="dry_run" {% if form_values.dry_run %}checked{% endif %}> 드라이런(미리보기)</label>
                 <label><input type="checkbox" name="save_settings"> 현재 상태를 기본값으로 저장</label>
             </div>
-            <button type="submit">실행</button>
+            <button type="submit" id="download-btn">실행</button>
         </form>
+
+        <!-- 진행율 표시 영역 -->
+        <div id="progress-container" style="display: none; margin-top: 20px;">
+            <div class="progress-header">
+                <h3>다운로드 진행 중</h3>
+                <span id="progress-status">준비 중...</span>
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progress-bar" style="width: 0%;">
+                    <span id="progress-text">0%</span>
+                </div>
+            </div>
+            <div id="progress-message" class="progress-message">다운로드를 시작합니다...</div>
+        </div>
     </section>
 
     {% if settings_saved %}
@@ -94,6 +109,148 @@
 </div>
 
 <script>
+let pollInterval = null;
+
+// 폼 제출 이벤트 가로채기
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('ytdl-form');
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await startDownload();
+    });
+
+    // 페이지 로드 시 다운로드 기록 불러오기
+    loadDownloadHistory();
+});
+
+async function startDownload() {
+    // 폼 데이터 수집
+    const urls = document.getElementById('urls').value;
+    const outputDir = document.getElementById('output_dir').value;
+    const subLangs = document.getElementById('sub_langs').value;
+    const subFormat = document.getElementById('sub_format').value;
+    const downloadSubs = document.getElementById('download_subs').checked;
+    const autoSubs = document.getElementById('auto_subs').checked;
+    const dryRun = document.getElementById('dry_run').checked;
+
+    if (!urls.trim()) {
+        alert('최소 하나의 URL을 입력하세요.');
+        return;
+    }
+
+    // 진행율 UI 표시
+    document.getElementById('progress-container').style.display = 'block';
+    document.getElementById('download-btn').disabled = true;
+    updateProgress(0, '다운로드를 시작합니다...', 'starting');
+
+    try {
+        // 백그라운드 다운로드 시작
+        const response = await fetch('/api/ytdl/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                urls: urls,
+                output_dir: outputDir,
+                sub_langs: subLangs,
+                sub_format: subFormat,
+                download_subs: downloadSubs,
+                auto_subs: autoSubs,
+                dry_run: dryRun,
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('다운로드 시작 실패');
+        }
+
+        const result = await response.json();
+        const taskId = result.task_id;
+
+        // 진행 상태 폴링 시작
+        pollProgress(taskId);
+    } catch (error) {
+        console.error('Error:', error);
+        updateProgress(0, '오류 발생: ' + error.message, 'error');
+        document.getElementById('download-btn').disabled = false;
+    }
+}
+
+function pollProgress(taskId) {
+    // 기존 폴링 중지
+    if (pollInterval) {
+        clearInterval(pollInterval);
+    }
+
+    // 1초마다 진행 상태 확인
+    pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/ytdl/status/${taskId}`);
+            if (!response.ok) {
+                throw new Error('상태 조회 실패');
+            }
+
+            const status = await response.json();
+            updateProgress(status.progress, status.message, status.status);
+
+            // 완료되면 폴링 중지
+            if (status.completed) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+                document.getElementById('download-btn').disabled = false;
+
+                if (status.status === 'completed') {
+                    // 다운로드 기록 새로고침
+                    setTimeout(() => {
+                        loadDownloadHistory();
+                        // 진행율 UI 숨기기 (3초 후)
+                        setTimeout(() => {
+                            document.getElementById('progress-container').style.display = 'none';
+                        }, 3000);
+                    }, 1000);
+                }
+            }
+        } catch (error) {
+            console.error('폴링 오류:', error);
+            clearInterval(pollInterval);
+            pollInterval = null;
+            updateProgress(0, '상태 확인 실패: ' + error.message, 'error');
+            document.getElementById('download-btn').disabled = false;
+        }
+    }, 1000);
+}
+
+function updateProgress(percent, message, status) {
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const progressMessage = document.getElementById('progress-message');
+    const progressStatus = document.getElementById('progress-status');
+
+    progressBar.style.width = percent + '%';
+    progressText.textContent = Math.round(percent) + '%';
+    progressMessage.textContent = message;
+
+    // 상태에 따라 색상 변경
+    if (status === 'error') {
+        progressBar.style.background = '#ef4444';
+        progressStatus.textContent = '❌ 오류';
+        progressStatus.style.color = '#ef4444';
+    } else if (status === 'completed') {
+        progressBar.style.background = '#10b981';
+        progressStatus.textContent = '✓ 완료';
+        progressStatus.style.color = '#10b981';
+    } else if (status === 'downloading') {
+        progressBar.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+        progressStatus.textContent = '⏬ 다운로드 중';
+        progressStatus.style.color = '#667eea';
+    } else {
+        progressBar.style.background = '#fbbf24';
+        progressStatus.textContent = '⏳ 준비 중';
+        progressStatus.style.color = '#fbbf24';
+    }
+}
+
 // Load and display download history
 async function loadDownloadHistory() {
     try {
@@ -175,9 +332,6 @@ async function deleteFiles(recordIndex, filePaths) {
         alert('파일 삭제 중 오류가 발생했습니다: ' + error.message);
     }
 }
-
-// Load history when page loads
-document.addEventListener('DOMContentLoaded', loadDownloadHistory);
 </script>
 
 <style>
@@ -238,6 +392,70 @@ document.addEventListener('DOMContentLoaded', loadDownloadHistory);
     padding: 20px;
 }
 
+/* 진행율 표시 스타일 */
+#progress-container {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.progress-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: #e0e6ed;
+}
+
+#progress-status {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.progress-bar-container {
+    width: 100%;
+    height: 30px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 15px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: width 0.3s ease;
+    border-radius: 15px;
+}
+
+#progress-text {
+    color: white;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.progress-message {
+    color: #c8d8e8;
+    font-size: 0.95rem;
+    text-align: center;
+    margin-top: 10px;
+}
+
+#download-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
 
 </style>
 
