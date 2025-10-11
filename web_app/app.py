@@ -2280,6 +2280,10 @@ async def video_analyzer_process(
             # 자막 파일 자동 검색
             search_paths = []
 
+            logging.info(f"🔍 자막 자동 검색 시작")
+            logging.info(f"  - auto_search: {auto_search}")
+            logging.info(f"  - search_directory: {search_directory}")
+
             # 영상 파일과 같은 디렉토리에서 검색
             if video_file_path:
                 import re
@@ -2289,6 +2293,10 @@ async def video_analyzer_process(
                 video_id_match = re.search(r'\[([a-zA-Z0-9_-]+)\]', video_file_path.name)
                 if video_id_match:
                     video_id = video_id_match.group(1)
+
+                logging.info(f"  - 영상 파일: {video_file_path.name}")
+                logging.info(f"  - 영상 디렉토리: {video_dir}")
+                logging.info(f"  - 비디오 ID: {video_id}")
 
                 # 정확히 일치하는 자막 파일 우선 검색
                 exact_match_paths = [
@@ -2302,34 +2310,43 @@ async def video_analyzer_process(
                 for path in exact_match_paths:
                     if path.exists() and path.is_file():
                         subtitle_path = path
+                        logging.info(f"  ✅ 정확한 파일명 매칭: {subtitle_path.name}")
                         break
 
                 # 정확한 매칭이 없으면, 비디오 ID 매칭 시도
                 if not subtitle_path and video_id:
+                    logging.info(f"  🔍 비디오 ID로 자막 검색 중: [{video_id}]")
                     # 같은 비디오 ID를 가진 자막 파일 찾기
                     for ext in [".srt", ".vtt", ".ko.srt", ".en.srt"]:
                         matching_subtitles = list(video_dir.glob(f"*[{video_id}]*{ext}"))
                         if matching_subtitles:
                             subtitle_path = matching_subtitles[0]
+                            logging.info(f"  ✅ 비디오 ID 매칭: {subtitle_path.name}")
                             break
 
                 # 비디오 ID 매칭도 실패하면, 검색 디렉토리에서 찾기
                 if not subtitle_path and search_directory and auto_search:
+                    logging.info(f"  🔍 검색 디렉토리에서 찾기: {search_directory}")
                     search_dir = Path(search_directory)
                     if search_dir.exists() and search_dir.is_dir():
                         # 먼저 비디오 ID로 검색
                         if video_id:
+                            logging.info(f"  🔍 검색 디렉토리에서 비디오 ID로 검색: [{video_id}]")
                             for ext in [".srt", ".vtt", ".ko.srt", ".en.srt"]:
                                 matching_subtitles = list(search_dir.glob(f"*[{video_id}]*{ext}"))
                                 if matching_subtitles:
                                     subtitle_path = matching_subtitles[0]
+                                    logging.info(f"  ✅ 검색 디렉토리에서 비디오 ID 매칭: {subtitle_path.name}")
                                     break
 
                         # 비디오 ID 매칭 실패 시, 파일명 유사도로 찾기
                         if not subtitle_path:
+                            logging.info(f"  🔍 파일명 유사도로 자막 검색 중")
                             all_subtitle_files = []
                             for ext in [".srt", ".vtt", ".ass", ".ssa"]:
                                 all_subtitle_files.extend(search_dir.glob(f"*{ext}"))
+
+                            logging.info(f"  - 검색 디렉토리의 자막 파일 수: {len(all_subtitle_files)}")
 
                             # 파일명 유사도 계산 (가장 긴 공통 부분 문자열)
                             best_match = None
@@ -2345,9 +2362,21 @@ async def video_analyzer_process(
 
                             if best_match and best_score > 0:
                                 subtitle_path = best_match
+                                logging.info(f"  ✅ 유사도 매칭 (점수: {best_score}): {subtitle_path.name}")
+                            else:
+                                logging.info(f"  ❌ 유사한 자막 파일을 찾지 못했습니다")
+                    else:
+                        logging.warning(f"  ⚠️ 검색 디렉토리가 존재하지 않거나 디렉토리가 아닙니다: {search_directory}")
+                elif not subtitle_path:
+                    if not auto_search:
+                        logging.info(f"  ⚠️ 자동 검색이 비활성화되어 있습니다")
+                    elif not search_directory:
+                        logging.info(f"  ⚠️ 검색 디렉토리가 지정되지 않았습니다")
 
         # 자막 파일 파싱
         if subtitle_path and subtitle_path.exists():
+            logging.info(f"✅ 자막 파일 발견: {subtitle_path}")
+            logging.info(f"  - 경로: {subtitle_path}")
             with open(subtitle_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
@@ -2383,6 +2412,10 @@ async def video_analyzer_process(
                         })
 
         if not subtitle_path:
+            logging.error(f"❌ 자막 파일을 찾을 수 없습니다")
+            logging.error(f"  - 영상 파일: {video_file_path.name if video_file_path else 'None'}")
+            logging.error(f"  - 검색 디렉토리: {search_directory or '지정되지 않음'}")
+            logging.error(f"  - 자동 검색: {auto_search}")
             raise ValueError("자막 파일을 찾을 수 없습니다. 자막 파일을 직접 업로드하거나 검색 폴더를 지정하세요.")
 
         context["result"] = {

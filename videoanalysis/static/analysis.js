@@ -44,6 +44,7 @@ class VideoAnalysisApp {
             'motion-pulse'
         ];
         this.selectedFiles = new Set();
+        this.selectedFilesOrder = []; // 파일 순서를 관리하는 배열
         this.hiddenFiles = new Set();
         this.lastHiddenFiles = new Set(); // 전체보기 전 숨긴 파일 백업
         this.fileMetadata = new Map();
@@ -2051,10 +2052,15 @@ class VideoAnalysisApp {
                 const checkbox = card.querySelector('input[type="checkbox"]');
                 if (checkbox) checkbox.checked = false;
                 this.selectedFiles.delete(filePath);
+                this.selectedFilesOrder = this.selectedFilesOrder.filter(f => f !== filePath);
                 return;
             }
 
             this.selectedFiles.add(filePath);
+            // 순서 배열에 추가 (중복 방지)
+            if (!this.selectedFilesOrder.includes(filePath)) {
+                this.selectedFilesOrder.push(filePath);
+            }
             card.classList.add('selected');
 
             // 비디오 파일이면 플레이어에 로드하고 영상 편집 탭으로 전환
@@ -2073,6 +2079,7 @@ class VideoAnalysisApp {
             }
         } else {
             this.selectedFiles.delete(filePath);
+            this.selectedFilesOrder = this.selectedFilesOrder.filter(f => f !== filePath);
             card.classList.remove('selected');
         }
 
@@ -2239,21 +2246,72 @@ class VideoAnalysisApp {
             return;
         }
 
-        container.innerHTML = Array.from(this.selectedFiles).map(filePath => {
+        // selectedFilesOrder를 사용하여 순서대로 렌더링
+        container.innerHTML = this.selectedFilesOrder.map((filePath, index) => {
             const fileName = filePath.split('/').pop();
+            const isFirst = index === 0;
+            const isLast = index === this.selectedFilesOrder.length - 1;
+
             return `
-                <div class="selected-item">
-                    <span>${this.truncateText(fileName, 40)}</span>
+                <div class="selected-item"
+                     draggable="true"
+                     data-index="${index}"
+                     data-file-path="${filePath}">
+                    <div class="drag-handle" title="드래그하여 순서 변경">⋮⋮</div>
+                    <div class="file-order-controls">
+                        <button class="order-btn move-up"
+                                onclick="app.moveFileUp(${index})"
+                                ${isFirst ? 'disabled' : ''}
+                                title="위로 이동">
+                            ⬆️
+                        </button>
+                        <button class="order-btn move-down"
+                                onclick="app.moveFileDown(${index})"
+                                ${isLast ? 'disabled' : ''}
+                                title="아래로 이동">
+                            ⬇️
+                        </button>
+                    </div>
+                    <span class="file-order-number">${index + 1}.</span>
+                    <span class="file-name">${this.truncateText(fileName, 35)}</span>
                     <button class="remove-selected" onclick="app.removeSelectedFile('${filePath}')">
                         ❌
                     </button>
                 </div>
             `;
         }).join('');
+
+        // 드래그 앤 드롭 이벤트 리스너 추가
+        this.setupDragAndDrop();
+    }
+
+    moveFileUp(index) {
+        if (index > 0 && index < this.selectedFilesOrder.length) {
+            // 배열에서 요소 교환
+            const temp = this.selectedFilesOrder[index];
+            this.selectedFilesOrder[index] = this.selectedFilesOrder[index - 1];
+            this.selectedFilesOrder[index - 1] = temp;
+
+            // UI 업데이트
+            this.updateSelectedFilesList();
+        }
+    }
+
+    moveFileDown(index) {
+        if (index >= 0 && index < this.selectedFilesOrder.length - 1) {
+            // 배열에서 요소 교환
+            const temp = this.selectedFilesOrder[index];
+            this.selectedFilesOrder[index] = this.selectedFilesOrder[index + 1];
+            this.selectedFilesOrder[index + 1] = temp;
+
+            // UI 업데이트
+            this.updateSelectedFilesList();
+        }
     }
 
     removeSelectedFile(filePath) {
         this.selectedFiles.delete(filePath);
+        this.selectedFilesOrder = this.selectedFilesOrder.filter(f => f !== filePath);
 
         // 파일 카드에서 선택 해제
         const card = document.querySelector(`[data-file-path="${filePath}"]`);
@@ -2267,6 +2325,85 @@ class VideoAnalysisApp {
         this.updateStatusBar();
     }
 
+    setupDragAndDrop() {
+        const items = document.querySelectorAll('#selected-files-container .selected-item');
+
+        items.forEach(item => {
+            item.addEventListener('dragstart', this.handleDragStart.bind(this));
+            item.addEventListener('dragover', this.handleDragOver.bind(this));
+            item.addEventListener('drop', this.handleDrop.bind(this));
+            item.addEventListener('dragenter', this.handleDragEnter.bind(this));
+            item.addEventListener('dragleave', this.handleDragLeave.bind(this));
+            item.addEventListener('dragend', this.handleDragEnd.bind(this));
+        });
+    }
+
+    handleDragStart(e) {
+        this.draggedElement = e.currentTarget;
+        this.draggedIndex = parseInt(e.currentTarget.dataset.index);
+
+        e.currentTarget.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', e.currentTarget.innerHTML);
+
+        // 드래그 이미지 투명도 설정
+        if (e.dataTransfer.setDragImage) {
+            e.dataTransfer.setDragImage(e.currentTarget, 0, 0);
+        }
+    }
+
+    handleDragOver(e) {
+        if (e.preventDefault) {
+            e.preventDefault();
+        }
+        e.dataTransfer.dropEffect = 'move';
+        return false;
+    }
+
+    handleDragEnter(e) {
+        if (e.currentTarget !== this.draggedElement) {
+            e.currentTarget.classList.add('drag-over');
+        }
+    }
+
+    handleDragLeave(e) {
+        e.currentTarget.classList.remove('drag-over');
+    }
+
+    handleDrop(e) {
+        if (e.stopPropagation) {
+            e.stopPropagation();
+        }
+
+        e.currentTarget.classList.remove('drag-over');
+
+        const dropIndex = parseInt(e.currentTarget.dataset.index);
+
+        if (this.draggedIndex !== dropIndex && this.draggedIndex !== undefined) {
+            // 배열에서 요소 이동
+            const movedItem = this.selectedFilesOrder[this.draggedIndex];
+            this.selectedFilesOrder.splice(this.draggedIndex, 1);
+            this.selectedFilesOrder.splice(dropIndex, 0, movedItem);
+
+            // UI 업데이트
+            this.updateSelectedFilesList();
+        }
+
+        return false;
+    }
+
+    handleDragEnd(e) {
+        e.currentTarget.classList.remove('dragging');
+
+        // 모든 drag-over 클래스 제거
+        document.querySelectorAll('#selected-files-container .selected-item').forEach(item => {
+            item.classList.remove('drag-over');
+        });
+
+        this.draggedElement = null;
+        this.draggedIndex = undefined;
+    }
+
     selectAllFiles() {
         document.querySelectorAll('.file-card').forEach(card => {
             const checkbox = card.querySelector('input[type="checkbox"]');
@@ -2277,6 +2414,7 @@ class VideoAnalysisApp {
 
     clearSelection() {
         this.selectedFiles.clear();
+        this.selectedFilesOrder = [];
         document.querySelectorAll('.file-card').forEach(card => {
             card.classList.remove('selected');
             const checkbox = card.querySelector('input[type="checkbox"]');
@@ -16747,9 +16885,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     savedTargets = JSON.parse(existingData);
                 }
 
-                // 새 데이터 저장
+                // 새 데이터 저장 (순서 포함)
                 savedTargets[saveName.trim()] = {
                     files: Array.from(app.selectedFiles),
+                    filesOrder: app.selectedFilesOrder, // 순서 정보 저장
                     timestamp: new Date().toISOString(),
                     fileCount: app.selectedFiles.size
                 };
@@ -16825,6 +16964,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             // 선택된 파일 복원
                             app.selectedFiles.clear();
                             target.files.forEach(filePath => app.selectedFiles.add(filePath));
+
+                            // 순서 정보 복원 (있으면 사용, 없으면 files 순서 사용)
+                            app.selectedFilesOrder = target.filesOrder || target.files;
 
                             // UI 업데이트
                             app.updateSelectedFilesList();

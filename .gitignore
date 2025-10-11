@@ -47,3 +47,4 @@ gitignore
 *.csv
 
 *.json 
+ytdl_history.json 

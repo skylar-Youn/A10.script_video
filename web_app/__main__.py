@@ -35,11 +35,16 @@ def main() -> None:
     print("\n" + "=" * 60)
     print("🚀 서버가 시작되었습니다!")
     print("=" * 60)
-    print(f"\n📍 로컬 접근:      http://127.0.0.1:{port}/tools")
+    print(f"\n📍 로컬 접근:      http://127.0.0.1:{port}")
 
     local_ip = get_local_ip()
     if local_ip != "N/A":
-        print(f"📍 네트워크 접근:  http://{local_ip}:{port}/tools")
+        print(f"📍 네트워크 접근:  http://{local_ip}:{port}")
+
+    print("\n주요 페이지:")
+    print(f"  🏠 홈:           http://127.0.0.1:{port}/")
+    print(f"  📹 영상 분석기:  http://127.0.0.1:{port}/video-analyzer")
+    print(f"  ⬇️  다운로드:     http://127.0.0.1:{port}/ytdl")
 
     print("\n" + "=" * 60 + "\n")
 
