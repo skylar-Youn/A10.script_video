@@ -2466,14 +2466,51 @@ async def api_get_video_files(folder: Optional[str] = None) -> List[Dict[str, An
                 if item.is_file() and item.suffix.lower() in video_extensions:
                     try:
                         stat_info = item.stat()
-                        video_files.append({
+
+                        # 자막 파일 확인
+                        # 1. 정확히 같은 이름의 .srt 파일
+                        subtitle_path = item.with_suffix('.srt')
+                        has_subtitle = subtitle_path.exists()
+
+                        # 2. 언어 코드가 포함된 자막 파일 (.ko.srt, .en.srt 등)
+                        if not has_subtitle:
+                            # 비디오 ID 추출 (예: [vTMssu3XB7g])
+                            import re
+                            video_id_match = re.search(r'\[([a-zA-Z0-9_-]+)\]', item.name)
+
+                            if video_id_match:
+                                video_id = video_id_match.group(1)
+                                # 같은 비디오 ID를 가진 자막 파일 찾기
+                                for srt_file in item.parent.glob(f"*[{video_id}]*.srt"):
+                                    if srt_file.is_file():
+                                        subtitle_path = srt_file
+                                        has_subtitle = True
+                                        break
+
+                            # 비디오 ID가 없으면 파일명 기준으로 찾기
+                            if not has_subtitle:
+                                # 확장자를 제거한 파일명으로 자막 찾기
+                                base_name = item.stem
+                                for srt_file in item.parent.glob(f"{base_name}*.srt"):
+                                    if srt_file.is_file():
+                                        subtitle_path = srt_file
+                                        has_subtitle = True
+                                        break
+
+                        video_info = {
                             "name": item.name,
                             "path": str(item.absolute()),
                             "size": stat_info.st_size,
                             "size_mb": round(stat_info.st_size / (1024 * 1024), 2),
                             "modified": datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
                             "directory": str(item.parent),
-                        })
+                            "has_subtitle": has_subtitle,
+                        }
+
+                        if has_subtitle:
+                            video_info["subtitle_path"] = str(subtitle_path.absolute())
+
+                        video_files.append(video_info)
                     except (OSError, PermissionError):
                         continue
         except (OSError, PermissionError):
@@ -2719,6 +2756,112 @@ async def api_get_subtitle_times(payload: Dict[str, Any] = Body(...)) -> Dict[st
     except Exception as e:
         logging.exception("자막 시간 추출 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"자막 시간 추출 실패: {str(e)}")
+
+
+@app.get("/api/video-analyzer/read-subtitle")
+async def api_read_subtitle(path: str) -> Dict[str, Any]:
+    """자막 파일 내용 읽기"""
+    try:
+        subtitle_path = Path(path)
+
+        if not subtitle_path.exists():
+            raise HTTPException(status_code=404, detail="자막 파일을 찾을 수 없습니다.")
+
+        subtitles = []
+        file_ext = subtitle_path.suffix.lower()
+
+        with open(subtitle_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        if file_ext == '.srt':
+            # SRT 형식 파싱
+            import re
+            # SRT 블록 분리 (빈 줄로 구분)
+            blocks = content.strip().split('\n\n')
+
+            for block in blocks:
+                lines = block.strip().split('\n')
+                if len(lines) >= 3:
+                    # 첫 줄: 번호
+                    index = lines[0].strip()
+                    # 둘째 줄: 시간
+                    time_line = lines[1].strip()
+                    # 셋째 줄 이후: 텍스트
+                    text = '\n'.join(lines[2:]).strip()
+
+                    # 시간 파싱
+                    time_pattern = r'(\d{2}):(\d{2}):(\d{2})[,\.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,\.](\d{3})'
+                    match = re.match(time_pattern, time_line)
+
+                    if match:
+                        start_h, start_m, start_s, start_ms = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+                        end_h, end_m, end_s, end_ms = int(match.group(5)), int(match.group(6)), int(match.group(7)), int(match.group(8))
+
+                        start_time = f"{start_h:02d}:{start_m:02d}:{start_s:02d},{start_ms:03d}"
+                        end_time = f"{end_h:02d}:{end_m:02d}:{end_s:02d},{end_ms:03d}"
+
+                        subtitles.append({
+                            'index': index,
+                            'start': start_time,
+                            'end': end_time,
+                            'text': text
+                        })
+
+        elif file_ext == '.vtt':
+            # VTT 형식 파싱
+            import re
+            lines = content.split('\n')
+            i = 0
+            index = 1
+
+            while i < len(lines):
+                line = lines[i].strip()
+
+                # 시간 패턴 찾기
+                time_pattern = r'(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})'
+                match = re.match(time_pattern, line)
+
+                if match:
+                    start_h, start_m, start_s, start_ms = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+                    end_h, end_m, end_s, end_ms = int(match.group(5)), int(match.group(6)), int(match.group(7)), int(match.group(8))
+
+                    start_time = f"{start_h:02d}:{start_m:02d}:{start_s:02d},{start_ms:03d}"
+                    end_time = f"{end_h:02d}:{end_m:02d}:{end_s:02d},{end_ms:03d}"
+
+                    # 다음 줄들이 텍스트
+                    text_lines = []
+                    i += 1
+                    while i < len(lines) and lines[i].strip():
+                        text_lines.append(lines[i].strip())
+                        i += 1
+
+                    text = '\n'.join(text_lines)
+
+                    subtitles.append({
+                        'index': str(index),
+                        'start': start_time,
+                        'end': end_time,
+                        'text': text
+                    })
+                    index += 1
+
+                i += 1
+
+        else:
+            raise HTTPException(status_code=400, detail="지원하지 않는 자막 파일 형식입니다. (.srt, .vtt 지원)")
+
+        return {
+            "success": True,
+            "subtitle_path": str(subtitle_path),
+            "subtitles": subtitles,
+            "count": len(subtitles)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("자막 파일 읽기 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"자막 파일 읽기 실패: {str(e)}")
 
 
 @app.post("/api/video-analyzer/cut-by-subtitles-start")
@@ -2988,6 +3131,73 @@ async def api_merge_videos(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any
     """여러 영상을 하나로 합치기"""
     import subprocess
     import tempfile
+    import json
+
+    def get_video_duration(video_path: str) -> float:
+        """ffprobe를 사용하여 영상의 길이를 초 단위로 반환"""
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'json',
+            str(video_path)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return 0.0
+        try:
+            data = json.loads(result.stdout)
+            return float(data['format']['duration'])
+        except:
+            return 0.0
+
+    def format_srt_time(seconds: float) -> str:
+        """초를 SRT 시간 형식으로 변환 (HH:MM:SS,mmm)"""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int((seconds % 1) * 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+    def create_subtitle_file(video_paths: list, output_path: Path) -> str:
+        """각 영상의 제목을 자막으로 추가한 SRT 파일 생성"""
+        subtitle_entries = []
+        current_time = 0.0
+
+        for idx, video_path in enumerate(video_paths):
+            # 영상 파일명에서 제목 추출 (확장자 제거)
+            video_name = Path(video_path).stem
+
+            # 영상 길이 가져오기
+            duration = get_video_duration(video_path)
+
+            # 자막 엔트리 생성 (각 영상 시작 시점에 5초간 제목 표시)
+            start_time = current_time
+            end_time = current_time + 5.0  # 5초간 표시
+
+            subtitle_entries.append({
+                'index': idx + 1,
+                'start': format_srt_time(start_time),
+                'end': format_srt_time(end_time),
+                'text': f"[{idx + 1}] {video_name}"
+            })
+
+            # 다음 영상 시작 시간 업데이트
+            current_time += duration
+
+        # SRT 파일 내용 생성
+        srt_content = []
+        for entry in subtitle_entries:
+            srt_content.append(str(entry['index']))
+            srt_content.append(f"{entry['start']} --> {entry['end']}")
+            srt_content.append(entry['text'])
+            srt_content.append("")  # 빈 줄
+
+        # SRT 파일 저장
+        subtitle_path = output_path.with_suffix('.srt')
+        subtitle_path.write_text('\n'.join(srt_content), encoding='utf-8')
+
+        return str(subtitle_path)
 
     try:
         video_paths = payload.get("video_paths", [])
@@ -3077,9 +3287,14 @@ async def api_merge_videos(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any
             if output_path.exists():
                 size_mb = output_path.stat().st_size / (1024 * 1024)
 
+                # 자막 파일 생성
+                subtitle_path = create_subtitle_file(video_paths, output_path)
+                logging.info(f"자막 파일 생성: {subtitle_path}")
+
                 return {
                     "success": True,
                     "output_path": str(output_path),
+                    "subtitle_path": subtitle_path,
                     "size_mb": round(size_mb, 2),
                     "video_count": len(video_paths)
                 }
