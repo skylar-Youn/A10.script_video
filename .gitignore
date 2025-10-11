@@ -45,3 +45,5 @@ old/*
 gitignore
 *.html
 *.csv
+
+*.json 

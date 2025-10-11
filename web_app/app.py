@@ -2950,6 +2950,401 @@ async def api_extract_frames_by_times(payload: Dict[str, Any] = Body(...)) -> Di
         raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
 
 
+@app.post("/api/video-analyzer/merge-videos")
+async def api_merge_videos(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """여러 영상을 하나로 합치기"""
+    import subprocess
+    import tempfile
+
+    try:
+        video_paths = payload.get("video_paths", [])
+        output_name = payload.get("output_name", "merged_video.mp4")
+
+        if len(video_paths) < 2:
+            raise HTTPException(status_code=400, detail="최소 2개의 영상이 필요합니다.")
+
+        # 첫 번째 영상의 디렉토리를 출력 디렉토리로 사용
+        first_video = Path(video_paths[0])
+        output_dir = first_video.parent
+        output_path = output_dir / output_name
+
+        # 파일 존재 확인
+        for video_path in video_paths:
+            if not Path(video_path).exists():
+                raise HTTPException(status_code=404, detail=f"영상 파일을 찾을 수 없습니다: {video_path}")
+
+        # FFmpeg concat 파일 생성
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as concat_file:
+            concat_file_path = concat_file.name
+            for video_path in video_paths:
+                # FFmpeg concat 형식: file '/absolute/path/to/video.mp4'
+                concat_file.write(f"file '{Path(video_path).absolute()}'\n")
+
+        try:
+            # 각 영상 정보 가져오기 (해상도, 코덱 등 확인)
+            # 서로 다른 포맷의 영상을 합치려면 재인코딩 필요
+
+            # FFmpeg filter_complex를 사용하여 모든 영상을 동일한 포맷으로 정규화
+            # 1. 모든 영상을 동일한 해상도로 스케일링
+            # 2. 동일한 프레임레이트 적용
+            # 3. h264 코덱으로 재인코딩
+
+            # 입력 파일 리스트 생성
+            input_args = []
+            for video_path in video_paths:
+                input_args.extend(['-i', str(Path(video_path).absolute())])
+
+            # filter_complex 구성
+            # 각 입력을 1080p, 30fps로 정규화한 후 concat
+            filter_parts = []
+            for i in range(len(video_paths)):
+                # scale: 1080p로 스케일링 (비율 유지, 패딩 추가)
+                # fps: 30fps로 변환
+                # setsar: 정사각형 픽셀 비율 설정
+                filter_parts.append(
+                    f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
+                    f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1[v{i}];"
+                )
+
+            # concat 필터 추가
+            concat_inputs = ''.join([f"[v{i}]" for i in range(len(video_paths))])
+            filter_parts.append(f"{concat_inputs}concat=n={len(video_paths)}:v=1:a=0[outv]")
+
+            filter_complex = ''.join(filter_parts)
+
+            cmd = [
+                '/usr/bin/ffmpeg',  # 시스템 ffmpeg 사용 (AV1 지원)
+                *input_args,
+                '-filter_complex', filter_complex,
+                '-map', '[outv]',
+                '-c:v', 'libx264',  # h264 코덱 사용
+                '-preset', 'medium',  # 인코딩 속도/품질 균형
+                '-crf', '23',  # 품질 설정 (낮을수록 고품질)
+                '-y',  # 출력 파일 덮어쓰기
+                str(output_path)
+            ]
+
+            logging.info(f"FFmpeg 명령 실행: {' '.join(cmd)}")
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10분 타임아웃 (재인코딩이므로 시간 더 필요)
+            )
+
+            if result.returncode != 0:
+                logging.error(f"FFmpeg 에러: {result.stderr}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"영상 합치기 실패: {result.stderr}"
+                )
+
+            # 출력 파일 크기 확인
+            if output_path.exists():
+                size_mb = output_path.stat().st_size / (1024 * 1024)
+
+                return {
+                    "success": True,
+                    "output_path": str(output_path),
+                    "size_mb": round(size_mb, 2),
+                    "video_count": len(video_paths)
+                }
+            else:
+                raise HTTPException(status_code=500, detail="출력 파일이 생성되지 않았습니다.")
+
+        finally:
+            # 임시 concat 파일 삭제
+            try:
+                Path(concat_file_path).unlink()
+            except:
+                pass
+
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="영상 합치기 시간 초과 (5분)")
+    except Exception as e:
+        logging.exception("영상 합치기 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"영상 합치기 실패: {str(e)}")
+
+
+@app.post("/api/video-analyzer/analyze-frames-with-ai")
+async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """AI를 사용한 프레임 분석"""
+    import anthropic
+    import openai
+    import os
+
+    try:
+        frames = payload.get("frames", [])
+        model = payload.get("model", "sonnet")
+        analysis_type = payload.get("analysis_type", "scene-description")
+        video_name = payload.get("video_name", "unknown")
+        custom_prompt = payload.get("custom_prompt")
+
+        if not frames:
+            raise HTTPException(status_code=400, detail="분석할 프레임이 없습니다.")
+
+        # 커스텀 프롬프트가 제공되면 사용, 아니면 기본 프롬프트 사용
+        if analysis_type == "custom" and custom_prompt:
+            prompt = custom_prompt
+        else:
+            # 프롬프트 생성
+            prompts = {
+                "shorts-production": f"""다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
+이 프레임들을 바탕으로 YouTube 쇼츠(Shorts) 제작을 위한 종합 분석을 해주세요.
+
+다음 형식으로 각 프레임별로 분석해주세요:
+
+## 프레임 [번호]: [타임스탬프]
+
+### 1. 시청자용 콘텐츠 설명
+- 이 장면에서 전달하려는 핵심 메시지
+- 시청자가 느껴야 할 감정이나 반응
+- 주목해야 할 포인트
+
+### 2. 화면 텍스트 (자막/캡션)
+- 화면에 표시될 임팩트 있는 텍스트 (20자 이내)
+- 강조할 키워드나 문구
+
+### 3. 나레이션 스크립트
+- 보이스오버로 읽을 대사 (자연스럽고 구어체로)
+- 예상 읽기 시간: 3-5초
+
+### 4. AI 이미지 생성 프롬프트
+- DALL-E/Midjourney용 상세 묘사 (영어로)
+- 스타일, 조명, 구도, 색감 포함
+- 예시: "A vibrant YouTube shorts thumbnail, close-up shot, warm lighting, person expressing excitement, modern minimalist background, high contrast, 9:16 aspect ratio"
+
+### 5. 편집 노트
+- 전환 효과 제안
+- BGM 분위기 제안
+- 추가 시각 효과 아이디어
+
+전체 쇼츠는 60초 이내로 구성됩니다. 각 프레임이 전체 스토리 흐름에서 어떤 역할을 하는지 고려해주세요.""",
+
+                "scene-description": f"""다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
+각 프레임을 상세히 분석하여 다음 정보를 제공해주세요:
+
+1. 각 프레임의 장면 설명 (무엇이 보이는지, 어떤 상황인지)
+2. 주요 객체나 인물
+3. 배경과 분위기
+4. 전체적인 스토리 흐름
+
+프레임 순서대로 분석해주세요.""",
+
+                "object-detection": f"""'{video_name}' 영상의 {len(frames)}개 프레임에서 보이는 모든 객체를 인식하고 나열해주세요.
+
+각 프레임별로:
+- 사람 (수, 성별, 연령대 등)
+- 물체 (종류, 위치)
+- 텍스트 (있다면)
+- 브랜드나 로고 (있다면)
+
+을 자세히 분석해주세요.""",
+
+                "text-extraction": f"""'{video_name}' 영상의 {len(frames)}개 프레임에서 보이는 모든 텍스트를 추출해주세요.
+
+각 프레임별로:
+- 화면에 표시된 모든 텍스트
+- 텍스트의 위치와 크기
+- 텍스트의 중요도
+- 자막, 제목, 설명 등 구분
+
+을 분석해주세요.""",
+
+                "story-flow": f"""'{video_name}' 영상의 {len(frames)}개 프레임을 시간순으로 분석하여 스토리의 흐름을 파악해주세요.
+
+다음을 포함해주세요:
+- 전체 스토리 요약
+- 시작-전개-절정-결말 구조
+- 각 장면 전환의 의미
+- 핵심 메시지나 주제
+
+영상의 내러티브를 이해할 수 있도록 분석해주세요.""",
+
+                "thumbnail-suggest": f"""'{video_name}' 영상의 {len(frames)}개 프레임 중에서 썸네일로 사용하기 가장 좋은 프레임을 추천해주세요.
+
+다음 기준으로 평가해주세요:
+- 시각적 임팩트
+- 클릭을 유도하는 요소
+- 영상 내용 대표성
+- 감정적 어필
+
+각 프레임을 평가하고 순위를 매겨주세요."""
+            }
+
+            prompt = prompts.get(analysis_type, prompts["scene-description"])
+
+        # AI 모델별 처리
+        if model in ["sonnet", "haiku"]:
+            # Claude API 사용
+            client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+            model_map = {
+                "sonnet": "claude-3-5-sonnet-20241022",
+                "haiku": "claude-3-5-haiku-20241022"
+            }
+
+            # 이미지 메시지 구성
+            content = [{"type": "text", "text": prompt}]
+
+            for frame in frames:
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": frame["image_data"]
+                    }
+                })
+
+            message = client.messages.create(
+                model=model_map[model],
+                max_tokens=4000,
+                messages=[{"role": "user", "content": content}]
+            )
+
+            analysis_result = message.content[0].text
+
+        else:
+            # OpenAI API 사용
+            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+            model_map = {
+                "gpt-4o-mini": "gpt-4o-mini",
+                "gpt-4o": "gpt-4o"
+            }
+
+            # 이미지 메시지 구성
+            content = [{"type": "text", "text": prompt}]
+
+            for frame in frames:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{frame['image_data']}"
+                    }
+                })
+
+            response = client.chat.completions.create(
+                model=model_map.get(model, "gpt-4o-mini"),
+                messages=[{"role": "user", "content": content}],
+                max_tokens=4000
+            )
+
+            analysis_result = response.choices[0].message.content
+
+        logging.info(f"AI 프레임 분석 완료: {len(frames)}개 프레임, 모델: {model}, 타입: {analysis_type}")
+
+        return {
+            "success": True,
+            "analysis_result": analysis_result,
+            "frames_count": len(frames),
+            "model": model,
+            "analysis_type": analysis_type
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("AI 프레임 분석 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"AI 프레임 분석 실패: {str(e)}")
+
+
+@app.put("/api/video-analyzer/rename-file")
+async def api_rename_video_file(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """영상 파일 이름 변경"""
+    try:
+        old_path = payload.get("old_path")
+        new_name = payload.get("new_name")
+
+        if not old_path or not new_name:
+            raise HTTPException(status_code=400, detail="old_path와 new_name이 필요합니다.")
+
+        old_path_obj = Path(old_path)
+
+        # 파일 존재 확인
+        if not old_path_obj.exists():
+            raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {old_path}")
+
+        # 디렉토리인 경우 거부
+        if old_path_obj.is_dir():
+            raise HTTPException(status_code=400, detail="디렉토리는 이름을 변경할 수 없습니다.")
+
+        # 새 경로 생성
+        new_path_obj = old_path_obj.parent / new_name
+
+        # 이미 같은 이름의 파일이 있는지 확인
+        if new_path_obj.exists():
+            raise HTTPException(status_code=400, detail=f"이미 같은 이름의 파일이 존재합니다: {new_name}")
+
+        # 파일 이름 변경
+        old_path_obj.rename(new_path_obj)
+
+        logging.info(f"파일 이름 변경 완료: {old_path} -> {new_path_obj}")
+
+        return {
+            "success": True,
+            "message": "파일 이름이 변경되었습니다.",
+            "old_path": str(old_path),
+            "new_path": str(new_path_obj),
+            "new_name": new_name
+        }
+
+    except HTTPException:
+        raise
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="파일 이름 변경 권한이 없습니다.")
+    except Exception as e:
+        logging.exception("파일 이름 변경 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"파일 이름 변경 실패: {str(e)}")
+
+
+@app.delete("/api/video-analyzer/delete-file")
+async def api_delete_video_file(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """영상 파일 삭제"""
+    import os
+
+    try:
+        file_path = payload.get("file_path")
+
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path가 필요합니다.")
+
+        file_path_obj = Path(file_path)
+
+        # 파일 존재 확인
+        if not file_path_obj.exists():
+            raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {file_path}")
+
+        # 디렉토리인 경우 거부
+        if file_path_obj.is_dir():
+            raise HTTPException(status_code=400, detail="디렉토리는 삭제할 수 없습니다.")
+
+        # 파일 삭제
+        file_size = file_path_obj.stat().st_size
+        file_path_obj.unlink()
+
+        logging.info(f"파일 삭제 완료: {file_path} ({file_size} bytes)")
+
+        return {
+            "success": True,
+            "message": "파일이 삭제되었습니다.",
+            "deleted_file": str(file_path),
+            "size_bytes": file_size
+        }
+
+    except HTTPException:
+        raise
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="파일 삭제 권한이 없습니다.")
+    except Exception as e:
+        logging.exception("파일 삭제 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"파일 삭제 실패: {str(e)}")
+
+
 @app.post("/api/ytdl/start")
 async def api_start_download(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """백그라운드로 다운로드 시작"""

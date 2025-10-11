@@ -1,5 +1,20 @@
 [
   {
+    "timestamp": "2025-10-11T08:03:24.500777",
+    "urls": [
+      "https://www.youtube.com/shorts/WDppnq5POSQ"
+    ],
+    "files": [
+      "/home/sk/ws/youtubeanalysis/youtube/download/Loyal Cat Brings Her Kitten to Sleep Beside the Baby — Pure Love ❤️ #cat [WDppnq5POSQ].mp4"
+    ],
+    "settings": {
+      "output_dir": "/home/sk/ws/youtubeanalysis/youtube/download",
+      "sub_langs": "ko",
+      "download_subs": true,
+      "auto_subs": true
+    }
+  },
+  {
     "timestamp": "2025-10-11T07:55:13.414990",
     "urls": [
       "https://www.youtube.com/shorts/zHCA0kALewI"
