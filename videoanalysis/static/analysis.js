@@ -6125,6 +6125,62 @@ class VideoAnalysisApp {
             });
         }
 
+        // 저장된 제목 불러오기 버튼
+        const loadSavedTitleBtn = document.getElementById('load-saved-title-as-subtitle');
+        if (loadSavedTitleBtn) {
+            loadSavedTitleBtn.addEventListener('click', async () => {
+                await this.showSavedTitlesModal();
+            });
+        }
+
+        // 선택된 파일 제목 자동 채우기 버튼
+        const autoFillTitlesBtn = document.getElementById('auto-fill-titles');
+        if (autoFillTitlesBtn) {
+            autoFillTitlesBtn.addEventListener('click', () => {
+                this.autoFillSelectedFilesTitles();
+            });
+        }
+
+        // GPT 자막 생성 요청 버튼
+        const generateSubtitleBtn = document.getElementById('generate-subtitle-with-gpt');
+        if (generateSubtitleBtn) {
+            generateSubtitleBtn.addEventListener('click', () => {
+                this.generateSubtitleWithGPT();
+            });
+        }
+
+        // GPT 자막 적용 버튼
+        const applyGptSubtitleBtn = document.getElementById('apply-gpt-subtitle');
+        if (applyGptSubtitleBtn) {
+            applyGptSubtitleBtn.addEventListener('click', () => {
+                this.applyGPTSubtitle();
+            });
+        }
+
+        // 붙여넣기 영역 닫기 버튼
+        const closePasteAreaBtn = document.getElementById('close-paste-area');
+        if (closePasteAreaBtn) {
+            closePasteAreaBtn.addEventListener('click', () => {
+                document.getElementById('gpt-subtitle-paste-area').style.display = 'none';
+            });
+        }
+
+        // 제목 프리셋 저장 버튼
+        const saveTitlePresetBtn = document.getElementById('save-title-preset');
+        if (saveTitlePresetBtn) {
+            saveTitlePresetBtn.addEventListener('click', () => {
+                this.saveTitlePreset();
+            });
+        }
+
+        // 제목 프리셋 불러오기 버튼
+        const loadTitlePresetBtn = document.getElementById('load-title-preset');
+        if (loadTitlePresetBtn) {
+            loadTitlePresetBtn.addEventListener('click', () => {
+                this.loadTitlePreset();
+            });
+        }
+
         // 번역기 자막 로드 버튼
         const loadTranslatorBtn = document.getElementById('load-translator-subtitles');
         if (loadTranslatorBtn) {
@@ -9683,6 +9739,9 @@ class VideoAnalysisApp {
     async createOutputVideo() {
         console.log('🎬 영상 출력 파일 만들기 시작');
 
+        // 출력 영상 제목 수집
+        const outputTitle = document.getElementById('output-video-title')?.value?.trim() || '';
+
         // 체크된 트랙 확인
         const videoEnabled = document.getElementById('track-video-enable')?.checked ?? false;
         const audioEnabled = document.getElementById('track-audio-enable')?.checked ?? false;
@@ -9776,7 +9835,9 @@ class VideoAnalysisApp {
                     description_subtitle_enabled: descriptionSubtitleEnabled,
                     video_files: videoFiles,
                     audio_files: audioFiles,
-                    subtitle_data: subtitleData
+                    subtitle_data: subtitleData,
+                    output_title: outputTitle,  // 제목 추가
+                    file_titles: this.selectedFilesTitles || []  // 개별 파일 제목 목록 추가
                 })
             });
 
@@ -10110,6 +10171,508 @@ class VideoAnalysisApp {
         if (progressBar) {
             progressBar.style.background = 'linear-gradient(90deg, #FF6F00, #FF8F00)';
             progressBar.style.width = '0%';
+        }
+    }
+
+    // 저장된 제목 모달 표시
+    async showSavedTitlesModal() {
+        try {
+            // 저장된 영상 목록 가져오기
+            const response = await fetch('/api/output-videos');
+            if (!response.ok) {
+                throw new Error('저장된 영상 목록을 가져오지 못했습니다');
+            }
+
+            const videos = await response.json();
+
+            if (videos.length === 0) {
+                alert('저장된 영상이 없습니다. 먼저 영상을 출력한 후 제목을 저장하세요.');
+                return;
+            }
+
+            // 모달 표시
+            const modal = document.getElementById('saved-title-modal');
+            const titlesList = document.getElementById('saved-titles-list');
+
+            // 목록 생성
+            titlesList.innerHTML = videos.map((video, index) => {
+                const fileTitlesHtml = video.file_titles && video.file_titles.length > 0
+                    ? `<div style="color: #667eea; font-size: 11px; margin-top: 5px; padding-top: 5px; border-top: 1px solid #2a3f5f;">
+                        📋 ${video.file_count || video.file_titles.length}개 파일: ${video.file_titles.join(' + ')}
+                       </div>`
+                    : '';
+
+                return `
+                    <div style="padding: 15px; margin-bottom: 10px; background: #1a2332; border-radius: 5px; border: 1px solid #2a3f5f; cursor: pointer; transition: all 0.2s;"
+                         onmouseover="this.style.background='#2a3f5f'"
+                         onmouseout="this.style.background='#1a2332'"
+                         onclick="app.selectSavedTitle('${video.metadata_file.replace(/'/g, "\\'")}', '${video.title.replace(/'/g, "\\'")}')">
+                        <div style="color: #4ade80; font-weight: bold; margin-bottom: 5px;">📺 ${video.title}</div>
+                        <div style="color: #b0c4d0; font-size: 12px; margin-bottom: 3px;">📁 ${video.filename}</div>
+                        <div style="color: #8b98a8; font-size: 11px;">🕐 ${new Date(video.created_at).toLocaleString('ko-KR')}</div>
+                        ${fileTitlesHtml}
+                    </div>
+                `;
+            }).join('');
+
+            modal.style.display = 'flex';
+
+            // 취소 버튼 이벤트
+            const cancelBtn = document.getElementById('title-modal-cancel-btn');
+            cancelBtn.onclick = () => {
+                modal.style.display = 'none';
+            };
+
+            // 모달 외부 클릭 시 닫기
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
+
+        } catch (error) {
+            console.error('저장된 제목 불러오기 실패:', error);
+            alert(`저장된 제목 불러오기 실패: ${error.message}`);
+        }
+    }
+
+    // 저장된 제목 선택
+    async selectSavedTitle(metadataFile, title) {
+        try {
+            const modal = document.getElementById('saved-title-modal');
+            const trackType = document.getElementById('title-track-type').value;
+
+            // 서버에 제목 자막 추가 요청
+            const response = await fetch('/api/add-title-to-subtitle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    metadata_file: metadataFile,
+                    track_type: trackType
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('제목을 자막으로 추가하지 못했습니다');
+            }
+
+            const result = await response.json();
+
+            // 자막 트랙에 추가
+            if (this.timeline && this.timeline.subtitleData) {
+                const subtitle = result.subtitle;
+
+                // 트랙 타입에 따라 자막 추가
+                if (trackType === 'main') {
+                    if (!this.timeline.subtitleData.subtitles) {
+                        this.timeline.subtitleData.subtitles = [];
+                    }
+                    this.timeline.subtitleData.subtitles.unshift(subtitle);
+                } else if (trackType === 'translation') {
+                    if (!this.timeline.subtitleData.translationSubtitles) {
+                        this.timeline.subtitleData.translationSubtitles = [];
+                    }
+                    this.timeline.subtitleData.translationSubtitles.unshift(subtitle);
+                } else if (trackType === 'description') {
+                    if (!this.timeline.subtitleData.descriptionSubtitles) {
+                        this.timeline.subtitleData.descriptionSubtitles = [];
+                    }
+                    this.timeline.subtitleData.descriptionSubtitles.unshift(subtitle);
+                }
+
+                // 타임라인 재렌더링
+                this.renderTimeline();
+            }
+
+            modal.style.display = 'none';
+            this.showSuccess(`제목 "${title}"을(를) ${trackType === 'main' ? '메인' : trackType === 'translation' ? '번역' : '설명'} 자막에 추가했습니다`);
+
+        } catch (error) {
+            console.error('제목 선택 실패:', error);
+            alert(`제목 선택 실패: ${error.message}`);
+        }
+    }
+
+    // 선택된 파일들의 제목 추출 및 표시
+    async autoFillSelectedFilesTitles() {
+        if (!this.selectedFilesOrder || this.selectedFilesOrder.length === 0) {
+            alert('선택된 파일이 없습니다. 먼저 파일을 선택해주세요.');
+            return;
+        }
+
+        // 파일 경로에서 제목 추출 (확장자 제거)
+        const titlesWithInfo = await Promise.all(this.selectedFilesOrder.map(async (filePath, index) => {
+            const fileName = filePath.split('/').pop();
+            // 확장자 제거 (.webm, .mp4 등)
+            const titleWithoutExt = fileName.replace(/\.[^.]+$/, '');
+            // [video_id] 형식 제거
+            const title = titleWithoutExt.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
+
+            // 영상 길이 정보 가져오기 (비동기)
+            let duration = null;
+            try {
+                // 영상 파일의 길이를 가져오기 위해 video 엘리먼트 사용
+                const video = document.createElement('video');
+                video.preload = 'metadata';
+
+                await new Promise((resolve, reject) => {
+                    video.onloadedmetadata = () => {
+                        duration = video.duration;
+                        resolve();
+                    };
+                    video.onerror = () => reject();
+                    video.src = `/api/media/video?path=${encodeURIComponent(filePath)}`;
+                });
+            } catch (error) {
+                console.log(`영상 길이 정보를 가져올 수 없음: ${fileName}`);
+            }
+
+            return { title, duration, filePath };
+        }));
+
+        const titles = titlesWithInfo.map(info => info.title);
+
+        // 제목 입력 필드에 합친 제목 표시
+        const titleInput = document.getElementById('output-video-title');
+        const combinedTitle = titles.join(' + ');
+        titleInput.value = combinedTitle;
+
+        // 개별 제목 목록 표시
+        const titlesContainer = document.getElementById('selected-files-titles');
+        const titlesList = document.getElementById('files-titles-list');
+
+        titlesList.innerHTML = titlesWithInfo.map((info, index) => {
+            const durationText = info.duration ? this.formatDuration(info.duration) : '길이 정보 없음';
+            return `
+                <div style="padding: 5px 0; border-bottom: 1px solid #2a3f5f;">
+                    <span style="color: #4ade80; font-weight: bold;">${index + 1}.</span>
+                    <span style="color: #f0f4f8;">${info.title}</span>
+                    <span style="color: #667eea; font-size: 11px; margin-left: 8px;">(${durationText})</span>
+                </div>
+            `;
+        }).join('');
+
+        // 전체 영상 길이 정보 표시
+        const totalDuration = titlesWithInfo.reduce((sum, info) => sum + (info.duration || 0), 0);
+        const durationInfo = document.getElementById('files-duration-info');
+        if (totalDuration > 0) {
+            durationInfo.innerHTML = `⏱️ 전체 길이: ${this.formatDuration(totalDuration)} (${titlesWithInfo.length}개 영상)`;
+        }
+
+        titlesContainer.style.display = 'block';
+
+        // 저장할 제목 정보를 임시 저장 (길이 정보 포함)
+        this.selectedFilesTitles = titles;
+        this.selectedFilesTitlesWithInfo = titlesWithInfo;
+
+        this.showSuccess(`${titles.length}개 파일의 제목과 길이 정보를 가져왔습니다`);
+    }
+
+    // 초를 분:초 형식으로 변환
+    formatDuration(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // GPT로 자막 생성 요청
+    async generateSubtitleWithGPT() {
+        if (!this.selectedFilesTitles || this.selectedFilesTitles.length === 0) {
+            alert('먼저 "선택된 파일 제목 채우기" 버튼을 클릭하여 제목을 불러오세요.');
+            return;
+        }
+
+        const titleInput = document.getElementById('output-video-title');
+        const combinedTitle = titleInput.value || this.selectedFilesTitles.join(' + ');
+
+        // 자막 스타일 선택
+        const styleSelect = document.getElementById('subtitle-style-select');
+        const selectedStyle = styleSelect.value;
+
+        // 스타일별 설명
+        const styleDescriptions = {
+            'standard': '균형잡힌 설명으로 중립적인 톤',
+            'comic': '유머러스하고 재미있는 표현, 웃음을 유발하는 말투',
+            'serious': '격식있고 진중한 표현, 전문적인 톤',
+            'dramatic': '감정적이고 극적인 표현, 강렬한 어조',
+            'thrilling': '스릴있고 박진감 넘치는 표현, 긴장감 조성',
+            'emotional': '따뜻하고 감동적인 표현, 공감을 이끄는 톤',
+            'mysterious': '신비롭고 호기심을 자극하는 표현, 궁금증 유발',
+            'energetic': '활기차고 역동적인 표현, 에너지 넘치는 톤'
+        };
+
+        // 영상 길이 정보
+        const titlesWithInfo = this.selectedFilesTitlesWithInfo || [];
+        const durationInfo = titlesWithInfo.map((info, index) => {
+            const durationText = info.duration ? this.formatDuration(info.duration) : '정보없음';
+            return `${index + 1}. ${info.title} (길이: ${durationText})`;
+        }).join('\n');
+
+        const totalDuration = titlesWithInfo.reduce((sum, info) => sum + (info.duration || 0), 0);
+        const totalDurationText = totalDuration > 0 ? this.formatDuration(totalDuration) : '정보없음';
+
+        // GPT 프롬프트 생성
+        const prompt = `다음은 합쳐진 영상의 제목들입니다. 각 부분에 대해 적절한 자막을 생성해주세요.
+
+# 영상 제목 목록 (순서대로):
+${durationInfo || this.selectedFilesTitles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
+
+# 전체 합친 제목:
+${combinedTitle}
+
+# 전체 영상 길이:
+${totalDurationText} (${titlesWithInfo.length}개 영상)
+
+# 자막 스타일:
+${styleDescriptions[selectedStyle]} (${selectedStyle})
+
+# 요청사항:
+1. 선택된 스타일(${selectedStyle})에 맞춰 임팩트 있는 자막을 생성해주세요 (20자 이내)
+2. 각 영상의 길이를 고려하여 자막 타이밍을 조정해주세요
+3. 전체 영상의 흐름을 고려하여 스토리텔링 자막을 만들어주세요
+4. SRT 자막 형식으로 출력해주세요 (번호, 타임코드, 자막 텍스트)
+5. 각 자막은 영상 길이에 맞춰 적절한 시간동안 표시되도록 설정해주세요
+
+자막을 생성해주세요:`;
+
+        // 클립보드에 복사
+        try {
+            await navigator.clipboard.writeText(prompt);
+
+            // 확인 다이얼로그
+            const proceed = confirm(
+                '✅ GPT 프롬프트가 클립보드에 복사되었습니다!\n\n' +
+                `📋 선택된 영상: ${this.selectedFilesTitles.length}개\n` +
+                `📝 제목: ${combinedTitle}\n\n` +
+                '💡 ChatGPT 창을 열까요?\n' +
+                '(새 창에서 ChatGPT가 열립니다. 프롬프트를 붙여넣어 자막을 생성하세요.)'
+            );
+
+            if (proceed) {
+                window.open('https://chat.openai.com/', '_blank');
+            }
+
+            // 붙여넣기 영역 표시
+            document.getElementById('gpt-subtitle-paste-area').style.display = 'block';
+
+            this.showSuccess('프롬프트가 클립보드에 복사되었습니다. ChatGPT에 붙여넣어 자막을 생성하세요.');
+
+        } catch (error) {
+            console.error('클립보드 복사 실패:', error);
+
+            // 폴백: 프롬프트를 텍스트 영역에 표시
+            const promptDisplay = prompt;
+            const textarea = document.createElement('textarea');
+            textarea.value = promptDisplay;
+            textarea.style.position = 'fixed';
+            textarea.style.top = '50%';
+            textarea.style.left = '50%';
+            textarea.style.transform = 'translate(-50%, -50%)';
+            textarea.style.width = '80%';
+            textarea.style.height = '60%';
+            textarea.style.padding = '20px';
+            textarea.style.background = '#1a2332';
+            textarea.style.color = '#f0f4f8';
+            textarea.style.border = '2px solid #4ade80';
+            textarea.style.borderRadius = '8px';
+            textarea.style.fontSize = '14px';
+            textarea.style.zIndex = '10000';
+            document.body.appendChild(textarea);
+            textarea.select();
+
+            alert('프롬프트를 복사하세요 (Ctrl+C 또는 Cmd+C)');
+
+            textarea.addEventListener('blur', () => {
+                document.body.removeChild(textarea);
+            });
+        }
+    }
+
+    // GPT 생성 자막 적용
+    async applyGPTSubtitle() {
+        const subtitleInput = document.getElementById('gpt-subtitle-input');
+        const srtContent = subtitleInput.value.trim();
+
+        if (!srtContent) {
+            alert('GPT가 생성한 자막을 붙여넣어주세요.');
+            return;
+        }
+
+        try {
+            // SRT 파싱
+            const subtitles = this.parseSRT(srtContent);
+
+            if (subtitles.length === 0) {
+                throw new Error('유효한 SRT 자막을 찾을 수 없습니다.');
+            }
+
+            // 자막 트랙에 추가 (메인 자막으로)
+            if (!this.timeline) {
+                this.timeline = {};
+            }
+            if (!this.timeline.subtitleData) {
+                this.timeline.subtitleData = {};
+            }
+            if (!this.timeline.subtitleData.subtitles) {
+                this.timeline.subtitleData.subtitles = [];
+            }
+
+            // 기존 자막에 추가 (또는 병합)
+            const addToExisting = this.timeline.subtitleData.subtitles.length > 0;
+            if (addToExisting) {
+                const proceed = confirm(
+                    `기존 자막이 ${this.timeline.subtitleData.subtitles.length}개 있습니다.\n\n` +
+                    `GPT 자막 ${subtitles.length}개를 추가할까요?\n\n` +
+                    `확인: 추가\n취소: 기존 자막 삭제 후 교체`
+                );
+
+                if (!proceed) {
+                    this.timeline.subtitleData.subtitles = [];
+                }
+            }
+
+            // 자막 추가
+            subtitles.forEach(subtitle => {
+                this.timeline.subtitleData.subtitles.push(subtitle);
+            });
+
+            // 타임라인 재렌더링
+            this.renderTimeline();
+
+            // 붙여넣기 영역 닫기
+            document.getElementById('gpt-subtitle-paste-area').style.display = 'none';
+            subtitleInput.value = '';
+
+            this.showSuccess(`${subtitles.length}개의 자막을 메인 자막 트랙에 추가했습니다.`);
+
+        } catch (error) {
+            console.error('자막 적용 실패:', error);
+            alert(`자막 적용 실패: ${error.message}\n\nSRT 형식이 올바른지 확인해주세요.`);
+        }
+    }
+
+    // SRT 자막 파싱
+    parseSRT(srtContent) {
+        const subtitles = [];
+        const blocks = srtContent.trim().split(/\n\s*\n/);
+
+        for (const block of blocks) {
+            const lines = block.trim().split('\n');
+            if (lines.length < 3) continue;
+
+            // 번호 (첫 줄)
+            const index = parseInt(lines[0]);
+            if (isNaN(index)) continue;
+
+            // 타임코드 (두 번째 줄)
+            const timecodeMatch = lines[1].match(/(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})/);
+            if (!timecodeMatch) continue;
+
+            const startTime = timecodeMatch[1];
+            const endTime = timecodeMatch[2];
+
+            // 자막 텍스트 (나머지 줄들)
+            const text = lines.slice(2).join('\n').trim();
+
+            subtitles.push({
+                index: index,
+                start: startTime,
+                end: endTime,
+                text: text,
+                track: 'main'
+            });
+        }
+
+        return subtitles;
+    }
+
+    // 제목 프리셋 저장
+    saveTitlePreset() {
+        const titleInput = document.getElementById('output-video-title');
+        const title = titleInput.value.trim();
+
+        if (!title) {
+            alert('저장할 제목을 입력해주세요.');
+            return;
+        }
+
+        const presetName = prompt('프리셋 이름을 입력하세요:', title.substring(0, 20));
+        if (!presetName) return;
+
+        try {
+            // 로컬 스토리지에서 기존 프리셋 가져오기
+            const presets = JSON.parse(localStorage.getItem('titlePresets') || '[]');
+
+            // 새 프리셋 추가
+            const newPreset = {
+                name: presetName.trim(),
+                title: title,
+                fileTitles: this.selectedFilesTitles || [],
+                style: document.getElementById('subtitle-style-select')?.value || 'standard',
+                createdAt: new Date().toISOString()
+            };
+
+            presets.unshift(newPreset);
+
+            // 최대 20개까지만 저장
+            if (presets.length > 20) {
+                presets.length = 20;
+            }
+
+            localStorage.setItem('titlePresets', JSON.stringify(presets));
+
+            this.showSuccess(`프리셋 "${presetName}"을(를) 저장했습니다.`);
+
+        } catch (error) {
+            console.error('프리셋 저장 실패:', error);
+            alert(`프리셋 저장 실패: ${error.message}`);
+        }
+    }
+
+    // 제목 프리셋 불러오기
+    loadTitlePreset() {
+        try {
+            const presets = JSON.parse(localStorage.getItem('titlePresets') || '[]');
+
+            if (presets.length === 0) {
+                alert('저장된 프리셋이 없습니다.');
+                return;
+            }
+
+            // 프리셋 선택 다이얼로그
+            const presetList = presets.map((preset, index) => {
+                const date = new Date(preset.createdAt).toLocaleString('ko-KR');
+                return `${index + 1}. ${preset.name} (${date})`;
+            }).join('\n');
+
+            const selection = prompt(
+                `프리셋을 선택하세요 (번호 입력):\n\n${presetList}`,
+                '1'
+            );
+
+            if (!selection) return;
+
+            const selectedIndex = parseInt(selection) - 1;
+            if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= presets.length) {
+                alert('잘못된 선택입니다.');
+                return;
+            }
+
+            const preset = presets[selectedIndex];
+
+            // 프리셋 적용
+            document.getElementById('output-video-title').value = preset.title;
+            if (preset.style) {
+                document.getElementById('subtitle-style-select').value = preset.style;
+            }
+
+            this.selectedFilesTitles = preset.fileTitles || [];
+
+            this.showSuccess(`프리셋 "${preset.name}"을(를) 불러왔습니다.`);
+
+        } catch (error) {
+            console.error('프리셋 불러오기 실패:', error);
+            alert(`프리셋 불러오기 실패: ${error.message}`);
         }
     }
 
@@ -17130,3 +17693,352 @@ window.forceRenderSubtitles = function() {
         });
     }
 };
+
+/**
+ * ================================================
+ * 커스텀 자막 기능 (한글/영어)
+ * ================================================
+ */
+
+// 자막 초기화 및 이벤트 리스너 설정
+VideoAnalysisApp.prototype.setupCustomSubtitles = function() {
+    // 크기 슬라이더 업데이트
+    const koreanSizeInput = document.getElementById('korean-subtitle-size');
+    const koreanSizeDisplay = document.getElementById('korean-subtitle-size-display');
+    const englishSizeInput = document.getElementById('english-subtitle-size');
+    const englishSizeDisplay = document.getElementById('english-subtitle-size-display');
+    
+    if (koreanSizeInput && koreanSizeDisplay) {
+        koreanSizeInput.addEventListener('input', (e) => {
+            koreanSizeDisplay.textContent = e.target.value + 'px';
+        });
+    }
+    
+    if (englishSizeInput && englishSizeDisplay) {
+        englishSizeInput.addEventListener('input', (e) => {
+            englishSizeDisplay.textContent = e.target.value + 'px';
+        });
+    }
+    
+    // 한글 자막 적용 버튼
+    const applyKoreanBtn = document.getElementById('apply-korean-subtitle');
+    if (applyKoreanBtn) {
+        applyKoreanBtn.addEventListener('click', () => {
+            this.applyCustomSubtitle('korean');
+        });
+    }
+    
+    // 영어 자막 적용 버튼
+    const applyEnglishBtn = document.getElementById('apply-english-subtitle');
+    if (applyEnglishBtn) {
+        applyEnglishBtn.addEventListener('click', () => {
+            this.applyCustomSubtitle('english');
+        });
+    }
+    
+    // 설정 저장 버튼
+    const savePresetBtn = document.getElementById('save-subtitle-preset');
+    if (savePresetBtn) {
+        savePresetBtn.addEventListener('click', () => {
+            this.saveSubtitlePreset();
+        });
+    }
+    
+    // 설정 불러오기 버튼
+    const loadPresetBtn = document.getElementById('load-subtitle-preset');
+    if (loadPresetBtn) {
+        loadPresetBtn.addEventListener('click', () => {
+            this.loadSubtitlePreset();
+        });
+    }
+    
+    // 설정 삭제 버튼
+    const deletePresetBtn = document.getElementById('delete-subtitle-preset');
+    if (deletePresetBtn) {
+        deletePresetBtn.addEventListener('click', () => {
+            this.deleteSubtitlePreset();
+        });
+    }
+    
+    // 저장된 프리셋 목록 불러오기
+    this.loadSubtitlePresetList();
+    
+    // 드래그 기능 활성화
+    this.enableSubtitleDragging();
+};
+
+// 자막 적용 함수
+VideoAnalysisApp.prototype.applyCustomSubtitle = function(lang) {
+    const overlay = document.getElementById(`${lang}-subtitle-overlay`);
+    if (!overlay) {
+        console.error(`Subtitle overlay not found for language: ${lang}`);
+        return;
+    }
+    
+    // 입력값 가져오기
+    const text = document.getElementById(`${lang}-subtitle-input`).value.trim();
+    const size = document.getElementById(`${lang}-subtitle-size`).value;
+    const color = document.getElementById(`${lang}-subtitle-color`).value;
+    const x = document.getElementById(`${lang}-subtitle-x`).value;
+    const y = document.getElementById(`${lang}-subtitle-y`).value;
+    const effect = document.getElementById(`${lang}-subtitle-effect`).value;
+    
+    // 텍스트가 비어있으면 숨김
+    if (!text) {
+        overlay.classList.add('empty');
+        overlay.textContent = '';
+        return;
+    }
+    
+    // 자막 표시
+    overlay.textContent = text;
+    overlay.classList.remove('empty');
+    
+    // 스타일 적용
+    overlay.style.fontSize = size + 'px';
+    overlay.style.color = color;
+    overlay.style.left = x + '%';
+    overlay.style.top = y + '%';
+    
+    // 효과 클래스 제거 및 추가
+    overlay.className = overlay.className.replace(/effect-\S+/g, '');
+    overlay.classList.add('custom-subtitle-overlay');
+    if (effect !== 'none') {
+        overlay.classList.add(`effect-${effect}`);
+    }
+    
+    // 위치 조정 (중앙 정렬)
+    overlay.style.transform = 'translateX(-50%)';
+    
+    console.log(`Applied ${lang} subtitle:`, {text, size, color, x, y, effect});
+};
+
+// 자막 드래그 기능
+VideoAnalysisApp.prototype.enableSubtitleDragging = function() {
+    const koreanOverlay = document.getElementById('korean-subtitle-overlay');
+    const englishOverlay = document.getElementById('english-subtitle-overlay');
+    
+    if (koreanOverlay) {
+        this.makeSubtitleDraggable(koreanOverlay, 'korean');
+    }
+    
+    if (englishOverlay) {
+        this.makeSubtitleDraggable(englishOverlay, 'english');
+    }
+};
+
+VideoAnalysisApp.prototype.makeSubtitleDraggable = function(element, lang) {
+    const wrapper = element.closest('.video-subtitle-wrapper');
+    if (!wrapper) return;
+    
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+    
+    element.addEventListener('mousedown', (e) => {
+        if (element.classList.contains('empty')) return;
+        
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        
+        const rect = element.getBoundingClientRect();
+        const wrapperRect = wrapper.getBoundingClientRect();
+        
+        startLeft = rect.left - wrapperRect.left;
+        startTop = rect.top - wrapperRect.top;
+        
+        element.style.cursor = 'grabbing';
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+        
+        const wrapperRect = wrapper.getBoundingClientRect();
+        const newLeft = startLeft + deltaX;
+        const newTop = startTop + deltaY;
+        
+        // 퍼센트로 변환
+        const leftPercent = (newLeft / wrapperRect.width) * 100;
+        const topPercent = (newTop / wrapperRect.height) * 100;
+        
+        // 범위 제한
+        const clampedLeft = Math.max(0, Math.min(100, leftPercent));
+        const clampedTop = Math.max(0, Math.min(100, topPercent));
+        
+        element.style.left = clampedLeft + '%';
+        element.style.top = clampedTop + '%';
+        
+        // 입력 필드 업데이트
+        document.getElementById(`${lang}-subtitle-x`).value = Math.round(clampedLeft);
+        document.getElementById(`${lang}-subtitle-y`).value = Math.round(clampedTop);
+        
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            element.style.cursor = 'move';
+        }
+    });
+};
+
+// 자막 설정 저장
+VideoAnalysisApp.prototype.saveSubtitlePreset = function() {
+    const presetName = document.getElementById('subtitle-preset-name').value.trim();
+    if (!presetName) {
+        alert('설정 이름을 입력하세요.');
+        return;
+    }
+    
+    const preset = {
+        korean: {
+            text: document.getElementById('korean-subtitle-input').value,
+            size: document.getElementById('korean-subtitle-size').value,
+            color: document.getElementById('korean-subtitle-color').value,
+            x: document.getElementById('korean-subtitle-x').value,
+            y: document.getElementById('korean-subtitle-y').value,
+            effect: document.getElementById('korean-subtitle-effect').value
+        },
+        english: {
+            text: document.getElementById('english-subtitle-input').value,
+            size: document.getElementById('english-subtitle-size').value,
+            color: document.getElementById('english-subtitle-color').value,
+            x: document.getElementById('english-subtitle-x').value,
+            y: document.getElementById('english-subtitle-y').value,
+            effect: document.getElementById('english-subtitle-effect').value
+        }
+    };
+    
+    // localStorage에 저장
+    try {
+        const presets = JSON.parse(localStorage.getItem('subtitle_presets') || '{}');
+        presets[presetName] = preset;
+        localStorage.setItem('subtitle_presets', JSON.stringify(presets));
+        
+        alert(`'${presetName}' 설정이 저장되었습니다.`);
+        this.loadSubtitlePresetList();
+        document.getElementById('subtitle-preset-name').value = '';
+    } catch (error) {
+        console.error('Failed to save preset:', error);
+        alert('설정 저장에 실패했습니다.');
+    }
+};
+
+// 자막 설정 불러오기
+VideoAnalysisApp.prototype.loadSubtitlePreset = function() {
+    const presetSelect = document.getElementById('subtitle-preset-select');
+    const presetName = presetSelect.value;
+    
+    if (!presetName) {
+        alert('불러올 설정을 선택하세요.');
+        return;
+    }
+    
+    try {
+        const presets = JSON.parse(localStorage.getItem('subtitle_presets') || '{}');
+        const preset = presets[presetName];
+        
+        if (!preset) {
+            alert('선택한 설정을 찾을 수 없습니다.');
+            return;
+        }
+        
+        // 한글 자막 설정 적용
+        if (preset.korean) {
+            document.getElementById('korean-subtitle-input').value = preset.korean.text || '';
+            document.getElementById('korean-subtitle-size').value = preset.korean.size || 32;
+            document.getElementById('korean-subtitle-size-display').textContent = (preset.korean.size || 32) + 'px';
+            document.getElementById('korean-subtitle-color').value = preset.korean.color || '#000000';
+            document.getElementById('korean-subtitle-x').value = preset.korean.x || 50;
+            document.getElementById('korean-subtitle-y').value = preset.korean.y || 80;
+            document.getElementById('korean-subtitle-effect').value = preset.korean.effect || 'outline';
+        }
+        
+        // 영어 자막 설정 적용
+        if (preset.english) {
+            document.getElementById('english-subtitle-input').value = preset.english.text || '';
+            document.getElementById('english-subtitle-size').value = preset.english.size || 28;
+            document.getElementById('english-subtitle-size-display').textContent = (preset.english.size || 28) + 'px';
+            document.getElementById('english-subtitle-color').value = preset.english.color || '#000000';
+            document.getElementById('english-subtitle-x').value = preset.english.x || 50;
+            document.getElementById('english-subtitle-y').value = preset.english.y || 90;
+            document.getElementById('english-subtitle-effect').value = preset.english.effect || 'outline';
+        }
+        
+        alert(`'${presetName}' 설정을 불러왔습니다.`);
+        
+        // 자동으로 자막 적용
+        this.applyCustomSubtitle('korean');
+        this.applyCustomSubtitle('english');
+    } catch (error) {
+        console.error('Failed to load preset:', error);
+        alert('설정 불러오기에 실패했습니다.');
+    }
+};
+
+// 자막 설정 삭제
+VideoAnalysisApp.prototype.deleteSubtitlePreset = function() {
+    const presetSelect = document.getElementById('subtitle-preset-select');
+    const presetName = presetSelect.value;
+    
+    if (!presetName) {
+        alert('삭제할 설정을 선택하세요.');
+        return;
+    }
+    
+    if (!confirm(`'${presetName}' 설정을 삭제하시겠습니까?`)) {
+        return;
+    }
+    
+    try {
+        const presets = JSON.parse(localStorage.getItem('subtitle_presets') || '{}');
+        delete presets[presetName];
+        localStorage.setItem('subtitle_presets', JSON.stringify(presets));
+        
+        alert(`'${presetName}' 설정이 삭제되었습니다.`);
+        this.loadSubtitlePresetList();
+    } catch (error) {
+        console.error('Failed to delete preset:', error);
+        alert('설정 삭제에 실패했습니다.');
+    }
+};
+
+// 자막 설정 목록 불러오기
+VideoAnalysisApp.prototype.loadSubtitlePresetList = function() {
+    const presetSelect = document.getElementById('subtitle-preset-select');
+    if (!presetSelect) return;
+    
+    try {
+        const presets = JSON.parse(localStorage.getItem('subtitle_presets') || '{}');
+        const presetNames = Object.keys(presets);
+        
+        // 옵션 초기화
+        presetSelect.innerHTML = '<option value="">저장된 설정 선택</option>';
+        
+        // 프리셋 목록 추가
+        presetNames.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            presetSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Failed to load preset list:', error);
+    }
+};
+
+// init 함수에서 호출되도록 추가
+const originalInit = VideoAnalysisApp.prototype.init;
+VideoAnalysisApp.prototype.init = function() {
+    originalInit.call(this);
+    this.setupCustomSubtitles();
+};
+

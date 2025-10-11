@@ -3536,8 +3536,8 @@ textarea:focus {
     top: 0;
     padding: 0.35em 0.8em;
     border-radius: 0.75rem;
-    background: rgba(0, 0, 0, 0.5);
-    color: #ffffff;
+    background: rgba(255, 255, 255, 0.9);
+    color: #000000;
     font-size: 48px;
     font-weight: 800;
     text-align: center;
@@ -3579,8 +3579,8 @@ textarea:focus {
     transform: translateX(-50%);
     padding: 0.65em 1.2em;
     border-radius: var(--radius);
-    background: rgba(0, 0, 0, 0.85);
-    color: #ffffff;
+    background: rgba(255, 255, 255, 0.9);
+    color: #000000;
     border: 2px solid rgba(255, 150, 50, 0.85);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
     font-size: 1.2rem;
@@ -5741,4 +5741,365 @@ textarea:focus {
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
+}
+
+/* ================================================
+   자막 입력 UI 스타일 (한글/영어)
+   ================================================ */
+
+.custom-subtitles-section {
+    margin: 20px 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #1a2332 0%, #0d1520 100%);
+    border-radius: 12px;
+    border: 1px solid #2a3f5f;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.custom-subtitles-section .area-title {
+    color: #4ade80;
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 20px;
+    text-align: center;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.subtitles-input-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    gap: 20px;
+    margin-bottom: 25px;
+}
+
+.subtitle-input-card {
+    background: #0d1520;
+    border: 1px solid #2a3f5f;
+    border-radius: 10px;
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+.subtitle-input-card:hover {
+    border-color: #4ade80;
+    box-shadow: 0 4px 20px rgba(74, 222, 128, 0.2);
+}
+
+.subtitle-input-card h5 {
+    color: #4ade80;
+    font-size: 16px;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.subtitle-input-controls textarea {
+    width: 100%;
+    padding: 12px;
+    background: #1a2332;
+    color: #f0f4f8;
+    border: 1px solid #2a3f5f;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: 'Nanum Gothic', 'Malgun Gothic', sans-serif;
+    resize: vertical;
+    margin-bottom: 15px;
+    transition: border-color 0.3s ease;
+}
+
+.subtitle-input-controls textarea:focus {
+    outline: none;
+    border-color: #4ade80;
+    box-shadow: 0 0 10px rgba(74, 222, 128, 0.3);
+}
+
+.subtitle-style-row,
+.subtitle-position-row,
+.subtitle-effect-row {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.control-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.control-item label {
+    color: #b0c4d0;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.control-item input[type="range"] {
+    width: 100%;
+    height: 6px;
+    background: linear-gradient(90deg, #2a3f5f 0%, #4ade80 100%);
+    border-radius: 5px;
+    outline: none;
+    cursor: pointer;
+}
+
+.control-item input[type="range"]::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    background: #4ade80;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(74, 222, 128, 0.5);
+}
+
+.control-item input[type="number"] {
+    width: 70px;
+    padding: 6px;
+    background: #1a2332;
+    color: #f0f4f8;
+    border: 1px solid #2a3f5f;
+    border-radius: 5px;
+    text-align: center;
+}
+
+.control-item input[type="color"] {
+    width: 60px;
+    height: 40px;
+    border: 2px solid #2a3f5f;
+    border-radius: 8px;
+    cursor: pointer;
+    background: none;
+}
+
+.control-item select {
+    padding: 8px;
+    background: #1a2332;
+    color: #f0f4f8;
+    border: 1px solid #2a3f5f;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.size-value {
+    color: #4ade80;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+.apply-subtitle-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, #4ade80 0%, #2dd4bf 100%);
+    color: #0d1520;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 10px;
+}
+
+.apply-subtitle-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(74, 222, 128, 0.4);
+}
+
+/* 자막 설정 저장/불러오기 */
+.subtitle-preset-controls {
+    background: #0d1520;
+    padding: 20px;
+    border-radius: 10px;
+    border: 1px solid #2a3f5f;
+}
+
+.subtitle-preset-controls .preset-title {
+    color: #667eea;
+    font-size: 16px;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.preset-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+}
+
+.preset-name-input {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px;
+    background: #1a2332;
+    color: #f0f4f8;
+    border: 1px solid #2a3f5f;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.preset-select {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px;
+    background: #1a2332;
+    color: #f0f4f8;
+    border: 1px solid #2a3f5f;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.preset-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 14px;
+}
+
+.preset-btn.save {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.preset-btn.load {
+    background: linear-gradient(135deg, #4ade80 0%, #2dd4bf 100%);
+    color: #0d1520;
+}
+
+.preset-btn.delete {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+    color: white;
+}
+
+.preset-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.preset-hint {
+    color: #b0c4d0;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 10px;
+}
+
+/* 커스텀 자막 오버레이 (한글/영어) */
+.custom-subtitle-overlay {
+    position: absolute;
+    color: #000000;
+    font-weight: bold;
+    text-shadow: 
+        -1px -1px 0 #ffffff,  
+        1px -1px 0 #ffffff,
+        -1px 1px 0 #ffffff,
+        1px 1px 0 #ffffff,
+        0 0 10px rgba(255, 255, 255, 0.8);
+    pointer-events: auto;
+    cursor: move;
+    user-select: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(4px);
+    transition: all 0.3s ease;
+    z-index: 100;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.custom-subtitle-overlay[data-lang="korean"] {
+    top: 80%;
+    font-size: 32px;
+}
+
+.custom-subtitle-overlay[data-lang="english"] {
+    top: 90%;
+    font-size: 28px;
+}
+
+.custom-subtitle-overlay.empty {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.custom-subtitle-overlay:hover {
+    background: rgba(74, 222, 128, 0.2);
+    box-shadow: 0 0 20px rgba(74, 222, 128, 0.5);
+}
+
+/* 효과 클래스 */
+.custom-subtitle-overlay.effect-outline {
+    text-shadow: 
+        -2px -2px 0 #ffffff,  
+        2px -2px 0 #ffffff,
+        -2px 2px 0 #ffffff,
+        2px 2px 0 #ffffff;
+}
+
+.custom-subtitle-overlay.effect-shadow {
+    text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.8);
+}
+
+.custom-subtitle-overlay.effect-glow {
+    text-shadow: 0 0 20px rgba(74, 222, 128, 1),
+                 0 0 40px rgba(74, 222, 128, 0.8);
+}
+
+.custom-subtitle-overlay.effect-fade {
+    animation: fadeIn 1s ease-in-out;
+}
+
+.custom-subtitle-overlay.effect-slide-up {
+    animation: slideUp 0.8s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateX(-50%) translateY(30px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+}
+
+/* 반응형 디자인 */
+@media (max-width: 1024px) {
+    .subtitles-input-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .custom-subtitle-overlay {
+        font-size: 24px !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .subtitle-style-row,
+    .subtitle-position-row {
+        flex-direction: column;
+    }
+    
+    .preset-actions {
+        flex-direction: column;
+    }
+    
+    .preset-name-input,
+    .preset-select {
+        width: 100%;
+    }
 }

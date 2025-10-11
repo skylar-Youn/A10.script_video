@@ -254,6 +254,8 @@ async def create_output_video(request: Request):
     video_files = data.get("video_files", [])
     audio_files = data.get("audio_files", [])
     subtitle_data = data.get("subtitle_data", [])
+    output_title = data.get("output_title", "")  # 제목 받기
+    file_titles = data.get("file_titles", [])  # 개별 파일 제목 목록 받기
 
     # 출력 파일 경로 생성
     output_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "videos"
@@ -364,12 +366,254 @@ async def create_output_video(request: Request):
             logger.error(f"FFmpeg error: {result.stderr}")
             raise HTTPException(status_code=500, detail=f"FFmpeg failed: {result.stderr}")
 
-        return {"output_path": str(output_file), "message": "영상 생성 완료"}
+        # 제목을 메타데이터 JSON 파일로 저장
+        if output_title or file_titles:
+            import json
+            metadata_file = output_file.with_suffix('.json')
+            metadata = {
+                "title": output_title,
+                "file_titles": file_titles,  # 개별 파일 제목 목록
+                "file_count": len(file_titles) if file_titles else 0,
+                "created_at": datetime.now().isoformat(),
+                "video_path": str(output_file),
+                "video_files": video_files,
+                "audio_files": [af.get("path") for af in audio_files if af.get("path")],
+                "tracks": {
+                    "video": video_enabled,
+                    "audio": audio_enabled,
+                    "commentary": commentary_enabled,
+                    "main_subtitle": main_subtitle_enabled,
+                    "translation_subtitle": translation_subtitle_enabled,
+                    "description_subtitle": data.get("description_subtitle_enabled", False)
+                }
+            }
+
+            with metadata_file.open("w", encoding="utf-8") as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"영상 메타데이터 저장 완료: {metadata_file}")
+
+        return {"output_path": str(output_file), "message": "영상 생성 완료", "title": output_title, "file_titles": file_titles}
 
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="영상 생성 시간 초과 (10분 제한). 영상이 너무 길거나 복잡할 수 있습니다.")
     except Exception as e:
         logger.error(f"영상 생성 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/output-videos")
+async def get_output_videos():
+    """저장된 출력 영상 목록과 메타데이터 반환"""
+    from pathlib import Path
+    import json
+    from datetime import datetime
+
+    output_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "videos"
+
+    if not output_dir.exists():
+        return []
+
+    videos = []
+
+    # 모든 JSON 메타데이터 파일 찾기
+    for json_file in sorted(output_dir.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with json_file.open('r', encoding='utf-8') as f:
+                metadata = json.load(f)
+
+            # 해당 영상 파일이 존재하는지 확인
+            video_path = Path(metadata.get("video_path", ""))
+            if video_path.exists():
+                videos.append({
+                    "title": metadata.get("title", "제목 없음"),
+                    "file_titles": metadata.get("file_titles", []),
+                    "file_count": metadata.get("file_count", 0),
+                    "video_path": str(video_path),
+                    "created_at": metadata.get("created_at", ""),
+                    "filename": video_path.name,
+                    "metadata_file": str(json_file)
+                })
+        except Exception as e:
+            logger.error(f"메타데이터 로드 실패: {json_file}, {e}")
+            continue
+
+    return videos
+
+
+@app.post("/api/add-title-to-subtitle")
+async def add_title_to_subtitle(request: Request):
+    """저장된 영상 제목을 자막으로 추가"""
+    from pathlib import Path
+    import json
+
+    data = await request.json()
+    metadata_file = data.get("metadata_file")
+    track_type = data.get("track_type", "main")  # main, translation, description 중 선택
+
+    if not metadata_file:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="메타데이터 파일 경로가 필요합니다")
+
+    try:
+        metadata_path = Path(metadata_file)
+        if not metadata_path.exists():
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="메타데이터 파일을 찾을 수 없습니다")
+
+        with metadata_path.open('r', encoding='utf-8') as f:
+            metadata = json.load(f)
+
+        title = metadata.get("title", "")
+
+        # 자막 형식으로 반환 (00:00:00 시작, 5초 표시)
+        subtitle_entry = {
+            "index": 1,
+            "start": "00:00:00,000",
+            "end": "00:00:05,000",
+            "text": title,
+            "track": track_type
+        }
+
+        return {
+            "success": True,
+            "title": title,
+            "subtitle": subtitle_entry
+        }
+
+    except Exception as e:
+        logger.error(f"제목 자막 추가 실패: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/subtitle-presets")
+async def save_subtitle_preset(request: Request):
+    """자막 설정 저장"""
+    from pathlib import Path
+    import json
+    from datetime import datetime
+
+    data = await request.json()
+    preset_name = data.get("name", "").strip()
+    preset_data = data.get("preset", {})
+
+    if not preset_name:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="설정 이름이 필요합니다")
+
+    # 저장 경로
+    presets_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "subtitle_presets"
+    presets_dir.mkdir(parents=True, exist_ok=True)
+
+    preset_file = presets_dir / f"{preset_name}.json"
+
+    try:
+        preset_payload = {
+            "name": preset_name,
+            "preset": preset_data,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+
+        with preset_file.open("w", encoding="utf-8") as f:
+            json.dump(preset_payload, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"자막 설정 저장 완료: {preset_file}")
+
+        return {
+            "success": True,
+            "message": f"'{preset_name}' 설정이 저장되었습니다",
+            "file": str(preset_file)
+        }
+
+    except Exception as e:
+        logger.error(f"자막 설정 저장 실패: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/subtitle-presets")
+async def list_subtitle_presets():
+    """저장된 자막 설정 목록 반환"""
+    from pathlib import Path
+    import json
+
+    presets_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "subtitle_presets"
+
+    if not presets_dir.exists():
+        return []
+
+    presets = []
+
+    for preset_file in sorted(presets_dir.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with preset_file.open('r', encoding='utf-8') as f:
+                preset_data = json.load(f)
+
+            presets.append({
+                "name": preset_data.get("name", preset_file.stem),
+                "file": str(preset_file),
+                "created_at": preset_data.get("created_at", ""),
+                "updated_at": preset_data.get("updated_at", "")
+            })
+
+        except Exception as e:
+            logger.error(f"자막 설정 로드 실패: {preset_file}, {e}")
+            continue
+
+    return presets
+
+
+@app.get("/api/subtitle-presets/{preset_name}")
+async def get_subtitle_preset(preset_name: str):
+    """특정 자막 설정 반환"""
+    from pathlib import Path
+    import json
+
+    presets_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "subtitle_presets"
+    preset_file = presets_dir / f"{preset_name}.json"
+
+    if not preset_file.exists():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"설정을 찾을 수 없습니다: {preset_name}")
+
+    try:
+        with preset_file.open('r', encoding='utf-8') as f:
+            preset_data = json.load(f)
+
+        return preset_data
+
+    except Exception as e:
+        logger.error(f"자막 설정 로드 실패: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/subtitle-presets/{preset_name}")
+async def delete_subtitle_preset(preset_name: str):
+    """자막 설정 삭제"""
+    from pathlib import Path
+
+    presets_dir = Path.home() / "ws" / "youtubeanalysis" / "output" / "subtitle_presets"
+    preset_file = presets_dir / f"{preset_name}.json"
+
+    if not preset_file.exists():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"설정을 찾을 수 없습니다: {preset_name}")
+
+    try:
+        preset_file.unlink()
+        logger.info(f"자막 설정 삭제 완료: {preset_file}")
+
+        return {
+            "success": True,
+            "message": f"'{preset_name}' 설정이 삭제되었습니다"
+        }
+
+    except Exception as e:
+        logger.error(f"자막 설정 삭제 실패: {e}")
+        from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e))
 
 

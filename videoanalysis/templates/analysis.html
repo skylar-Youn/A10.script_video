@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>유튜브콘텐츠메이커</title>
-    <link rel="stylesheet" href="/static/analysis.css?v=7">
+    <link rel="stylesheet" href="/static/analysis.css?v=8">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -490,7 +490,7 @@
                                 </div>
                                 <div class="title-color-control">
                                     <label for="video-title-color">색상</label>
-                                    <input type="color" id="video-title-color" value="#ffffff">
+                                    <input type="color" id="video-title-color" value="#000000">
                                 </div>
                                 <div class="title-motion-control">
                                     <label for="video-title-motion">모션</label>
@@ -533,7 +533,7 @@
                                 </div>
                                 <div class="subtitle-color-control">
                                     <label for="video-subtitle-color">색상</label>
-                                    <input type="color" id="video-subtitle-color" value="#ffe14d">
+                                    <input type="color" id="video-subtitle-color" value="#000000">
                                 </div>
                                 <div class="subtitle-motion-control">
                                     <label for="video-subtitle-motion">모션</label>
@@ -632,7 +632,7 @@
                                     </div>
                                     <div class="realtime-control-group">
                                         <label for="realtime-main-color">색상</label>
-                                        <input type="color" id="realtime-main-color" value="#ffffff">
+                                        <input type="color" id="realtime-main-color" value="#000000">
                                     </div>
                                     <div class="realtime-control-group">
                                         <label for="realtime-main-static-effect">정적 효과 (스타일)</label>
@@ -688,7 +688,7 @@
                                     </div>
                                     <div class="realtime-control-group">
                                         <label for="realtime-description-color">색상</label>
-                                        <input type="color" id="realtime-description-color" value="#ffe14d">
+                                        <input type="color" id="realtime-description-color" value="#000000">
                                     </div>
                                     <div class="realtime-control-group">
                                         <label for="realtime-description-static-effect">정적 효과 (스타일)</label>
@@ -735,6 +735,117 @@
                             </div>
                         </div>
 
+                        <!-- 자막 입력 섹션 (한글/영어) -->
+                        <div class="custom-subtitles-section">
+                            <h4 class="area-title">📝 자막 추가 (한글/영어)</h4>
+                            <div class="subtitles-input-grid">
+                                <!-- 한글 자막 -->
+                                <div class="subtitle-input-card">
+                                    <h5>🇰🇷 한글 자막</h5>
+                                    <div class="subtitle-input-controls">
+                                        <textarea id="korean-subtitle-input" placeholder="한글 자막을 입력하세요..." rows="3"></textarea>
+                                        <div class="subtitle-style-row">
+                                            <div class="control-item">
+                                                <label for="korean-subtitle-size">크기</label>
+                                                <input type="range" id="korean-subtitle-size" min="18" max="96" value="32" step="2">
+                                                <span class="size-value" id="korean-subtitle-size-display">32px</span>
+                                            </div>
+                                            <div class="control-item">
+                                                <label for="korean-subtitle-color">색상</label>
+                                                <input type="color" id="korean-subtitle-color" value="#000000">
+                                            </div>
+                                        </div>
+                                        <div class="subtitle-position-row">
+                                            <div class="control-item">
+                                                <label for="korean-subtitle-x">X 위치</label>
+                                                <input type="number" id="korean-subtitle-x" value="50" min="0" max="100" step="1">
+                                                <span>%</span>
+                                            </div>
+                                            <div class="control-item">
+                                                <label for="korean-subtitle-y">Y 위치</label>
+                                                <input type="number" id="korean-subtitle-y" value="80" min="0" max="100" step="1">
+                                                <span>%</span>
+                                            </div>
+                                        </div>
+                                        <div class="subtitle-effect-row">
+                                            <div class="control-item">
+                                                <label for="korean-subtitle-effect">효과</label>
+                                                <select id="korean-subtitle-effect">
+                                                    <option value="none">없음</option>
+                                                    <option value="outline" selected>외곽선</option>
+                                                    <option value="shadow">그림자</option>
+                                                    <option value="glow">글로우</option>
+                                                    <option value="fade">페이드</option>
+                                                    <option value="slide-up">슬라이드 업</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <button class="apply-subtitle-btn" id="apply-korean-subtitle">✅ 한글 자막 적용</button>
+                                    </div>
+                                </div>
+
+                                <!-- 영어 자막 -->
+                                <div class="subtitle-input-card">
+                                    <h5>🇺🇸 영어 자막</h5>
+                                    <div class="subtitle-input-controls">
+                                        <textarea id="english-subtitle-input" placeholder="Enter English subtitle..." rows="3"></textarea>
+                                        <div class="subtitle-style-row">
+                                            <div class="control-item">
+                                                <label for="english-subtitle-size">크기</label>
+                                                <input type="range" id="english-subtitle-size" min="18" max="96" value="28" step="2">
+                                                <span class="size-value" id="english-subtitle-size-display">28px</span>
+                                            </div>
+                                            <div class="control-item">
+                                                <label for="english-subtitle-color">색상</label>
+                                                <input type="color" id="english-subtitle-color" value="#000000">
+                                            </div>
+                                        </div>
+                                        <div class="subtitle-position-row">
+                                            <div class="control-item">
+                                                <label for="english-subtitle-x">X 위치</label>
+                                                <input type="number" id="english-subtitle-x" value="50" min="0" max="100" step="1">
+                                                <span>%</span>
+                                            </div>
+                                            <div class="control-item">
+                                                <label for="english-subtitle-y">Y 위치</label>
+                                                <input type="number" id="english-subtitle-y" value="90" min="0" max="100" step="1">
+                                                <span>%</span>
+                                            </div>
+                                        </div>
+                                        <div class="subtitle-effect-row">
+                                            <div class="control-item">
+                                                <label for="english-subtitle-effect">효과</label>
+                                                <select id="english-subtitle-effect">
+                                                    <option value="none">없음</option>
+                                                    <option value="outline" selected>외곽선</option>
+                                                    <option value="shadow">그림자</option>
+                                                    <option value="glow">글로우</option>
+                                                    <option value="fade">페이드</option>
+                                                    <option value="slide-up">슬라이드 업</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <button class="apply-subtitle-btn" id="apply-english-subtitle">✅ 영어 자막 적용</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 자막 설정 저장/불러오기 -->
+                            <div class="subtitle-preset-controls">
+                                <h5 class="preset-title">💾 자막 설정 저장/불러오기</h5>
+                                <div class="preset-actions">
+                                    <input type="text" id="subtitle-preset-name" placeholder="설정 이름 입력" class="preset-name-input">
+                                    <button class="preset-btn save" id="save-subtitle-preset">💾 저장</button>
+                                    <select id="subtitle-preset-select" class="preset-select">
+                                        <option value="">저장된 설정 선택</option>
+                                    </select>
+                                    <button class="preset-btn load" id="load-subtitle-preset">📂 불러오기</button>
+                                    <button class="preset-btn delete" id="delete-subtitle-preset">🗑️ 삭제</button>
+                                </div>
+                                <p class="preset-hint">💡 자막 텍스트, 크기, 색상, 위치, 효과를 저장하고 불러올 수 있습니다.</p>
+                            </div>
+                        </div>
+
                         <!-- 비디오 플레이어 -->
                         <div class="video-subtitle-wrapper">
                             <div class="video-player-container">
@@ -756,6 +867,13 @@
                             <div class="subtitle-line-overlay subtitle-line-overlay-main empty" id="overlay-main-subtitle"></div>
                             <div class="subtitle-line-overlay subtitle-line-overlay-description empty" id="overlay-description-subtitle"></div>
 
+                            <!-- 커스텀 자막 오버레이 (한글/영어) -->
+                            <div class="custom-subtitle-overlay empty" id="korean-subtitle-overlay" data-lang="korean">
+                                한글 자막
+                            </div>
+                            <div class="custom-subtitle-overlay empty" id="english-subtitle-overlay" data-lang="english">
+                                English Subtitle
+                            </div>
                         </div>
 
                         <!-- 오디오 플레이어 (음성만 로드 시 사용) -->
@@ -913,11 +1031,84 @@
                             <button class="sync-btn" id="load-audio-file">🎵 음성 파일 로드</button>
                             <button class="sync-btn" id="load-bgm-file">🎵 배경음악 로드</button>
                             <button class="sync-btn" id="load-subtitle-file">📝 자막 파일 로드</button>
+                            <button class="sync-btn" id="load-saved-title-as-subtitle" style="background-color: #9C27B0; color: white;">📺 저장된 제목 불러오기</button>
                             <button class="sync-btn" id="load-translator-subtitles" style="background-color: #2196F3;">🌐 유튜브제작기 번역결과 자막 로드</button>
                             <button class="sync-btn" id="load-translator-audio" style="background-color: #2196F3;">🎵 유튜브제작기 번역결과 음성 로드</button>
                             <button class="sync-btn" id="cut-translation-audio" style="background-color: #FF5722;">🔇 설명자막 음성 묵음처리</button>
                             <button class="sync-btn primary" id="simultaneous-play">🎥 영상+음성 동시 재생</button>
                             <button class="sync-btn secondary" id="bundle-audio">🎵 음성 묶음 편집</button>
+                        </div>
+
+                        <!-- 영상 출력 제목 입력 -->
+                        <div style="margin: 15px 0; padding: 15px; background: #1a2332; border-radius: 8px; border: 1px solid #2a3f5f;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <label for="output-video-title" style="color: #f0f4f8; font-weight: bold;">
+                                    📝 출력 영상 제목 (나중에 자막으로 사용 가능)
+                                </label>
+                                <div style="display: flex; gap: 5px;">
+                                    <button id="load-title-preset" class="sync-btn" style="padding: 5px 12px; font-size: 12px; background: #9C27B0;">
+                                        📚 프리셋 불러오기
+                                    </button>
+                                    <button id="save-title-preset" class="sync-btn" style="padding: 5px 12px; font-size: 12px; background: #FF9800;">
+                                        💾 프리셋 저장
+                                    </button>
+                                    <button id="auto-fill-titles" class="sync-btn" style="padding: 5px 12px; font-size: 12px; background: #4CAF50;">
+                                        🔄 선택된 파일 제목 채우기
+                                    </button>
+                                </div>
+                            </div>
+                            <input type="text" id="output-video-title" placeholder="예: 놀라운 AI 기술의 세계"
+                                   style="width: 100%; padding: 10px; background: #0d1520; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px; font-size: 14px; margin-bottom: 10px;">
+
+                            <!-- 개별 파일 제목 목록 -->
+                            <div id="selected-files-titles" style="display: none; margin-top: 10px; padding: 10px; background: #0d1520; border-radius: 5px; border: 1px solid #2a3f5f;">
+                                <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">📋 선택된 파일 제목 목록:</div>
+                                <div id="files-titles-list" style="color: #b0c4d0; font-size: 13px;"></div>
+                                <div id="files-duration-info" style="color: #667eea; font-size: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #2a3f5f;"></div>
+                            </div>
+
+                            <!-- 자막 스타일 옵션 -->
+                            <div style="margin-top: 10px;">
+                                <label style="color: #f0f4f8; font-size: 13px; display: block; margin-bottom: 5px;">🎨 자막 스타일:</label>
+                                <select id="subtitle-style-select" style="width: 100%; padding: 8px; background: #0d1520; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px; font-size: 13px;">
+                                    <option value="standard">📝 표준 (균형잡힌 설명)</option>
+                                    <option value="comic">😂 코믹 (유머러스하고 재미있게)</option>
+                                    <option value="serious">🎯 진지 (격식있고 진중하게)</option>
+                                    <option value="dramatic">🎭 드라마틱 (감정적이고 극적으로)</option>
+                                    <option value="thrilling">⚡ 긴장감 (스릴있고 박진감있게)</option>
+                                    <option value="emotional">💝 감성적 (따뜻하고 감동적으로)</option>
+                                    <option value="mysterious">🔮 미스터리 (신비롭고 궁금증 유발)</option>
+                                    <option value="energetic">🔥 에너제틱 (활기차고 역동적으로)</option>
+                                </select>
+                            </div>
+
+                            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                                <button id="generate-subtitle-with-gpt" class="sync-btn" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: bold;">
+                                    🤖 GPT로 자막 생성 요청
+                                </button>
+                            </div>
+
+                            <!-- GPT 생성 자막 붙여넣기 영역 -->
+                            <div id="gpt-subtitle-paste-area" style="display: none; margin-top: 15px; padding: 15px; background: #0d1520; border-radius: 5px; border: 2px dashed #667eea;">
+                                <label style="color: #667eea; font-weight: bold; display: block; margin-bottom: 8px;">📋 GPT 생성 자막 붙여넣기:</label>
+                                <textarea id="gpt-subtitle-input" placeholder="GPT가 생성한 SRT 자막을 여기에 붙여넣으세요..."
+                                          style="width: 100%; height: 150px; padding: 10px; background: #1a2332; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px; font-family: monospace; font-size: 12px; resize: vertical;"></textarea>
+                                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                                    <button id="apply-gpt-subtitle" class="sync-btn" style="flex: 1; background: #4CAF50; color: white; font-weight: bold;">
+                                        ✅ 자막 트랙에 적용
+                                    </button>
+                                    <button id="close-paste-area" class="sync-btn" style="background: #666; color: white;">
+                                        ❌ 닫기
+                                    </button>
+                                </div>
+                            </div>
+
+                            <small style="display: block; color: #b0c4d0; margin-top: 5px;">
+                                💡 입력한 제목은 영상 메타데이터로 저장되며, 자막 트랙에 불러올 수 있습니다.
+                            </small>
+                        </div>
+
+                        <div class="sync-controls">
                             <button class="sync-btn" id="create-output-video" style="background-color: #FF6F00; color: white; font-weight: bold;">🎬 영상 출력 파일 만들기</button>
                             <button class="sync-btn" id="save-track-project" style="background-color: #00B894; color: white; font-weight: bold;">💾 트랙 프로젝트 저장하기</button>
                             <button class="sync-btn" id="load-track-project" style="background-color: #0984E3; color: white; font-weight: bold;">📂 트랙 프로젝트 불러오기</button>
@@ -1306,6 +1497,27 @@
         </div>
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
             <button id="load-modal-cancel-btn" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">취소</button>
+        </div>
+    </div>
+</div>
+
+<!-- 저장된 제목 선택 모달 -->
+<div id="saved-title-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center;">
+    <div style="background: #2a2a2a; padding: 30px; border-radius: 10px; max-width: 700px; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+        <h3 style="color: #fff; margin-bottom: 20px;">📺 저장된 영상 제목 선택</h3>
+        <div style="margin-bottom: 20px;">
+            <label style="color: #f0f4f8; display: block; margin-bottom: 8px;">자막 트랙 선택:</label>
+            <select id="title-track-type" style="width: 100%; padding: 10px; background: #1a2332; color: #f0f4f8; border: 1px solid #2a3f5f; border-radius: 5px;">
+                <option value="main">📝 메인 자막</option>
+                <option value="translation">🌐 번역 자막</option>
+                <option value="description">🔊 설명 자막</option>
+            </select>
+        </div>
+        <div id="saved-titles-list" style="margin-bottom: 20px; max-height: 400px; overflow-y: auto;">
+            <!-- 저장된 제목 목록이 여기에 표시됩니다 -->
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button id="title-modal-cancel-btn" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">취소</button>
         </div>
     </div>
 </div>
