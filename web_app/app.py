@@ -3082,6 +3082,28 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         analysis_type = payload.get("analysis_type", "scene-description")
         video_name = payload.get("video_name", "unknown")
         custom_prompt = payload.get("custom_prompt")
+        subtitle_language_primary = payload.get("subtitle_language_primary", "korean")
+        subtitle_language_secondary = payload.get("subtitle_language_secondary", "")
+
+        # 언어별 지시사항
+        language_instructions = {
+            "korean": "한국어",
+            "english": "English",
+            "japanese": "日本語"
+        }
+
+        # 자막 언어 지시문 생성
+        primary_lang = language_instructions.get(subtitle_language_primary, "한국어")
+
+        if subtitle_language_secondary and subtitle_language_secondary != "":
+            secondary_lang = language_instructions.get(subtitle_language_secondary, "")
+            lang_instruction = f"""**중요 - 자막 언어 지시사항**:
+- **주 자막 (상단)**: {primary_lang}로 작성
+- **보조 자막 (하단)**: {secondary_lang}로 작성
+- 각 프레임마다 두 언어로 자막을 모두 제공해주세요.
+- 형식: "### 2-1. 주 자막 ({primary_lang})" 와 "### 2-2. 보조 자막 ({secondary_lang})" 로 구분"""
+        else:
+            lang_instruction = f"**중요**: 모든 자막과 나레이션은 **{primary_lang}**로 작성해주세요."
 
         if not frames:
             raise HTTPException(status_code=400, detail="분석할 프레임이 없습니다.")
@@ -3090,10 +3112,26 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         if analysis_type == "custom" and custom_prompt:
             prompt = custom_prompt
         else:
+            # 자막 섹션 구성
+            if subtitle_language_secondary and subtitle_language_secondary != "":
+                subtitle_section = f"""### 2-1. 주 자막 ({primary_lang}) - 상단 배치용
+- 화면 상단에 표시될 임팩트 있는 텍스트 (20자 이내)
+- 강조할 키워드나 문구
+
+### 2-2. 보조 자막 ({secondary_lang}) - 하단 배치용
+- 화면 하단에 표시될 임팩트 있는 텍스트 (20자 이내)
+- 강조할 키워드나 문구"""
+            else:
+                subtitle_section = """### 2. 화면 텍스트 (자막/캡션)
+- 화면에 표시될 임팩트 있는 텍스트 (20자 이내)
+- 강조할 키워드나 문구"""
+
             # 프롬프트 생성
             prompts = {
                 "shorts-production": f"""다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
 이 프레임들을 바탕으로 YouTube 쇼츠(Shorts) 제작을 위한 종합 분석을 해주세요.
+
+{lang_instruction}
 
 다음 형식으로 각 프레임별로 분석해주세요:
 
@@ -3104,16 +3142,15 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 - 시청자가 느껴야 할 감정이나 반응
 - 주목해야 할 포인트
 
-### 2. 화면 텍스트 (자막/캡션)
-- 화면에 표시될 임팩트 있는 텍스트 (20자 이내)
-- 강조할 키워드나 문구
+{subtitle_section}
 
 ### 3. 나레이션 스크립트
 - 보이스오버로 읽을 대사 (자연스럽고 구어체로)
 - 예상 읽기 시간: 3-5초
 
-### 4. AI 이미지 생성 프롬프트
-- DALL-E/Midjourney용 상세 묘사 (영어로)
+### 4. AI 이미지 생성 프롬프트 (**반드시 영어로만 작성**)
+- **IMPORTANT: Write ONLY in English!**
+- DALL-E/Midjourney용 상세 묘사
 - 스타일, 조명, 구도, 색감 포함
 - 예시: "A vibrant YouTube shorts thumbnail, close-up shot, warm lighting, person expressing excitement, modern minimalist background, high contrast, 9:16 aspect ratio"
 
