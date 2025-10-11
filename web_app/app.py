@@ -38,7 +38,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -415,6 +415,9 @@ download_tasks: Dict[str, Dict[str, Any]] = {}
 
 # 영상 자르기 진행 상태 추적
 cut_video_tasks: Dict[str, Dict[str, Any]] = {}
+
+# 프리뷰 영상 생성 진행 상태 추적
+preview_video_tasks: Dict[str, Dict[str, Any]] = {}
 
 # CORS 설정 추가
 app.add_middleware(
@@ -2525,21 +2528,24 @@ async def api_get_video_files(folder: Optional[str] = None) -> List[Dict[str, An
 
 @app.get("/api/video-analyzer/stream")
 async def api_stream_video(path: str):
-    """Stream video file for preview.
+    """Stream video or subtitle file for preview.
 
     Args:
-        path: Absolute path to the video file.
+        path: Absolute path to the video or subtitle file.
     """
-    video_path = Path(path)
+    file_path = Path(path)
 
     # 보안: 파일이 존재하고 실제 파일인지 확인
-    if not video_path.exists() or not video_path.is_file():
-        raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
 
-    # 비디오 확장자 확인
+    # 지원되는 확장자 확인
     video_extensions = {".mp4", ".webm", ".mkv", ".avi", ".mov", ".flv", ".m4v", ".wmv"}
-    if video_path.suffix.lower() not in video_extensions:
-        raise HTTPException(status_code=400, detail="지원하지 않는 비디오 형식입니다.")
+    subtitle_extensions = {".srt", ".vtt", ".ass", ".ssa"}
+    supported_extensions = video_extensions | subtitle_extensions
+
+    if file_path.suffix.lower() not in supported_extensions:
+        raise HTTPException(status_code=400, detail="지원하지 않는 파일 형식입니다.")
 
     # MIME 타입 결정
     mime_types = {
@@ -2551,13 +2557,50 @@ async def api_stream_video(path: str):
         ".flv": "video/x-flv",
         ".m4v": "video/mp4",
         ".wmv": "video/x-ms-wmv",
+        ".srt": "text/srt",
+        ".vtt": "text/vtt",
+        ".ass": "text/x-ass",
+        ".ssa": "text/x-ssa",
     }
-    media_type = mime_types.get(video_path.suffix.lower(), "video/mp4")
+    media_type = mime_types.get(file_path.suffix.lower(), "application/octet-stream")
 
     return FileResponse(
-        path=str(video_path),
+        path=str(file_path),
         media_type=media_type,
-        filename=video_path.name,
+        filename=file_path.name,
+    )
+
+
+@app.get("/api/video-analyzer/download")
+async def api_download_file(path: str):
+    """Download video or other file.
+
+    Args:
+        path: Absolute path to the file.
+    """
+    file_path = Path(path)
+
+    # 보안: 파일이 존재하고 실제 파일인지 확인
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+
+    # MIME 타입 결정
+    mime_types = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+        ".avi": "video/x-msvideo",
+        ".mov": "video/quicktime",
+        ".srt": "text/srt",
+        ".vtt": "text/vtt",
+    }
+    media_type = mime_types.get(file_path.suffix.lower(), "application/octet-stream")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=file_path.name,
+        headers={"Content-Disposition": f"attachment; filename={file_path.name}"}
     )
 
 
@@ -3171,15 +3214,15 @@ async def api_merge_videos(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any
             # 영상 길이 가져오기
             duration = get_video_duration(video_path)
 
-            # 자막 엔트리 생성 (각 영상 시작 시점에 5초간 제목 표시)
+            # 자막 엔트리 생성 (각 영상의 전체 길이 동안 제목 표시)
             start_time = current_time
-            end_time = current_time + 5.0  # 5초간 표시
+            end_time = current_time + duration  # 영상 전체 길이 동안 표시
 
             subtitle_entries.append({
                 'index': idx + 1,
                 'start': format_srt_time(start_time),
                 'end': format_srt_time(end_time),
-                'text': f"[{idx + 1}] {video_name}"
+                'text': f"📌 제목 [{idx + 1}] {video_name}"
             })
 
             # 다음 영상 시작 시간 업데이트
@@ -3315,6 +3358,184 @@ async def api_merge_videos(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any
     except Exception as e:
         logging.exception("영상 합치기 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"영상 합치기 실패: {str(e)}")
+
+
+@app.post("/api/video-analyzer/create-preview-video")
+async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """텍스트 오버레이와 자막이 적용된 프리뷰 영상 생성"""
+    import subprocess
+    import tempfile
+    import re
+
+    def rgb_to_hex(rgb_string: str) -> str:
+        """CSS rgb(r, g, b) 형식을 FFmpeg 0xRRGGBB 형식으로 변환"""
+        if not rgb_string:
+            return "0xFFFFFF"
+
+        # rgb(r, g, b) 또는 rgba(r, g, b, a) 파싱
+        match = re.search(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', rgb_string)
+        if match:
+            r, g, b = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            return f"0x{r:02X}{g:02X}{b:02X}"
+
+        # 기본값
+        return "0xFFFFFF"
+
+    def escape_ffmpeg_text(text: str) -> str:
+        """FFmpeg drawtext를 위한 텍스트 이스케이프"""
+        # FFmpeg drawtext에서 특수문자 이스케이프
+        text = text.replace("\\", "\\\\")
+        text = text.replace("'", "'\\''")
+        text = text.replace(":", "\\:")
+        text = text.replace("[", "\\[")
+        text = text.replace("]", "\\]")
+        return text
+
+    try:
+        video_path = payload.get("video_path")
+        subtitle_path = payload.get("subtitle_path")
+        video_width = payload.get("video_width")
+        video_height = payload.get("video_height")
+        overlays = payload.get("overlays", {})
+        black_bars = payload.get("black_bars", {})
+
+        if not video_path or not Path(video_path).exists():
+            raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
+
+        video_file = Path(video_path)
+        output_dir = video_file.parent
+        output_name = f"{video_file.stem}_preview.mp4"
+        output_path = output_dir / output_name
+
+        # 출력 파일이 이미 존재하면 고유한 이름 생성
+        counter = 1
+        while output_path.exists():
+            output_name = f"{video_file.stem}_preview_{counter}.mp4"
+            output_path = output_dir / output_name
+            counter += 1
+
+        logging.info(f"🎬 프리뷰 영상 생성 시작: {video_path}")
+        logging.info(f"📐 비디오 크기: {video_width}x{video_height}")
+        logging.info(f"📝 오버레이: {overlays}")
+        logging.info(f"⬛ 검정 배경: {black_bars}")
+
+        # FFmpeg filter_complex 구성
+        filters = []
+
+        # 1. 검정 배경 추가
+        if black_bars.get("top", {}).get("enabled"):
+            top_height_percent = black_bars["top"].get("height", 15)
+            top_opacity = black_bars["top"].get("opacity", 0.8)
+            top_height = int(video_height * top_height_percent / 100)
+            filters.append(
+                f"drawbox=x=0:y=0:w={video_width}:h={top_height}:color=black@{top_opacity}:t=fill"
+            )
+
+        if black_bars.get("bottom", {}).get("enabled"):
+            bottom_height_percent = black_bars["bottom"].get("height", 15)
+            bottom_opacity = black_bars["bottom"].get("opacity", 0.8)
+            bottom_height = int(video_height * bottom_height_percent / 100)
+            bottom_y = video_height - bottom_height
+            filters.append(
+                f"drawbox=x=0:y={bottom_y}:w={video_width}:h={bottom_height}:color=black@{bottom_opacity}:t=fill"
+            )
+
+        # 2. 텍스트 오버레이 추가 (제목, 부제목, 한글 자막, 영어 자막)
+        for overlay_key, overlay_data in overlays.items():
+            if overlay_data and overlay_data.get("text"):
+                text = escape_ffmpeg_text(overlay_data["text"])
+                x = overlay_data.get("x", video_width // 2)
+                y = overlay_data.get("y", video_height // 2)
+                font_size = overlay_data.get("fontSize", 48)
+                color = rgb_to_hex(overlay_data.get("color", "white"))
+
+                # drawtext 필터 추가
+                # x, y는 중앙 정렬을 위해 조정
+                filters.append(
+                    f"drawtext=text='{text}':x={x}-text_w/2:y={y}-text_h/2:"
+                    f"fontsize={font_size}:fontcolor={color}:"
+                    f"box=1:boxcolor=black@0.3:boxborderw=5"
+                )
+
+        # 3. 자막 파일 추가 (있는 경우)
+        if subtitle_path and Path(subtitle_path).exists():
+            # 자막 파일 절대 경로
+            subtitle_path_abs = str(Path(subtitle_path).absolute())
+            # FFmpeg subtitles 필터: 경로의 특수문자 이스케이프
+            # 콜론과 백슬래시를 이스케이프 (FFmpeg filter 문법)
+            subtitle_path_escaped = subtitle_path_abs.replace("\\", "\\\\\\\\").replace(":", "\\:").replace("'", "\\'")
+
+            # 자막 스타일 설정 (크고 잘 보이도록)
+            # force_style: 자막 스타일 강제 적용
+            # FontSize: 폰트 크기 (기본값보다 크게)
+            # PrimaryColour: 노란색 (&H00FFFF)
+            # OutlineColour: 검정 테두리 (&H000000)
+            # BorderStyle: 테두리 스타일 (1 = 테두리 + 그림자)
+            # Outline: 테두리 두께
+            # Shadow: 그림자 깊이
+            # MarginV: 하단 여백
+            style = "FontName=Arial,FontSize=48,PrimaryColour=&H00FFFF,OutlineColour=&H000000,BorderStyle=1,Outline=3,Shadow=2,MarginV=80"
+            filters.append(f"subtitles={subtitle_path_escaped}:force_style='{style}'")
+
+        # FFmpeg 명령어 구성
+        cmd = [
+            "/usr/bin/ffmpeg",
+            "-i", str(video_file.absolute()),
+            "-y"  # 파일 덮어쓰기
+        ]
+
+        # filter_complex 추가
+        if filters:
+            filter_string = ",".join(filters)
+            cmd.extend(["-vf", filter_string])
+
+        # 출력 옵션
+        cmd.extend([
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23",
+            "-c:a", "copy",  # 오디오는 복사
+            str(output_path)
+        ])
+
+        logging.info(f"🎬 FFmpeg 명령어: {' '.join(cmd)}")
+
+        # FFmpeg 실행
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600  # 10분 타임아웃
+        )
+
+        if result.returncode != 0:
+            logging.error(f"FFmpeg 에러: {result.stderr}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"프리뷰 영상 생성 실패: {result.stderr}"
+            )
+
+        # 출력 파일 확인
+        if output_path.exists():
+            size_mb = output_path.stat().st_size / (1024 * 1024)
+            logging.info(f"✅ 프리뷰 영상 생성 완료: {output_path} ({size_mb:.2f}MB)")
+
+            return {
+                "success": True,
+                "preview_path": str(output_path),
+                "file_name": output_name,
+                "size_mb": round(size_mb, 2)
+            }
+        else:
+            raise HTTPException(status_code=500, detail="프리뷰 영상 파일이 생성되지 않았습니다.")
+
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="프리뷰 영상 생성 시간 초과 (10분)")
+    except Exception as e:
+        logging.exception("프리뷰 영상 생성 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"프리뷰 영상 생성 실패: {str(e)}")
 
 
 @app.post("/api/video-analyzer/analyze-frames-with-ai")
