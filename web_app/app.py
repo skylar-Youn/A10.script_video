@@ -3154,7 +3154,14 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 - 스타일, 조명, 구도, 색감 포함
 - 예시: "A vibrant YouTube shorts thumbnail, close-up shot, warm lighting, person expressing excitement, modern minimalist background, high contrast, 9:16 aspect ratio"
 
-### 5. 편집 노트
+### 5. AI 영상 생성 프롬프트 (**반드시 영어로만 작성**)
+- **IMPORTANT: Write ONLY in English!**
+- Sora/Kling/Runway용 동적 장면 묘사
+- 카메라 움직임, 액션, 모션 포함
+- 시간적 흐름과 변화 설명
+- 예시: "Slow zoom in on person's excited face, hands gesturing enthusiastically, natural head movements, soft camera shake for realism, warm lighting gradually brightening, 9:16 vertical format, 3-5 seconds duration"
+
+### 6. 편집 노트
 - 전환 효과 제안
 - BGM 분위기 제안
 - 추가 시각 효과 아이디어
