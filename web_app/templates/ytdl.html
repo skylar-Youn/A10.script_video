@@ -41,6 +41,11 @@
                 <label><input type="checkbox" id="dry_run" name="dry_run" {% if form_values.dry_run %}checked{% endif %}> 드라이런(미리보기)</label>
                 <label><input type="checkbox" name="save_settings"> 현재 상태를 기본값으로 저장</label>
             </div>
+            <div class="field inline" style="background: rgba(102, 126, 234, 0.1); padding: 10px; border-radius: 5px; border-left: 3px solid #667eea;">
+                <label style="color: #aaa; font-weight: 500; margin-right: 15px;">📥 다운로드 시 자동 분리:</label>
+                <label><input type="checkbox" id="extract_vocal" name="extract_vocal" {% if form_values.extract_vocal %}checked{% endif %}> 🎤 Vocal</label>
+                <label><input type="checkbox" id="extract_instruments" name="extract_instruments" {% if form_values.extract_instruments %}checked{% endif %}> 🎸 Instruments</label>
+            </div>
             <button type="submit" id="download-btn">실행</button>
         </form>
 
@@ -91,8 +96,36 @@
     {% endif %}
 
     <section class="panel">
-        <h2>다운로드 기록</h2>
-        <div id="download-history">
+        <div class="history-header-controls">
+            <h2>다운로드 기록 <span style="font-size: 0.8rem; color: #888; font-weight: 400;">(기존 파일에서 추출)</span></h2>
+            <div class="history-actions">
+                <button id="extract-vocal-btn" class="action-btn" onclick="extractAudio('vocal')" disabled>
+                    🎤 Vocal 분리
+                </button>
+                <button id="extract-instruments-btn" class="action-btn" onclick="extractAudio('instruments')" disabled>
+                    🎸 Instruments 분리
+                </button>
+                <button id="select-all-btn" class="action-btn secondary" onclick="toggleSelectAll()">
+                    전체 선택
+                </button>
+            </div>
+        </div>
+
+        <!-- 추출 진행율 표시 영역 -->
+        <div id="extraction-progress-container" style="display: none; margin-bottom: 20px;">
+            <div class="progress-header">
+                <h3>오디오 추출 진행 중</h3>
+                <span id="extraction-progress-status">준비 중...</span>
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="extraction-progress-bar" style="width: 0%;">
+                    <span id="extraction-progress-text">0%</span>
+                </div>
+            </div>
+            <div id="extraction-progress-message" class="progress-message">오디오 추출을 시작합니다...</div>
+        </div>
+
+        <div id="download-history" class="file-list-container">
             <div class="loading">기록을 불러오는 중...</div>
         </div>
     </section>
@@ -110,6 +143,7 @@
 
 <script>
 let pollInterval = null;
+let extractionPollInterval = null;
 
 // 폼 제출 이벤트 가로채기
 document.addEventListener('DOMContentLoaded', () => {
@@ -132,6 +166,8 @@ async function startDownload() {
     const downloadSubs = document.getElementById('download_subs').checked;
     const autoSubs = document.getElementById('auto_subs').checked;
     const dryRun = document.getElementById('dry_run').checked;
+    const extractVocal = document.getElementById('extract_vocal').checked;
+    const extractInstruments = document.getElementById('extract_instruments').checked;
 
     if (!urls.trim()) {
         alert('최소 하나의 URL을 입력하세요.');
@@ -158,6 +194,8 @@ async function startDownload() {
                 download_subs: downloadSubs,
                 auto_subs: autoSubs,
                 dry_run: dryRun,
+                extract_vocal: extractVocal,
+                extract_instruments: extractInstruments,
             })
         });
 
@@ -271,37 +309,262 @@ function displayHistory(history) {
         return;
     }
 
-    let html = '';
-    history.forEach((record, index) => {
-        const date = new Date(record.timestamp).toLocaleString('ko-KR');
-        const urls = record.urls.join('<br>');
+    // 파일 목록을 플랫하게 변환
+    const allFiles = [];
+    history.forEach((record) => {
+        record.files.forEach(filePath => {
+            const fileName = filePath.split('/').pop();
+            const fileExt = fileName.split('.').pop().toLowerCase();
+            const fileSize = ''; // 파일 크기는 서버에서 가져와야 하지만 일단 생략
+            const date = new Date(record.timestamp).toLocaleString('ko-KR', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
 
+            // 비디오 파일만 표시 (오디오 분리 가능한 파일)
+            const videoExts = ['mp4', 'webm', 'mkv', 'avi', 'mov'];
+            if (videoExts.includes(fileExt)) {
+                allFiles.push({
+                    path: filePath,
+                    name: fileName,
+                    ext: fileExt,
+                    size: fileSize,
+                    date: date,
+                    icon: getFileIcon(fileExt)
+                });
+            }
+        });
+    });
+
+    if (allFiles.length === 0) {
+        container.innerHTML = '<div class="info">다운로드된 비디오 파일이 없습니다.</div>';
+        return;
+    }
+
+    let html = '<div class="file-grid">';
+    allFiles.forEach((file, index) => {
         html += `
-            <div class="history-item">
-                <div class="history-header">
-                    <span class="timestamp">${date}</span>
-                    <button class="delete-btn" onclick="deleteFiles(${index}, ${JSON.stringify(record.files).replace(/"/g, '&quot;')})">
-                        파일 삭제
+            <div class="file-card" data-file-path="${file.path}">
+                <div class="file-checkbox">
+                    <input type="checkbox" id="file-${index}" class="file-select"
+                           data-file-path="${file.path}" onchange="updateActionButtons()">
+                </div>
+                <div class="file-icon">
+                    ${file.icon}
+                </div>
+                <div class="file-info">
+                    <div class="file-name" title="${file.name}">${file.name}</div>
+                    <div class="file-meta">
+                        <span class="file-date">${file.date}</span>
+                    </div>
+                </div>
+                <div class="file-actions">
+                    <button class="file-action-btn" onclick="deleteFile('${file.path.replace(/'/g, "\\'")}')">
+                        🗑️ 삭제
                     </button>
-                </div>
-                <div class="history-urls">
-                    <strong>URL:</strong><br>
-                    <small>${urls}</small>
-                </div>
-                <div class="history-files">
-                    <strong>파일 (${record.files.length}개):</strong>
-                    <ul class="file-list small">
-                        ${record.files.map(file => `<li><code>${file}</code></li>`).join('')}
-                    </ul>
-                </div>
-                <div class="history-settings">
-                    <small>설정: ${record.settings.sub_langs} | ${record.settings.download_subs ? '자막O' : '자막X'}</small>
                 </div>
             </div>
         `;
     });
+    html += '</div>';
 
     container.innerHTML = html;
+}
+
+function getFileIcon(ext) {
+    const icons = {
+        'mp4': '🎬',
+        'webm': '🎬',
+        'mkv': '🎬',
+        'avi': '🎬',
+        'mov': '🎬',
+        'wav': '🎵',
+        'mp3': '🎵'
+    };
+    return icons[ext] || '📄';
+}
+
+function updateActionButtons() {
+    const checkboxes = document.querySelectorAll('.file-select:checked');
+    const vocalBtn = document.getElementById('extract-vocal-btn');
+    const instrumentsBtn = document.getElementById('extract-instruments-btn');
+
+    if (checkboxes.length > 0) {
+        vocalBtn.disabled = false;
+        instrumentsBtn.disabled = false;
+    } else {
+        vocalBtn.disabled = true;
+        instrumentsBtn.disabled = true;
+    }
+}
+
+function toggleSelectAll() {
+    const checkboxes = document.querySelectorAll('.file-select');
+    const selectAllBtn = document.getElementById('select-all-btn');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+
+    checkboxes.forEach(cb => {
+        cb.checked = !allChecked;
+    });
+
+    selectAllBtn.textContent = allChecked ? '전체 선택' : '선택 해제';
+    updateActionButtons();
+}
+
+async function extractAudio(type) {
+    const checkboxes = document.querySelectorAll('.file-select:checked');
+    const filePaths = Array.from(checkboxes).map(cb => cb.dataset.filePath);
+
+    if (filePaths.length === 0) {
+        alert('파일을 선택해주세요.');
+        return;
+    }
+
+    if (!confirm(`선택한 ${filePaths.length}개 파일에서 ${type === 'vocal' ? 'Vocal' : 'Instruments'}을 추출하시겠습니까?`)) {
+        return;
+    }
+
+    // 진행율 UI 표시
+    document.getElementById('extraction-progress-container').style.display = 'block';
+    document.getElementById('extract-vocal-btn').disabled = true;
+    document.getElementById('extract-instruments-btn').disabled = true;
+    updateExtractionProgress(0, '오디오 추출을 시작합니다...', 'starting');
+
+    try {
+        const response = await fetch('/api/ytdl/extract-audio', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                file_paths: filePaths,
+                extract_vocal: type === 'vocal',
+                extract_instruments: type === 'instruments'
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('오디오 추출 시작 실패');
+        }
+
+        const result = await response.json();
+        const taskId = result.task_id;
+
+        // 진행 상태 폴링 시작
+        pollExtractionProgress(taskId);
+    } catch (error) {
+        console.error('Error:', error);
+        updateExtractionProgress(0, '오류 발생: ' + error.message, 'error');
+        document.getElementById('extract-vocal-btn').disabled = false;
+        document.getElementById('extract-instruments-btn').disabled = false;
+    }
+}
+
+function pollExtractionProgress(taskId) {
+    // 기존 폴링 중지
+    if (extractionPollInterval) {
+        clearInterval(extractionPollInterval);
+    }
+
+    // 1초마다 진행 상태 확인
+    extractionPollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/ytdl/extract-audio/status/${taskId}`);
+            if (!response.ok) {
+                throw new Error('상태 조회 실패');
+            }
+
+            const status = await response.json();
+            updateExtractionProgress(status.progress, status.message, status.status);
+
+            // 완료되면 폴링 중지
+            if (status.completed) {
+                clearInterval(extractionPollInterval);
+                extractionPollInterval = null;
+
+                // 버튼 다시 활성화 (체크된 항목이 있으면)
+                updateActionButtons();
+
+                if (status.status === 'completed') {
+                    // 다운로드 기록 새로고침
+                    setTimeout(() => {
+                        loadDownloadHistory();
+                        // 진행율 UI 숨기기 (3초 후)
+                        setTimeout(() => {
+                            document.getElementById('extraction-progress-container').style.display = 'none';
+                        }, 3000);
+                    }, 1000);
+                }
+            }
+        } catch (error) {
+            console.error('폴링 오류:', error);
+            clearInterval(extractionPollInterval);
+            extractionPollInterval = null;
+            updateExtractionProgress(0, '상태 확인 실패: ' + error.message, 'error');
+            updateActionButtons();
+        }
+    }, 1000);
+}
+
+function updateExtractionProgress(percent, message, status) {
+    const progressBar = document.getElementById('extraction-progress-bar');
+    const progressText = document.getElementById('extraction-progress-text');
+    const progressMessage = document.getElementById('extraction-progress-message');
+    const progressStatus = document.getElementById('extraction-progress-status');
+
+    progressBar.style.width = percent + '%';
+    progressText.textContent = Math.round(percent) + '%';
+    progressMessage.textContent = message;
+
+    // 상태에 따라 색상 변경
+    if (status === 'error') {
+        progressBar.style.background = '#ef4444';
+        progressStatus.textContent = '❌ 오류';
+        progressStatus.style.color = '#ef4444';
+    } else if (status === 'completed') {
+        progressBar.style.background = '#10b981';
+        progressStatus.textContent = '✓ 완료';
+        progressStatus.style.color = '#10b981';
+    } else if (status === 'extracting') {
+        progressBar.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+        progressStatus.textContent = '🎵 추출 중';
+        progressStatus.style.color = '#667eea';
+    } else {
+        progressBar.style.background = '#fbbf24';
+        progressStatus.textContent = '⏳ 준비 중';
+        progressStatus.style.color = '#fbbf24';
+    }
+}
+
+async function deleteFile(filePath) {
+    if (!confirm('이 파일을 삭제하시겠습니까?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/ytdl/files', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify([filePath])
+        });
+
+        const result = await response.json();
+
+        if (result.errors && result.errors.length > 0) {
+            alert('파일 삭제 중 오류가 발생했습니다:\n' + result.errors.join('\n'));
+        } else {
+            alert('파일이 삭제되었습니다.');
+        }
+
+        loadDownloadHistory();
+    } catch (error) {
+        alert('파일 삭제 중 오류가 발생했습니다: ' + error.message);
+    }
 }
 
 async function deleteFiles(recordIndex, filePaths) {
@@ -335,61 +598,153 @@ async function deleteFiles(recordIndex, filePaths) {
 </script>
 
 <style>
-.history-item {
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    margin-bottom: 10px;
-    padding: 15px;
-    background: #f9f9f9;
+/* 파일 리스트 컨테이너 */
+.file-list-container {
+    background: #000;
+    border-radius: 8px;
+    padding: 20px;
+    min-height: 200px;
 }
 
-.history-header {
+.history-header-controls {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 20px;
 }
 
-.timestamp {
-    font-weight: bold;
-    color: #666;
+.history-actions {
+    display: flex;
+    gap: 10px;
 }
 
-.delete-btn {
-    background: #ff4444;
-    color: white;
+.action-btn {
+    padding: 8px 16px;
     border: none;
-    padding: 5px 10px;
-    border-radius: 3px;
+    border-radius: 5px;
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
+    transition: all 0.2s;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.action-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.action-btn.secondary {
+    background: #555;
+}
+
+.action-btn.secondary:hover {
+    background: #666;
+    box-shadow: 0 4px 12px rgba(85, 85, 85, 0.4);
+}
+
+/* 파일 그리드 */
+.file-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* 파일 카드 */
+.file-card {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 15px;
+    transition: all 0.2s;
+}
+
+.file-card:hover {
+    background: #252525;
+    border-color: #444;
+    transform: translateX(5px);
+}
+
+.file-checkbox {
+    flex-shrink: 0;
+}
+
+.file-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.file-icon {
+    font-size: 32px;
+    flex-shrink: 0;
+}
+
+.file-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.file-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 5px;
+}
+
+.file-meta {
+    display: flex;
+    gap: 15px;
     font-size: 12px;
+    color: #888;
 }
 
-.delete-btn:hover {
-    background: #cc0000;
+.file-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
-.history-urls, .history-files, .history-settings {
-    margin-bottom: 8px;
+.file-action-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #dc3545;
+    color: white;
 }
 
-.file-list.small {
-    font-size: 11px;
-    max-height: 100px;
-    overflow-y: auto;
+.file-action-btn:hover {
+    background: #c82333;
+    transform: scale(1.05);
 }
 
 .loading {
     text-align: center;
-    color: #666;
+    color: #888;
     font-style: italic;
+    padding: 40px;
 }
 
 .info {
     text-align: center;
     color: #888;
     font-style: italic;
-    padding: 20px;
+    padding: 40px;
 }
 
 /* 진행율 표시 스타일 */

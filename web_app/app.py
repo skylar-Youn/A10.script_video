@@ -45,38 +45,40 @@ from starlette.concurrency import run_in_threadpool
 
 from pydantic import BaseModel
 
-from ai_shorts_maker.generator import GenerationOptions, generate_short
-from ai_shorts_maker.models import (
-    ProjectMetadata,
-    ProjectSummary,
-    ProjectVersionInfo,
-    SubtitleCreate,
-    SubtitleUpdate,
-    TimelineUpdate,
-)
-from ai_shorts_maker.repository import (
-    clone_project,
-    delete_project as repository_delete_project,
-    list_projects,
-    load_project,
-    metadata_path,
-)
-from ai_shorts_maker.services import (
-    add_subtitle,
-    delete_subtitle_line,
-    list_versions,
-    render_project,
-    replace_timeline,
-    restore_project_version,
-    update_audio_settings,
-    update_subtitle_style,
-    update_subtitle,
-)
-import ai_shorts_maker.translator as translator_module
-from ai_shorts_maker.translator import (
-    TranslatorProject,
-    TranslatorProjectCreate,
-    TranslatorProjectUpdate,
+# AI Shorts Maker imports - optional module
+try:
+    from ai_shorts_maker.generator import GenerationOptions, generate_short
+    from ai_shorts_maker.models import (
+        ProjectMetadata,
+        ProjectSummary,
+        ProjectVersionInfo,
+        SubtitleCreate,
+        SubtitleUpdate,
+        TimelineUpdate,
+    )
+    from ai_shorts_maker.repository import (
+        clone_project,
+        delete_project as repository_delete_project,
+        list_projects,
+        load_project,
+        metadata_path,
+    )
+    from ai_shorts_maker.services import (
+        add_subtitle,
+        delete_subtitle_line,
+        list_versions,
+        render_project,
+        replace_timeline,
+        restore_project_version,
+        update_audio_settings,
+        update_subtitle_style,
+        update_subtitle,
+    )
+    import ai_shorts_maker.translator as translator_module
+    from ai_shorts_maker.translator import (
+        TranslatorProject,
+        TranslatorProjectCreate,
+        TranslatorProjectUpdate,
     aggregate_dashboard_projects,
     clone_translator_project,
     create_project as translator_create_project,
@@ -95,6 +97,15 @@ from ai_shorts_maker.translator import (
     delete_project_segment,
     UPLOADS_DIR,
 )
+    AI_SHORTS_MAKER_AVAILABLE = True
+except ImportError as e:
+    AI_SHORTS_MAKER_AVAILABLE = False
+    logging.warning(f"AI Shorts Maker module not available: {e}")
+    # Define placeholder variables for missing imports
+    TranslatorProject = None
+    TranslatorProjectCreate = None
+    TranslatorProjectUpdate = None
+
 from videoanalysis.config import SAVED_RESULTS_DIR
 from youtube.ytdl import download_with_options, parse_sub_langs
 try:
@@ -216,6 +227,8 @@ DEFAULT_YTDL_SETTINGS: Dict[str, Any] = {
     "download_subs": True,
     "auto_subs": True,
     "dry_run": False,
+    "extract_vocal": False,
+    "extract_instruments": False,
 }
 
 SIMILARITY_DEFAULTS: Dict[str, Any] = {
@@ -412,6 +425,9 @@ app = FastAPI(title="AI Shorts Maker")
 
 # 다운로드 진행 상태 추적
 download_tasks: Dict[str, Dict[str, Any]] = {}
+
+# 오디오 추출 진행 상태 추적
+extraction_tasks: Dict[str, Dict[str, Any]] = {}
 
 # 영상 자르기 진행 상태 추적
 cut_video_tasks: Dict[str, Dict[str, Any]] = {}
@@ -1574,6 +1590,115 @@ def save_download_history(history: List[Dict[str, Any]]) -> None:
         )
     except OSError as exc:
         logger.warning("Failed to save download history: %s", exc)
+
+
+def extract_audio_sources(
+    video_files: List[Path],
+    extract_vocal: bool,
+    extract_instruments: bool,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> List[Path]:
+    """
+    Extract vocal and/or instruments from video files using demucs.
+
+    Args:
+        video_files: List of video file paths
+        extract_vocal: Whether to extract vocal track
+        extract_instruments: Whether to extract instruments track
+        progress_callback: Optional callback(current, total, message)
+
+    Returns:
+        List of extracted audio file paths
+    """
+    import subprocess
+
+    extracted_files = []
+
+    # 비디오 파일만 필터링 (자막 파일 제외)
+    video_extensions = {".mp4", ".webm", ".mkv", ".avi", ".mov"}
+    videos = [f for f in video_files if f.suffix.lower() in video_extensions]
+
+    total_files = len(videos)
+
+    for idx, video_path in enumerate(videos, 1):
+        try:
+            if progress_callback:
+                progress_callback(idx, total_files, f"오디오 추출 중 ({idx}/{total_files}): {video_path.name}")
+
+            # 먼저 비디오에서 오디오 추출
+            audio_path = video_path.with_suffix(".wav")
+
+            # ffmpeg로 오디오 추출
+            cmd = [
+                "ffmpeg",
+                "-i", str(video_path),
+                "-vn",  # 비디오 스트림 제외
+                "-acodec", "pcm_s16le",  # WAV format
+                "-ar", "44100",  # 샘플링 레이트
+                "-ac", "2",  # 스테레오
+                "-y",  # 덮어쓰기
+                str(audio_path),
+            ]
+
+            subprocess.run(cmd, check=True, capture_output=True)
+
+            if progress_callback:
+                progress_callback(idx, total_files, f"Vocal/Instruments 분리 중 ({idx}/{total_files}): {video_path.name}")
+
+            # demucs로 오디오 분리
+            output_dir = video_path.parent / "separated"
+            output_dir.mkdir(exist_ok=True)
+
+            demucs_cmd = [
+                "demucs",
+                "--two-stems", "vocals",  # vocal과 나머지(instruments)로 분리
+                "-o", str(output_dir),
+                str(audio_path),
+            ]
+
+            try:
+                subprocess.run(demucs_cmd, check=True, capture_output=True)
+
+                # demucs 출력 경로 (htdemucs 모델 사용)
+                stem_dir = output_dir / "htdemucs" / audio_path.stem
+
+                if extract_vocal:
+                    vocal_file = stem_dir / "vocals.wav"
+                    if vocal_file.exists():
+                        # 파일 이름 변경
+                        final_vocal = video_path.with_name(
+                            f"{video_path.stem}_vocal.wav"
+                        )
+                        vocal_file.rename(final_vocal)
+                        extracted_files.append(final_vocal)
+
+                if extract_instruments:
+                    instruments_file = stem_dir / "no_vocals.wav"
+                    if instruments_file.exists():
+                        # 파일 이름 변경
+                        final_instruments = video_path.with_name(
+                            f"{video_path.stem}_instruments.wav"
+                        )
+                        instruments_file.rename(final_instruments)
+                        extracted_files.append(final_instruments)
+
+                # 정리: separated 폴더 삭제
+                import shutil
+                if output_dir.exists():
+                    shutil.rmtree(output_dir)
+
+            except subprocess.CalledProcessError:
+                logger.warning(f"demucs not available, skipping audio separation for {video_path}")
+
+            # 임시 오디오 파일 삭제
+            if audio_path.exists():
+                audio_path.unlink()
+
+        except Exception as e:
+            logger.warning(f"Failed to extract audio from {video_path}: {e}")
+            continue
+
+    return extracted_files
 
 
 def add_to_download_history(urls: List[str], files: List[Path], settings: Dict[str, Any]) -> None:
@@ -3873,6 +3998,8 @@ async def api_start_download(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
     download_subs_enabled = payload.get("download_subs", True)
     auto_subs_enabled = payload.get("auto_subs", True)
     dry_run_enabled = payload.get("dry_run", False)
+    extract_vocal = payload.get("extract_vocal", False)
+    extract_instruments = payload.get("extract_instruments", False)
 
     parsed_urls = _split_urls(urls_str)
 
@@ -3922,6 +4049,15 @@ async def api_start_download(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
                 progress_hook=progress_callback,
             )
 
+            # 오디오 분리 처리 (dry_run이 아닐 때)
+            audio_files = []
+            if not dry_run_enabled and (extract_vocal or extract_instruments):
+                download_tasks[task_id]["message"] = "오디오 분리 중..."
+                audio_files = extract_audio_sources(
+                    files, extract_vocal, extract_instruments
+                )
+                files.extend(audio_files)
+
             # 다운로드 기록에 추가
             if not dry_run_enabled and files:
                 form_values = {
@@ -3931,6 +4067,8 @@ async def api_start_download(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
                     "download_subs": download_subs_enabled,
                     "auto_subs": auto_subs_enabled,
                     "dry_run": dry_run_enabled,
+                    "extract_vocal": extract_vocal,
+                    "extract_instruments": extract_instruments,
                 }
                 add_to_download_history(parsed_urls, files, form_values)
 
@@ -3979,6 +4117,101 @@ async def api_get_download_history() -> List[Dict[str, Any]]:
 async def api_delete_files(file_paths: List[str] = Body(...)) -> Dict[str, Any]:
     """Delete downloaded files."""
     return delete_download_files(file_paths)
+
+
+@app.post("/api/ytdl/extract-audio")
+async def api_extract_audio(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Extract vocal and/or instruments from already downloaded video files as background task."""
+    import threading
+    from uuid import uuid4 as generate_uuid
+
+    file_paths_str = payload.get("file_paths", [])
+    extract_vocal = payload.get("extract_vocal", False)
+    extract_instruments = payload.get("extract_instruments", False)
+
+    if not file_paths_str:
+        raise HTTPException(status_code=400, detail="file_paths가 필요합니다.")
+
+    if not extract_vocal and not extract_instruments:
+        raise HTTPException(status_code=400, detail="최소 하나의 추출 옵션을 선택해야 합니다.")
+
+    # 문자열 경로를 Path 객체로 변환
+    file_paths = [Path(fp) for fp in file_paths_str]
+
+    # 파일 존재 여부 확인
+    existing_files = [fp for fp in file_paths if fp.exists()]
+
+    if not existing_files:
+        raise HTTPException(status_code=404, detail="유효한 파일이 없습니다.")
+
+    # Task ID 생성
+    task_id = str(generate_uuid())
+
+    # 초기 상태 설정
+    extraction_tasks[task_id] = {
+        "status": "starting",
+        "progress": 0,
+        "total": len(existing_files),
+        "current": 0,
+        "message": "오디오 추출 준비 중...",
+        "extracted_files": [],
+        "error": None,
+        "completed": False,
+    }
+
+    def progress_callback(current: int, total: int, message: str):
+        """Progress callback for extraction"""
+        progress_percent = (current / total * 100) if total > 0 else 0
+        extraction_tasks[task_id]["current"] = current
+        extraction_tasks[task_id]["progress"] = progress_percent
+        extraction_tasks[task_id]["message"] = message
+
+    def run_extraction():
+        """백그라운드 스레드에서 오디오 추출 실행"""
+        try:
+            extraction_tasks[task_id]["status"] = "extracting"
+            extraction_tasks[task_id]["message"] = "오디오 추출 중..."
+
+            extracted_files = extract_audio_sources(
+                existing_files,
+                extract_vocal,
+                extract_instruments,
+                progress_callback
+            )
+
+            extraction_tasks[task_id].update({
+                "status": "completed",
+                "progress": 100,
+                "message": "오디오 추출 완료",
+                "extracted_files": [str(f) for f in extracted_files],
+                "completed": True,
+            })
+        except Exception as e:
+            logging.exception("오디오 추출 중 오류 발생")
+            extraction_tasks[task_id].update({
+                "status": "error",
+                "message": f"오류 발생: {str(e)}",
+                "error": str(e),
+                "completed": True,
+            })
+
+    # 백그라운드 스레드로 추출 시작
+    thread = threading.Thread(target=run_extraction, daemon=True)
+    thread.start()
+
+    return {
+        "task_id": task_id,
+        "message": "오디오 추출이 시작되었습니다.",
+    }
+
+
+@app.get("/api/ytdl/extract-audio/status/{task_id}")
+async def api_get_extraction_status(task_id: str) -> Dict[str, Any]:
+    """오디오 추출 진행 상태 조회"""
+    if task_id not in extraction_tasks:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    return extraction_tasks[task_id]
 
 
 @app.get("/api/copyright/settings")
