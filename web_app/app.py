@@ -217,6 +217,7 @@ YTDL_HISTORY_PATH = BASE_DIR / "ytdl_history.json"
 DEFAULT_YTDL_OUTPUT_DIR = (BASE_DIR.parent / "youtube" / "download").resolve()
 COPYRIGHT_UPLOAD_DIR = BASE_DIR / "uploads" / "copyright"
 TEXT_REMOVAL_UPLOAD_DIR = BASE_DIR / "uploads" / "text_removal"
+YTDL_UPLOAD_DIR = BASE_DIR / "uploads" / "ytdl"
 COPYRIGHT_REPORT_DIR = BASE_DIR / "reports" / "copyright"
 SIMILARITY_SETTINGS_PATH = BASE_DIR / "similarity_settings.json"
 COPYRIGHT_SETTINGS_PATH = BASE_DIR / "copyright_settings.json"
@@ -247,6 +248,7 @@ SIMILARITY_DEFAULTS: Dict[str, Any] = {
 }
 
 TEXT_REMOVAL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+YTDL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_similarity_settings() -> Dict[str, Any]:
@@ -2865,6 +2867,145 @@ async def api_extract_frames_interval(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
 
 
+@app.post("/api/video-analyzer/extract-frames-by-segments")
+async def api_extract_frames_by_segments(payload: Dict[str, Any] = Body(...)):
+    """각 자막 구간마다 균등하게 N개의 프레임을 추출
+
+    Args:
+        payload: {
+            "video_path": str,
+            "subtitle_path": str,
+            "frames_per_segment": int (각 구간당 추출할 프레임 개수)
+        }
+    """
+    import cv2
+    import base64
+    import re
+
+    video_path = Path(payload["video_path"])
+    subtitle_path = Path(payload.get("subtitle_path", ""))
+    frames_per_segment = payload.get("frames_per_segment", 2)
+
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
+
+    if not subtitle_path.exists():
+        raise HTTPException(status_code=404, detail="자막 파일을 찾을 수 없습니다.")
+
+    try:
+        # 자막 파일에서 구간 정보 추출
+        with open(subtitle_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        file_ext = subtitle_path.suffix.lower()
+        segments = []
+
+        if file_ext == '.srt':
+            # SRT 형식 파싱 - 시작과 끝 시간 모두 추출
+            time_pattern = r'(\d{2}):(\d{2}):(\d{2})[,\.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,\.](\d{3})'
+            matches = re.findall(time_pattern, content)
+
+            for match in matches:
+                # 시작 시간
+                start_hours, start_min, start_sec, start_ms = int(match[0]), int(match[1]), int(match[2]), int(match[3])
+                start_time = start_hours * 3600 + start_min * 60 + start_sec + start_ms / 1000
+
+                # 끝 시간
+                end_hours, end_min, end_sec, end_ms = int(match[4]), int(match[5]), int(match[6]), int(match[7])
+                end_time = end_hours * 3600 + end_min * 60 + end_sec + end_ms / 1000
+
+                segments.append({"start": start_time, "end": end_time})
+
+        elif file_ext == '.vtt':
+            # VTT 형식 파싱
+            time_pattern = r'(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})'
+            matches = re.findall(time_pattern, content)
+
+            for match in matches:
+                # 시작 시간
+                start_hours, start_min, start_sec, start_ms = int(match[0]), int(match[1]), int(match[2]), int(match[3])
+                start_time = start_hours * 3600 + start_min * 60 + start_sec + start_ms / 1000
+
+                # 끝 시간
+                end_hours, end_min, end_sec, end_ms = int(match[4]), int(match[5]), int(match[6]), int(match[7])
+                end_time = end_hours * 3600 + end_min * 60 + end_sec + end_ms / 1000
+
+                segments.append({"start": start_time, "end": end_time})
+        else:
+            raise HTTPException(status_code=400, detail="지원하지 않는 자막 형식입니다. (.srt 또는 .vtt만 지원)")
+
+        if not segments:
+            raise HTTPException(status_code=400, detail="자막 파일에서 시간 정보를 찾을 수 없습니다.")
+
+        # 영상 열기
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="비디오 파일을 열 수 없습니다.")
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+
+        frames_data = []
+
+        # 각 구간마다 균등하게 N개 추출
+        for segment_idx, segment in enumerate(segments):
+            start_time = segment["start"]
+            end_time = segment["end"]
+            segment_duration = end_time - start_time
+
+            # 구간이 너무 짧으면 스킵
+            if segment_duration < 0.1:
+                continue
+
+            # N개로 균등 분할
+            # frames_per_segment=2: 시작(1/2), 끝(2/2)
+            # frames_per_segment=3: 1/3, 2/3, 3/3
+            # frames_per_segment=4: 1/4, 2/4, 3/4, 4/4
+            for i in range(frames_per_segment):
+                # 균등 분할 위치 계산
+                ratio = (i + 1) / frames_per_segment
+                time = start_time + segment_duration * ratio
+
+                # 영상 끝을 넘어가지 않도록
+                if time >= duration:
+                    time = duration - 0.1
+
+                frame_number = int(time * fps)
+                if frame_number >= total_frames:
+                    frame_number = total_frames - 1
+
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+                ret, frame = cap.read()
+
+                if ret:
+                    # JPEG로 인코딩
+                    _, buffer = cv2.imencode('.jpg', frame)
+                    frame_base64 = base64.b64encode(buffer).decode('utf-8')
+
+                    frames_data.append({
+                        "frame_data": frame_base64,
+                        "timestamp": round(time, 2),
+                        "segment_index": segment_idx + 1,
+                        "frame_in_segment": i + 1
+                    })
+
+        cap.release()
+
+        return {
+            "frames": frames_data,
+            "total_segments": len(segments),
+            "frames_per_segment": frames_per_segment,
+            "total_frames": len(frames_data)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("세그먼트별 프레임 추출 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
+
+
 @app.post("/api/video-analyzer/get-subtitle-times")
 async def api_get_subtitle_times(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """자막 파일에서 시작 시간 추출"""
@@ -4363,6 +4504,114 @@ async def api_get_extraction_status(task_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
 
     return extraction_tasks[task_id]
+
+
+@app.get("/api/ytdl/load-from-ytdl-server")
+async def api_load_from_ytdl_server() -> Dict[str, Any]:
+    """8001 포트의 ytdl 서버에서 다운로드 기록을 가져옵니다."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get("http://127.0.0.1:8001/api/ytdl/history")
+            response.raise_for_status()
+            history = response.json()
+
+            # 다운로드된 파일들을 추출하여 반환
+            files = []
+            for record in history:
+                if "files" in record:
+                    for file_path in record["files"]:
+                        path_obj = Path(file_path)
+                        if path_obj.exists():
+                            files.append({
+                                "path": str(path_obj),
+                                "name": path_obj.name,
+                                "timestamp": record.get("timestamp", ""),
+                                "size": path_obj.stat().st_size,
+                            })
+
+            return {
+                "success": True,
+                "files": files,
+                "history": history,
+            }
+    except httpx.HTTPError as e:
+        logger.error(f"8001 포트 연결 실패: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"다운로드 서버(8001)에 연결할 수 없습니다: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"다운로드 기록 불러오기 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"다운로드 기록을 불러올 수 없습니다: {str(e)}"
+        )
+
+
+@app.post("/api/ytdl/upload-file")
+async def api_upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """
+    사용자가 선택한 파일을 업로드하여 vocal/instruments 분리에 사용할 수 있도록 합니다.
+    업로드된 파일은 다운로드 기록에 추가됩니다.
+    """
+    import shutil
+    from datetime import datetime
+
+    # 파일 확장자 검증
+    allowed_extensions = {".mp4", ".webm", ".mkv", ".avi", ".mov", ".wav", ".mp3", ".m4a", ".ogg", ".flac"}
+    file_ext = Path(file.filename or "").suffix.lower()
+
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 파일 형식입니다. 허용된 형식: {', '.join(allowed_extensions)}"
+        )
+
+    try:
+        # 고유한 파일명 생성 (타임스탬프 + 원본 파일명)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = file.filename.replace(" ", "_")
+        unique_filename = f"{timestamp}_{safe_filename}"
+        file_path = YTDL_UPLOAD_DIR / unique_filename
+
+        # 파일 저장
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        logger.info(f"파일 업로드 완료: {file_path}")
+
+        # 다운로드 기록에 추가
+        history = load_download_history()
+        upload_record = {
+            "timestamp": datetime.now().isoformat(),
+            "urls": ["Uploaded File"],
+            "files": [str(file_path)],
+            "settings": {
+                "output_dir": str(YTDL_UPLOAD_DIR),
+                "sub_langs": "",
+                "download_subs": False,
+                "auto_subs": False,
+            }
+        }
+        history.insert(0, upload_record)
+        history = history[:100]  # Keep only last 100 records
+        save_download_history(history)
+
+        return {
+            "success": True,
+            "file_path": str(file_path),
+            "file_name": unique_filename,
+            "message": "파일이 성공적으로 업로드되었습니다."
+        }
+
+    except Exception as e:
+        logger.error(f"파일 업로드 중 오류 발생: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"파일 업로드 중 오류가 발생했습니다: {str(e)}"
+        )
 
 
 @app.get("/api/copyright/settings")

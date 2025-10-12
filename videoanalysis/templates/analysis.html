@@ -853,12 +853,10 @@
                                         <div class="track-header">
                                             <div class="track-title" style="display: flex; align-items: center; gap: 8px;">
                                                 <input type="checkbox" id="track-main-subtitle-enable" checked style="cursor: pointer; width: 16px; height: 16px;">
-                                                <label for="track-main-subtitle-enable" style="cursor: pointer;">📝 메인 자막</label>
+                                                <label for="track-main-subtitle-enable" style="cursor: pointer; color: #f0f4f8;">📝 메인 자막</label>
                                             </div>
                                             <div class="track-controls">
-                                                <button class="track-toggle" data-track="main" title="표시/숨김">👁️</button>
-                                                <button class="track-lock" data-track="main" title="잠금/해제">🔓</button>
-                                                <button class="track-settings" data-track="main" title="설정">⚙️</button>
+                                                <button class="track-clear" data-track="main" title="트랙 비우기">🗑️</button>
                                             </div>
                                         </div>
                                         <div class="track-content" id="main-subtitle-content">
@@ -871,12 +869,10 @@
                                         <div class="track-header">
                                             <div class="track-title" style="display: flex; align-items: center; gap: 8px;">
                                                 <input type="checkbox" id="track-translation-subtitle-enable" checked style="cursor: pointer; width: 16px; height: 16px;">
-                                                <label for="track-translation-subtitle-enable" style="cursor: pointer;">🌐 번역 자막</label>
+                                                <label for="track-translation-subtitle-enable" style="cursor: pointer; color: #f0f4f8;">🌐 번역 자막</label>
                                             </div>
                                             <div class="track-controls">
-                                                <button class="track-toggle" data-track="translation" title="표시/숨김">👁️</button>
-                                                <button class="track-lock" data-track="translation" title="잠금/해제">🔓</button>
-                                                <button class="track-settings" data-track="translation" title="설정">⚙️</button>
+                                                <button class="track-clear" data-track="translation" title="트랙 비우기">🗑️</button>
                                             </div>
                                         </div>
                                         <div class="track-content" id="translation-subtitle-content">
@@ -889,12 +885,10 @@
                                         <div class="track-header">
                                             <div class="track-title" style="display: flex; align-items: center; gap: 8px;">
                                                 <input type="checkbox" id="track-description-subtitle-enable" checked style="cursor: pointer; width: 16px; height: 16px;">
-                                                <label for="track-description-subtitle-enable" style="cursor: pointer;">🔊 설명 자막</label>
+                                                <label for="track-description-subtitle-enable" style="cursor: pointer; color: #f0f4f8;">🔊 설명 자막</label>
                                             </div>
                                             <div class="track-controls">
-                                                <button class="track-toggle" data-track="description" title="표시/숨김">👁️</button>
-                                                <button class="track-lock" data-track="description" title="잠금/해제">🔓</button>
-                                                <button class="track-settings" data-track="description" title="설정">⚙️</button>
+                                                <button class="track-clear" data-track="description" title="트랙 비우기">🗑️</button>
                                             </div>
                                         </div>
                                         <div class="track-content" id="description-subtitle-content">
@@ -1184,9 +1178,14 @@
                     <label style="color: #f0f4f8; font-weight: 500; margin-bottom: 5px; display: block;">
                         음성 파일 선택
                     </label>
-                    <button class="action-btn secondary" id="select-separation-audio" style="width: 100%; text-align: left; justify-content: flex-start; padding: 10px;">
-                        📁 음성 파일 선택하기
-                    </button>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="action-btn secondary" id="select-separation-audio" style="flex: 1; text-align: left; justify-content: flex-start; padding: 10px;">
+                            📁 다른 파일 불러오기 (기존 파일에서 추출)
+                        </button>
+                        <button class="action-btn secondary" id="load-from-ytdl" style="flex: 1; text-align: left; justify-content: flex-start; padding: 10px; background-color: #2196F3;">
+                            ⬇️ 다운로드 기록 불러오기
+                        </button>
+                    </div>
                     <div id="selected-separation-audio" style="margin-top: 8px; padding: 8px; background: #0d1520; border-radius: 5px; color: #4CAF50; font-size: 13px; display: none;">
                         선택된 파일: <span id="separation-audio-name">없음</span>
                     </div>
@@ -1282,6 +1281,26 @@
     <div class="status-actions">
         <button class="quick-action" id="select-all">✅ 전체 선택</button>
         <button class="quick-action" id="clear-selection">❌ 선택 해제</button>
+    </div>
+</div>
+
+<!-- 다운로드 기록 선택 모달 -->
+<div id="ytdl-files-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center;">
+    <div style="background: #2a2a2a; padding: 30px; border-radius: 10px; max-width: 800px; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+        <h3 style="color: #fff; margin-bottom: 20px;">⬇️ 다운로드된 파일 선택</h3>
+        <div style="margin-bottom: 15px; padding: 10px; background: #1a2332; border-radius: 5px; color: #b0c4d0; font-size: 13px;">
+            💡 8001 포트의 다운로드 도구에서 다운로드한 파일들을 선택할 수 있습니다.
+        </div>
+        <div id="ytdl-files-list" style="margin-bottom: 20px; max-height: 400px; overflow-y: auto;">
+            <div style="text-align: center; padding: 20px; color: #b0c4d0;">
+                <div style="margin-bottom: 10px; font-size: 24px;">⏳</div>
+                <div>다운로드 기록을 불러오는 중...</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button id="ytdl-modal-select-btn" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">선택</button>
+            <button id="ytdl-modal-cancel-btn" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">취소</button>
+        </div>
     </div>
 </div>
 

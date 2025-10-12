@@ -2093,103 +2093,19 @@ class VideoAnalysisApp {
 
         // 각 트랙의 제어 버튼에 이벤트 리스너 추가
         ['main', 'translation', 'description'].forEach(trackType => {
-            // 가시성 토글 버튼
-            const toggleBtn = document.querySelector(`.track-toggle[data-track="${trackType}"]`);
-            if (toggleBtn) {
-                toggleBtn.addEventListener('click', () => {
-                    this.toggleTrackVisibility(trackType);
-                });
-            }
-
-            // 잠금 토글 버튼
-            const lockBtn = document.querySelector(`.track-lock[data-track="${trackType}"]`);
-            if (lockBtn) {
-                lockBtn.addEventListener('click', () => {
-                    this.toggleTrackLock(trackType);
-                });
-            }
-
-            // 설정 버튼
-            const settingsBtn = document.querySelector(`.track-settings[data-track="${trackType}"]`);
-            if (settingsBtn) {
-                settingsBtn.addEventListener('click', () => {
-                    this.showTrackSettings(trackType);
-                });
-            }
-
-            // 축소된 트랙 헤더 클릭 시 펼치기
-            const trackHeader = document.querySelector(`#${trackType}-subtitle-track .track-header`);
-            if (trackHeader) {
-                trackHeader.addEventListener('click', (e) => {
-                    // 버튼 클릭이 아닌 헤더 영역 클릭만 처리
-                    if (!e.target.classList.contains('track-toggle') &&
-                        !e.target.classList.contains('track-lock') &&
-                        !e.target.classList.contains('track-settings')) {
-
-                        const track = document.getElementById(`${trackType}-subtitle-track`);
-                        if (track && track.classList.contains('collapsed')) {
-                            this.toggleTrackVisibility(trackType);
-                        }
-                    }
+            // 트랙 비우기 버튼
+            const clearBtn = document.querySelector(`.track-clear[data-track="${trackType}"]`);
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => {
+                    this.clearTrack(trackType);
                 });
             }
         });
     }
 
-    toggleTrackVisibility(trackType) {
-        console.log(`👁️ 트랙 가시성 토글: ${trackType}`);
 
-        this.trackStates[trackType].visible = !this.trackStates[trackType].visible;
-
-        // UI 업데이트
-        const toggleBtn = document.querySelector(`.track-toggle[data-track="${trackType}"]`);
-        const track = document.getElementById(`${trackType}-subtitle-track`);
-        const trackContent = track ? track.querySelector('.track-content') : null;
-
-        if (this.trackStates[trackType].visible) {
-            // 트랙 보이기
-            toggleBtn.textContent = '👁️';
-            toggleBtn.title = '트랙 숨기기';
-            if (track) {
-                track.classList.remove('collapsed');
-                track.style.height = '80px'; // 원래 높이로 복원
-            }
-        } else {
-            // 트랙 숨기기 (축소 상태로)
-            toggleBtn.textContent = '👁️‍🗨️';
-            toggleBtn.title = '트랙 보이기';
-            if (track) {
-                track.classList.add('collapsed');
-                track.style.height = '35px'; // 헤더만 보이는 높이로 축소
-            }
-        }
-
-        // 자막 다시 렌더링
-        this.renderHybridSubtitleTracks();
-    }
-
-    toggleTrackLock(trackType) {
-        console.log(`🔒 트랙 잠금 토글: ${trackType}`);
-
-        this.trackStates[trackType].locked = !this.trackStates[trackType].locked;
-
-        // UI 업데이트
-        const lockBtn = document.querySelector(`.track-lock[data-track="${trackType}"]`);
-        const track = document.getElementById(`${trackType}-subtitle-track`);
-
-        if (this.trackStates[trackType].locked) {
-            lockBtn.textContent = '🔒';
-            lockBtn.title = '트랙 잠금 해제';
-            if (track) track.classList.add('locked');
-        } else {
-            lockBtn.textContent = '🔓';
-            lockBtn.title = '트랙 잠금';
-            if (track) track.classList.remove('locked');
-        }
-    }
-
-    showTrackSettings(trackType) {
-        console.log(`⚙️ 트랙 설정 표시: ${trackType}`);
+    clearTrack(trackType) {
+        console.log(`🗑️ 트랙 비우기: ${trackType}`);
 
         const trackNames = {
             main: '메인 자막',
@@ -2197,8 +2113,30 @@ class VideoAnalysisApp {
             description: '설명 자막'
         };
 
-        alert(`${trackNames[trackType]} 설정\n\n향후 업데이트에서 제공될 예정입니다:\n- 트랙 색상 변경\n- 폰트 크기 조절\n- 자막 스타일 설정`);
+        // 확인 대화상자 표시
+        if (!confirm(`${trackNames[trackType]} 트랙의 모든 자막을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
+            return;
+        }
+
+        // 트랙 컨텐츠 영역 가져오기
+        const trackContent = document.getElementById(`${trackType}-subtitle-content`);
+        if (trackContent) {
+            // 모든 자막 블록 제거
+            trackContent.innerHTML = '';
+            console.log(`✅ ${trackNames[trackType]} 트랙이 비워졌습니다.`);
+
+            // 분석 결과에서도 해당 트랙 데이터 제거
+            if (this.analysisResults && this.analysisResults.subtitleData) {
+                if (this.analysisResults.subtitleData.classified) {
+                    this.analysisResults.subtitleData.classified[trackType] = [];
+                }
+            }
+
+            // 자막 다시 렌더링
+            this.renderHybridSubtitleTracks();
+        }
     }
+
 
     // 자막을 트랙별로 분류하는 함수
     classifySubtitlesByType(subtitles) {
@@ -16343,6 +16281,14 @@ class VideoAnalysisApp {
             });
         }
 
+        // 다운로드 기록에서 불러오기 버튼
+        const loadFromYtdlBtn = document.getElementById('load-from-ytdl');
+        if (loadFromYtdlBtn) {
+            loadFromYtdlBtn.addEventListener('click', async () => {
+                await this.showYtdlFilesModal();
+            });
+        }
+
         // 음성 파일 로드 버튼
         const loadVocalsBtn = document.getElementById('load-vocals-file');
         if (loadVocalsBtn) {
@@ -16597,6 +16543,155 @@ class VideoAnalysisApp {
                 modal.remove();
             }
         });
+    }
+
+    async showYtdlFilesModal() {
+        // 모달 표시
+        const modal = document.getElementById('ytdl-files-modal');
+        if (!modal) {
+            this.showError('모달을 찾을 수 없습니다');
+            return;
+        }
+
+        modal.style.display = 'flex';
+        const filesList = document.getElementById('ytdl-files-list');
+        const selectBtn = document.getElementById('ytdl-modal-select-btn');
+        const cancelBtn = document.getElementById('ytdl-modal-cancel-btn');
+
+        let selectedFile = null;
+
+        // 로딩 표시
+        filesList.innerHTML = `
+            <div style="text-align: center; padding: 20px; color: #b0c4d0;">
+                <div style="margin-bottom: 10px; font-size: 24px;">⏳</div>
+                <div>다운로드 기록을 불러오는 중...</div>
+            </div>
+        `;
+
+        try {
+            // 다운로드 기록 가져오기
+            const response = await fetch('/api/ytdl/load-from-ytdl-server');
+            if (!response.ok) {
+                throw new Error(`서버 응답 오류: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            if (!data.success || !data.files || data.files.length === 0) {
+                filesList.innerHTML = `
+                    <div style="text-align: center; padding: 30px; color: #b0c4d0;">
+                        <div style="margin-bottom: 10px; font-size: 32px;">📭</div>
+                        <div style="margin-bottom: 10px;">다운로드된 파일이 없습니다</div>
+                        <div style="font-size: 12px; color: #999;">먼저 다운로드 도구에서 파일을 다운로드하세요</div>
+                    </div>
+                `;
+                return;
+            }
+
+            // 음성/비디오 파일만 필터링
+            const mediaFiles = data.files.filter(file => {
+                const name = file.name.toLowerCase();
+                return name.endsWith('.wav') || name.endsWith('.mp3') ||
+                       name.endsWith('.m4a') || name.endsWith('.ogg') ||
+                       name.endsWith('.webm') || name.endsWith('.mp4');
+            });
+
+            if (mediaFiles.length === 0) {
+                filesList.innerHTML = `
+                    <div style="text-align: center; padding: 30px; color: #b0c4d0;">
+                        <div style="margin-bottom: 10px; font-size: 32px;">🎵</div>
+                        <div>음성/비디오 파일이 없습니다</div>
+                    </div>
+                `;
+                return;
+            }
+
+            // 파일 목록 표시
+            filesList.innerHTML = mediaFiles.map(file => {
+                const sizeInMB = (file.size / (1024 * 1024)).toFixed(2);
+                const timestamp = file.timestamp ? new Date(file.timestamp).toLocaleString('ko-KR') : '날짜 없음';
+
+                return `
+                    <div class="ytdl-file-item" data-file-path="${file.path}"
+                         style="padding: 12px; margin: 8px 0; background: #3a3a3a; border-radius: 5px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div style="flex: 1;">
+                                <div style="color: #4CAF50; font-weight: bold; margin-bottom: 5px;">${file.name}</div>
+                                <div style="color: #999; font-size: 11px; margin-bottom: 3px;">
+                                    📁 ${file.path}
+                                </div>
+                                <div style="color: #999; font-size: 11px;">
+                                    💾 크기: ${sizeInMB} MB | 📅 ${timestamp}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // 파일 항목 클릭 이벤트
+            const fileItems = filesList.querySelectorAll('.ytdl-file-item');
+            fileItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    // 이전 선택 해제
+                    fileItems.forEach(i => {
+                        i.style.borderColor = 'transparent';
+                        i.style.background = '#3a3a3a';
+                    });
+
+                    // 현재 항목 선택
+                    item.style.borderColor = '#4CAF50';
+                    item.style.background = '#404040';
+
+                    selectedFile = item.getAttribute('data-file-path');
+                    selectBtn.disabled = false;
+                });
+            });
+
+        } catch (error) {
+            console.error('다운로드 기록 불러오기 실패:', error);
+            filesList.innerHTML = `
+                <div style="text-align: center; padding: 30px; color: #ff6b6b;">
+                    <div style="margin-bottom: 10px; font-size: 32px;">❌</div>
+                    <div style="margin-bottom: 10px;">다운로드 기록을 불러올 수 없습니다</div>
+                    <div style="font-size: 12px; color: #999;">${error.message}</div>
+                    <div style="font-size: 12px; color: #999; margin-top: 10px;">
+                        💡 다운로드 도구(8001 포트)가 실행 중인지 확인하세요
+                    </div>
+                </div>
+            `;
+        }
+
+        // 선택 버튼 클릭
+        selectBtn.onclick = () => {
+            if (selectedFile) {
+                const fileName = selectedFile.split('/').pop();
+
+                // 선택된 파일 정보 저장 및 표시
+                document.getElementById('separation-audio-path').value = selectedFile;
+                document.getElementById('separation-audio-name').textContent = fileName;
+                document.getElementById('selected-separation-audio').style.display = 'block';
+
+                modal.style.display = 'none';
+                this.showSuccess(`${fileName} 파일이 선택되었습니다`);
+            }
+        };
+
+        // 취소 버튼 클릭
+        cancelBtn.onclick = () => {
+            modal.style.display = 'none';
+            selectedFile = null;
+            selectBtn.disabled = true;
+        };
+
+        // 배경 클릭 시 닫기
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+                selectedFile = null;
+                selectBtn.disabled = true;
+            }
+        };
     }
 
     async showAudioFileSelectorForVocals() {

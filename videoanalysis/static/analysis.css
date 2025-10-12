@@ -2551,7 +2551,7 @@ textarea:focus {
     opacity: 1;
 }
 
-.track-toggle, .track-lock, .track-settings {
+.track-toggle, .track-lock, .track-clear, .track-settings {
     background: none;
     border: none;
     font-size: 10px;
@@ -2562,7 +2562,7 @@ textarea:focus {
     color: var(--text-primary);
 }
 
-.track-toggle:hover, .track-lock:hover, .track-settings:hover {
+.track-toggle:hover, .track-lock:hover, .track-clear:hover, .track-settings:hover {
     background: rgba(255, 255, 255, 0.2);
     transform: scale(1.1);
 }
@@ -2573,6 +2573,14 @@ textarea:focus {
 
 .track-lock.locked {
     color: var(--error-color);
+}
+
+.track-clear {
+    color: #ff6b6b;
+}
+
+.track-clear:hover {
+    background: rgba(255, 107, 107, 0.2) !important;
 }
 
 .track-content {

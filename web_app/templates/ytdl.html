@@ -99,6 +99,9 @@
         <div class="history-header-controls">
             <h2>다운로드 기록 <span style="font-size: 0.8rem; color: #888; font-weight: 400;">(기존 파일에서 추출)</span></h2>
             <div class="history-actions">
+                <button id="load-other-files-btn" class="action-btn" style="background: #2196F3;" onclick="loadOtherFiles()">
+                    📁 다른 파일 불러오기
+                </button>
                 <button id="extract-vocal-btn" class="action-btn" onclick="extractAudio('vocal')" disabled>
                     🎤 Vocal 분리
                 </button>
@@ -110,6 +113,9 @@
                 </button>
             </div>
         </div>
+
+        <!-- 숨겨진 파일 입력 요소 -->
+        <input type="file" id="file-picker" multiple accept="audio/*,video/*,.mp4,.webm,.mkv,.avi,.mov,.wav,.mp3,.m4a,.ogg,.flac" style="display: none;">
 
         <!-- 추출 진행율 표시 영역 -->
         <div id="extraction-progress-container" style="display: none; margin-bottom: 20px;">
@@ -594,6 +600,106 @@ async function deleteFiles(recordIndex, filePaths) {
     } catch (error) {
         alert('파일 삭제 중 오류가 발생했습니다: ' + error.message);
     }
+}
+
+// 다른 파일 불러오기
+function loadOtherFiles() {
+    const filePicker = document.getElementById('file-picker');
+
+    // 파일 선택 이벤트 리스너 설정 (중복 방지를 위해 기존 리스너 제거)
+    filePicker.onchange = handleFileSelection;
+
+    // 파일 선택 대화상자 열기
+    filePicker.click();
+}
+
+async function handleFileSelection(event) {
+    const files = event.target.files;
+
+    if (files.length === 0) {
+        return;
+    }
+
+    // 파일 업로드 진행 상태 표시
+    const uploadStatus = document.createElement('div');
+    uploadStatus.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.95);
+        padding: 30px;
+        border-radius: 10px;
+        border: 2px solid #667eea;
+        z-index: 10000;
+        min-width: 300px;
+        text-align: center;
+    `;
+    uploadStatus.innerHTML = `
+        <h3 style="margin: 0 0 15px 0;">파일 업로드 중</h3>
+        <div style="color: #888;">파일을 업로드하고 있습니다...</div>
+        <div style="margin-top: 15px;">
+            <div style="width: 100%; height: 20px; background: rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden;">
+                <div id="upload-progress" style="width: 0%; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); transition: width 0.3s;"></div>
+            </div>
+            <div id="upload-count" style="margin-top: 10px; color: #888; font-size: 0.9rem;">0 / ${files.length}</div>
+        </div>
+    `;
+    document.body.appendChild(uploadStatus);
+
+    const progressBar = document.getElementById('upload-progress');
+    const countDisplay = document.getElementById('upload-count');
+
+    try {
+        let uploadedCount = 0;
+        const uploadedFiles = [];
+
+        // 파일을 하나씩 업로드
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/ytdl/upload-file', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`파일 업로드 실패: ${file.name}`);
+                }
+
+                const result = await response.json();
+                uploadedFiles.push(result.file_path);
+                uploadedCount++;
+
+                // 진행률 업데이트
+                const progress = (uploadedCount / files.length) * 100;
+                progressBar.style.width = progress + '%';
+                countDisplay.textContent = `${uploadedCount} / ${files.length}`;
+            } catch (error) {
+                console.error(`파일 업로드 오류 (${file.name}):`, error);
+            }
+        }
+
+        // 업로드 완료
+        document.body.removeChild(uploadStatus);
+
+        if (uploadedFiles.length > 0) {
+            alert(`${uploadedFiles.length}개 파일이 성공적으로 추가되었습니다.`);
+            // 다운로드 기록 새로고침하여 업로드된 파일 표시
+            loadDownloadHistory();
+        } else {
+            alert('파일 업로드에 실패했습니다.');
+        }
+    } catch (error) {
+        document.body.removeChild(uploadStatus);
+        alert('파일 업로드 중 오류가 발생했습니다: ' + error.message);
+    }
+
+    // 파일 입력 초기화
+    event.target.value = '';
 }
 </script>
 
