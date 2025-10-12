@@ -3834,10 +3834,11 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         if subtitle_language_secondary and subtitle_language_secondary != "":
             secondary_lang = language_instructions.get(subtitle_language_secondary, "")
             lang_instruction = f"""**중요 - 자막 언어 지시사항**:
-- **주 자막 (상단)**: {primary_lang}로 작성
-- **보조 자막 (하단)**: {secondary_lang}로 작성
-- 각 프레임마다 두 언어로 자막을 모두 제공해주세요.
-- 형식: "### 2-1. 주 자막 ({primary_lang})" 와 "### 2-2. 보조 자막 ({secondary_lang})" 로 구분"""
+- **기본 자막 (2-0)**: 한국어로 작성 (모든 사용자용 기본 자막)
+- **주 자막 (2-1, 상단)**: {primary_lang}로 작성
+- **보조 자막 (2-2, 하단)**: {secondary_lang}로 작성
+- 각 프레임마다 **세 가지 언어로 자막을 모두 제공**해주세요.
+- 형식: "### 2-0. 한글 자막", "### 2-1. 주 자막 ({primary_lang})", "### 2-2. 보조 자막 ({secondary_lang})" 순서로 작성"""
         else:
             lang_instruction = f"**중요**: 모든 자막과 나레이션은 **{primary_lang}**로 작성해주세요."
 
@@ -3866,7 +3867,11 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         else:
             # 자막 섹션 구성
             if subtitle_language_secondary and subtitle_language_secondary != "":
-                subtitle_section = f"""### 2-1. 주 자막 ({primary_lang}) - 상단 배치용
+                subtitle_section = f"""### 2-0. 한글 자막 (기본 자막)
+- 한국어로 작성된 기본 자막 (20자 이내)
+- 모든 한국 사용자를 위한 자막
+
+### 2-1. 주 자막 ({primary_lang}) - 상단 배치용
 - 화면 상단에 표시될 임팩트 있는 텍스트 (20자 이내)
 - 강조할 키워드나 문구
 
