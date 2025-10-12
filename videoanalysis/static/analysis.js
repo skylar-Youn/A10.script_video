@@ -3152,8 +3152,7 @@ class VideoAnalysisApp {
 
     showError(message) {
         // 간단한 에러 표시 (실제로는 토스트 메시지나 모달 사용 권장)
-        alert('❌ ' + message);
-        console.error(message);
+        console.error('❌ ' + message);
     }
 
     updateStatusBar() {
@@ -6071,6 +6070,14 @@ class VideoAnalysisApp {
             });
         }
 
+        // 현재 프레임 이미지 저장 버튼
+        const captureFrameBtn = document.getElementById('capture-current-frame');
+        if (captureFrameBtn) {
+            captureFrameBtn.addEventListener('click', async () => {
+                await this.captureCurrentFrame();
+            });
+        }
+
         // 번역기 음성 로드 버튼
         const loadTranslatorAudioBtn = document.getElementById('load-translator-audio');
         console.log('번역기 음성 로드 버튼:', loadTranslatorAudioBtn);
@@ -6198,7 +6205,7 @@ class VideoAnalysisApp {
                 const x = e.clientX - rect.left + timelineContainer.scrollLeft;
 
                 // 전체 시간 범위 계산
-                const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
+                const totalDuration = this.timeline.duration || 60; // 0초부터 duration까지
                 const timelineContent = document.getElementById('timeline-content');
                 const width = parseFloat(timelineContent.style.minWidth) || 1000;
 
@@ -6698,7 +6705,7 @@ class VideoAnalysisApp {
         const timelineContent = document.getElementById('timeline-content');
         if (timelineContent) {
             // 전체 시간 범위 계산 (minTime부터 duration까지)
-            const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
+            const totalDuration = this.timeline.duration || 60; // 0초부터 duration까지
             const width = totalDuration * this.timeline.pixelsPerSecond * this.timeline.zoom;
             timelineContent.style.minWidth = Math.max(1000, width) + 'px';
 
@@ -6718,7 +6725,7 @@ class VideoAnalysisApp {
         ruler.innerHTML = '';
 
         const interval = this.getOptimalTimeInterval();
-        const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
+        const totalDuration = this.timeline.duration || 60; // 0초부터 duration까지
         const width = totalDuration * this.timeline.pixelsPerSecond * this.timeline.zoom;
 
         // 0초부터 시작해서 최대 시간까지 마커 생성
@@ -6796,7 +6803,7 @@ class VideoAnalysisApp {
         const width = parseFloat(timelineContent.style.minWidth) || 1000;
 
         // 전체 시간 범위 계산
-        const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
+        const totalDuration = this.timeline.duration || 60; // 0초부터 duration까지
 
         // 현재 시간을 기준으로 위치 계산 (minTime 오프셋 고려)
         const adjustedTime = this.timeline.currentTime - this.timeline.minTime;
@@ -7306,6 +7313,13 @@ class VideoAnalysisApp {
                 console.log('정규화된 자막 데이터:', this.timeline.subtitleData);
                 console.log('자막 구간 수:', subtitles.length);
 
+                // 자막의 최대 종료 시간 계산
+                let subtitleMaxTime = 0;
+                if (subtitles.length > 0) {
+                    subtitleMaxTime = Math.max(...subtitles.map(s => s.end_time));
+                    console.log('📊 자막 최대 종료 시간:', subtitleMaxTime);
+                }
+
                 // 비디오 duration이 설정되어 있는지 확인
                 if (this.timeline.duration === 0) {
                     const videoPlayer = document.getElementById('video-player');
@@ -7313,13 +7327,31 @@ class VideoAnalysisApp {
                         this.timeline.duration = videoPlayer.duration;
                     } else {
                         // 자막 데이터에서 duration 추정
-                        if (subtitles.length > 0) {
-                            this.timeline.duration = Math.max(...subtitles.map(s => s.end_time));
+                        if (subtitleMaxTime > 0) {
+                            this.timeline.duration = Math.ceil(subtitleMaxTime) + 5; // 5초 여유 추가
                         } else if (resultData.total_duration) {
                             this.timeline.duration = resultData.total_duration;
                         }
                     }
+                } else {
+                    // 비디오 플레이어가 없고 자막만 있는 경우, 자막에 맞춰 duration 조정
+                    const videoPlayer = document.getElementById('video-player');
+                    if (!videoPlayer || !videoPlayer.duration || videoPlayer.duration === 0) {
+                        // 비디오가 없거나 duration이 0이면 자막 길이에 맞춤
+                        if (subtitleMaxTime > 0) {
+                            this.timeline.duration = Math.ceil(subtitleMaxTime) + 5;
+                            console.log(`📐 비디오 없음: 자막 길이에 맞춰 duration을 ${this.timeline.duration}초로 조정`);
+                        }
+                    } else {
+                        // Duration이 이미 설정되어 있어도, 자막이 더 길면 확장
+                        if (subtitleMaxTime > this.timeline.duration) {
+                            console.warn(`⚠️ 자막이 현재 duration(${this.timeline.duration}초)보다 깁니다. ${Math.ceil(subtitleMaxTime) + 5}초로 확장합니다.`);
+                            this.timeline.duration = Math.ceil(subtitleMaxTime) + 5;
+                        }
+                    }
                 }
+
+                console.log('📏 최종 타임라인 duration:', this.timeline.duration);
 
                 console.log('📝 자막 데이터 로드 완료, 렌더링 시작...');
                 console.log('자막 데이터:', this.timeline.subtitleData);
@@ -7612,7 +7644,7 @@ class VideoAnalysisApp {
             const endTime = Math.max(0, subtitle.end_time);
 
             // 전체 시간 범위 계산 (0초부터 시작)
-            const totalDuration = Math.max(this.timeline.duration, 60); // 0초부터 duration까지
+            const totalDuration = this.timeline.duration || 60; // 0초부터 duration까지
             const adjustedStartTime = startTime; // 0초부터 시작하므로 그대로 사용
             const duration = endTime - startTime;
 
@@ -7960,8 +7992,8 @@ class VideoAnalysisApp {
             const startTime = Math.max(0, subtitle.start_time);
             const endTime = Math.max(0, subtitle.end_time);
 
-            // 전체 시간 범위 계산
-            const totalDuration = Math.max(this.timeline.duration, 60);
+            // 전체 시간 범위 계산 - 실제 duration 사용 (최소값 강제 제거)
+            const totalDuration = this.timeline.duration || 60;
             const duration = endTime - startTime;
 
             const startPercent = (startTime / totalDuration) * 100;
@@ -8227,7 +8259,7 @@ class VideoAnalysisApp {
             const deltaY = e.clientY - dragStartY; // 세로 이동량
             const trackContent = block.parentElement;
             const trackWidth = trackContent.offsetWidth;
-            const totalDuration = Math.max(this.timeline.duration, 60);
+            const totalDuration = this.timeline.duration || 60;
 
             // 픽셀 이동을 시간으로 변환 (가로 방향)
             const timePerPixel = totalDuration / trackWidth;
@@ -8363,7 +8395,7 @@ class VideoAnalysisApp {
         const audioTrack = document.getElementById('audio-track');
         if (!audioTrack) return;
 
-        const totalDuration = Math.max(this.timeline.duration, 60);
+        const totalDuration = this.timeline.duration || 60;
         const currentPercent = (currentTime / totalDuration) * 100;
 
         // 현재 위치 가이드라인
@@ -8411,7 +8443,7 @@ class VideoAnalysisApp {
     // 위치에서 시간 계산
     calculateTimeFromPosition(block) {
         const leftPercent = parseFloat(block.style.left);
-        const totalDuration = Math.max(this.timeline.duration, 60);
+        const totalDuration = this.timeline.duration || 60;
         return (leftPercent / 100) * totalDuration;
     }
 
@@ -8527,7 +8559,7 @@ class VideoAnalysisApp {
         // 자막 시간 범위 계산
         const startTime = Math.max(0, subtitle.start_time);
         const endTime = Math.max(0, subtitle.end_time);
-        const totalDuration = Math.max(this.timeline.duration, 60);
+        const totalDuration = this.timeline.duration || 60;
 
         // 파형에서 해당 구간 하이라이트
         const startPercent = (startTime / totalDuration) * 100;
@@ -8593,7 +8625,7 @@ class VideoAnalysisApp {
 
         const startTime = Math.max(0, subtitle.start_time);
         const endTime = Math.max(0, subtitle.end_time);
-        const totalDuration = Math.max(this.timeline.duration, 60);
+        const totalDuration = this.timeline.duration || 60;
 
         const startPercent = (startTime / totalDuration) * 100;
         const widthPercent = ((endTime - startTime) / totalDuration) * 100;
@@ -8955,7 +8987,7 @@ class VideoAnalysisApp {
 
         const startTime = Math.max(0, subtitle.start_time);
         const endTime = Math.max(0, subtitle.end_time);
-        const totalDuration = Math.max(this.timeline.duration, 60);
+        const totalDuration = this.timeline.duration || 60;
 
         // 현재 재생 위치 표시
         const currentPercent = (currentTime / totalDuration) * 100;
@@ -15493,6 +15525,59 @@ class VideoAnalysisApp {
         } catch (error) {
             console.error('프로젝트 로드 실패:', error);
             alert(`프로젝트 로드 실패: ${error.message}`);
+        }
+    }
+
+    // 현재 프레임 이미지 저장
+    async captureCurrentFrame() {
+        console.log('📸 현재 프레임 이미지 저장 시작');
+        try {
+            const videoPlayer = document.getElementById('video-player');
+            if (!videoPlayer || !videoPlayer.src || videoPlayer.paused && videoPlayer.currentTime === 0) {
+                alert('영상을 먼저 로드하고 원하는 시점으로 이동하세요.');
+                return;
+            }
+
+            const currentTime = videoPlayer.currentTime;
+            const videoPath = this.timeline?.videoFilePath;
+
+            if (!videoPath) {
+                alert('비디오 파일 경로를 찾을 수 없습니다.');
+                return;
+            }
+
+            console.log(`현재 시간: ${currentTime}초, 비디오 경로: ${videoPath}`);
+
+            // API 호출하여 프레임 추출
+            const response = await fetch('/api/extract-video-frame', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    video_path: videoPath,
+                    timestamp: currentTime,
+                    format: 'png'
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || '프레임 추출 실패');
+            }
+
+            const result = await response.json();
+            console.log('✅ 프레임 추출 성공:', result);
+
+            // 성공 메시지 표시
+            alert(`✅ 이미지 저장 완료!\n파일명: ${result.output_filename}\n크기: ${result.size_kb} KB`);
+
+            // 파일 목록 새로고침
+            await this.loadFileList();
+
+        } catch (error) {
+            console.error('❌ 프레임 추출 에러:', error);
+            alert(`프레임 추출 실패: ${error.message}`);
         }
     }
 

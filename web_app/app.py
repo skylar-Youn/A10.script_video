@@ -1667,9 +1667,9 @@ def extract_audio_sources(
                 if extract_vocal:
                     vocal_file = stem_dir / "vocals.wav"
                     if vocal_file.exists():
-                        # 파일 이름 변경
+                        # 파일 이름 변경 (🎤 이모지로 vocal 명확히 표시)
                         final_vocal = video_path.with_name(
-                            f"{video_path.stem}_vocal.wav"
+                            f"{video_path.stem}__🎤VOCAL.wav"
                         )
                         vocal_file.rename(final_vocal)
                         extracted_files.append(final_vocal)
@@ -1677,9 +1677,9 @@ def extract_audio_sources(
                 if extract_instruments:
                     instruments_file = stem_dir / "no_vocals.wav"
                     if instruments_file.exists():
-                        # 파일 이름 변경
+                        # 파일 이름 변경 (🎸 이모지로 instruments 명확히 표시)
                         final_instruments = video_path.with_name(
-                            f"{video_path.stem}_instruments.wav"
+                            f"{video_path.stem}__🎸INSTRUMENTS.wav"
                         )
                         instruments_file.rename(final_instruments)
                         extracted_files.append(final_instruments)
@@ -2660,6 +2660,9 @@ async def api_stream_video(path: str):
     Args:
         path: Absolute path to the video or subtitle file.
     """
+    import re
+    from fastapi.responses import Response
+
     file_path = Path(path)
 
     # 보안: 파일이 존재하고 실제 파일인지 확인
@@ -2674,6 +2677,29 @@ async def api_stream_video(path: str):
     if file_path.suffix.lower() not in supported_extensions:
         raise HTTPException(status_code=400, detail="지원하지 않는 파일 형식입니다.")
 
+    # SRT 파일을 WebVTT로 변환
+    if file_path.suffix.lower() == ".srt":
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                srt_content = f.read()
+
+            # SRT를 WebVTT로 변환
+            vtt_content = "WEBVTT\n\n" + re.sub(
+                r'(\d{2}):(\d{2}):(\d{2}),(\d{3})',
+                r'\1:\2:\3.\4',
+                srt_content
+            )
+
+            return Response(
+                content=vtt_content,
+                media_type="text/vtt; charset=utf-8",
+                headers={"Content-Disposition": f"inline; filename={file_path.stem}.vtt"}
+            )
+        except Exception as e:
+            logging.error(f"SRT to VTT conversion error: {e}")
+            # 변환 실패 시 원본 파일 반환
+            pass
+
     # MIME 타입 결정
     mime_types = {
         ".mp4": "video/mp4",
@@ -2684,7 +2710,7 @@ async def api_stream_video(path: str):
         ".flv": "video/x-flv",
         ".m4v": "video/mp4",
         ".wmv": "video/x-ms-wmv",
-        ".srt": "text/srt",
+        ".srt": "text/vtt",
         ".vtt": "text/vtt",
         ".ass": "text/x-ass",
         ".ssa": "text/x-ssa",
@@ -3821,6 +3847,14 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         subtitle_language_secondary = payload.get("subtitle_language_secondary", "")
         original_titles = payload.get("original_titles", [])
 
+        # 디버깅: 받은 데이터 로깅
+        logging.info(f"🔍 AI 분석 요청 데이터:")
+        logging.info(f"  - 프레임 수: {len(frames)}")
+        logging.info(f"  - 원본 제목 수: {len(original_titles)}")
+        logging.info(f"  - 원본 제목 목록: {original_titles}")
+        if frames:
+            logging.info(f"  - 첫 번째 프레임 시간: {frames[0].get('time', 'N/A')}초")
+
         # 언어별 지시사항
         language_instructions = {
             "korean": "한국어",
@@ -3859,14 +3893,33 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         if not frames:
             raise HTTPException(status_code=400, detail="분석할 프레임이 없습니다.")
 
+        # 각 프레임에 해당하는 제목 매칭
+        def match_title_for_frame(frame_time, titles):
+            """프레임 시간에 해당하는 자막 제목 찾기"""
+            for title in titles:
+                start_time = title.get('startTime', 0)
+                end_time = title.get('endTime', 0)
+                if start_time <= frame_time < end_time:
+                    return title.get('title')
+            return None
+
+        # 각 프레임에 제목 정보 추가
+        for i, frame in enumerate(frames, 1):
+            frame_time = frame.get('time', 0)
+            matched_title = match_title_for_frame(frame_time, original_titles)
+            frame['matched_title'] = matched_title
+            logging.info(f"  - 프레임 {i} ({frame_time}초): 매칭된 제목 = '{matched_title}'")
+
         # 원본 제목 정보 구성
         original_titles_text = ""
         if original_titles and len(original_titles) > 0:
-            titles_list = "\n".join([f"- [{t.get('frame')}] {t.get('title')}" for t in original_titles])
+            titles_list = "\n".join([f"- [{t.get('frame')}] {t.get('title')} ({t.get('startTime')}초~{t.get('endTime')}초)" for t in original_titles])
             original_titles_text = f"""
 **중요 - 원본 영상 제목 참고**:
-이 영상들의 원본 제목은 다음과 같습니다:
+이 영상들의 원본 제목과 시간 구간은 다음과 같습니다:
 {titles_list}
+
+**각 프레임은 해당 시간 구간의 제목을 기반으로 분석해야 합니다!**
 
 원본 제목의 키워드와 분위기를 **반드시** 반영하여 분석해주세요.
 예를 들어 "fight", "battle", "vs"가 포함되어 있다면 싸움이나 대립 상황으로,
@@ -3900,16 +3953,30 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 - 화면에 표시될 임팩트 있는 텍스트 (20자 이내)
 - 강조할 키워드나 문구"""
 
+            # 각 프레임별 제목 정보 구성
+            frame_title_info = "\n\n**각 프레임의 원본 영상 제목 (반드시 이 제목에 맞춰 분석하세요!)**:\n"
+            for i, frame in enumerate(frames, 1):
+                matched_title = frame.get('matched_title')
+                frame_time = frame.get('time', 0)
+                if matched_title:
+                    frame_title_info += f"- 프레임 {i} ({frame_time}초): \"{matched_title}\" ← 이 제목 기반으로 분석!\n"
+                else:
+                    frame_title_info += f"- 프레임 {i} ({frame_time}초): 제목 없음\n"
+
             # 프롬프트 생성
             prompts = {
-                "shorts-production": f"""{original_titles_text}다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
+                "shorts-production": f"""{original_titles_text}{frame_title_info}
+
+다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
 이 프레임들을 바탕으로 YouTube 쇼츠(Shorts) 제작을 위한 종합 분석을 해주세요.
 
 {lang_instruction}
 
 다음 형식으로 각 프레임별로 분석해주세요:
 
-## 프레임 [번호]: [타임스탬프]
+## 프레임 [번호]: [타임스탬프] - 원본 제목: "[해당 제목]"
+
+⚠️ **중요**: 위에 명시된 각 프레임의 원본 제목을 **반드시** 참고하여 그 제목의 내용과 분위기에 맞게 분석하세요!
 
 ### 1. 시청자용 콘텐츠 설명
 - 이 장면에서 전달하려는 핵심 메시지

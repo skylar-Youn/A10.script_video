@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 
 from .config import BASE_DIR, TEMPLATES_DIR, STATIC_DIR, DOWNLOAD_DIR
 from .routers import files, analysis, media
@@ -23,6 +24,15 @@ app = FastAPI(
     title="유튜브 비디오 분석 도구",
     description="설계도에 따른 완전한 분석 도구 (리팩토링됨)",
     version="2.0.0"
+)
+
+# CORS 미들웨어 추가
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 정적 파일 및 템플릿 설정
@@ -44,6 +54,12 @@ async def analysis_main_page(request: Request):
 @app.get("/analysis", response_class=HTMLResponse)
 async def analysis_page(request: Request):
     """분석 페이지 (메인과 동일)"""
+    return templates.TemplateResponse("analysis.html", {"request": request})
+
+
+@app.get("/video-analyzer", response_class=HTMLResponse)
+async def video_analyzer_page(request: Request):
+    """비디오 분석 페이지 (메인과 동일)"""
     return templates.TemplateResponse("analysis.html", {"request": request})
 
 

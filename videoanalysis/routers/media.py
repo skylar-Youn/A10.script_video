@@ -465,3 +465,97 @@ async def analyze_audio_volumes_api(request: dict = Body(...)):
     except Exception as e:
         logger.exception(f"Volume analysis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/extract-video-frame")
+async def extract_video_frame_api(request: dict = Body(...)):
+    """비디오에서 특정 시간의 프레임을 이미지로 추출"""
+    import subprocess
+    import tempfile
+    from fastapi.responses import FileResponse
+    from datetime import datetime
+
+    try:
+        video_path = request.get("video_path")
+        timestamp = request.get("timestamp", 0)  # 초 단위
+        output_format = request.get("format", "png")  # png, jpg
+
+        if not video_path:
+            raise HTTPException(status_code=400, detail="video_path is required")
+
+        if not os.path.exists(video_path):
+            raise HTTPException(status_code=404, detail=f"Video file not found: {video_path}")
+
+        # 비디오 파일인지 확인
+        video_ext = os.path.splitext(video_path)[1].lower()
+        if video_ext not in ['.mp4', '.webm', '.avi', '.mov', '.mkv']:
+            raise HTTPException(
+                status_code=400,
+                detail="지원되지 않는 비디오 형식입니다"
+            )
+
+        # 출력 파일 경로 생성
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+        output_dir = os.path.dirname(video_path)
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"{base_name}_frame_{timestamp:.2f}s_{timestamp_str}.{output_format}"
+        output_path = os.path.join(output_dir, output_filename)
+
+        logger.info(f"Extracting frame from {video_path} at {timestamp}s")
+
+        # FFmpeg 명령어 구성
+        cmd = [
+            'ffmpeg', '-y',
+            '-ss', str(timestamp),  # 시작 시간
+            '-i', video_path,
+            '-frames:v', '1',  # 1프레임만
+            '-q:v', '2',  # 고품질 (2가 최고)
+            output_path
+        ]
+
+        logger.info(f"Running FFmpeg command: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30  # 30초 타임아웃
+        )
+
+        if result.returncode != 0:
+            logger.error(f"FFmpeg error: {result.stderr}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"FFmpeg failed: {result.stderr[:500]}"
+            )
+
+        # 파일 존재 확인
+        if not os.path.exists(output_path):
+            raise HTTPException(
+                status_code=500,
+                detail="Frame image was not created"
+            )
+
+        # 파일 정보
+        file_size = os.path.getsize(output_path)
+
+        logger.info(f"Frame extracted successfully: {output_path}")
+
+        return {
+            "status": "success",
+            "output_path": output_path,
+            "output_filename": output_filename,
+            "format": output_format,
+            "timestamp": timestamp,
+            "size_bytes": file_size,
+            "size_kb": round(file_size / 1024, 2)
+        }
+
+    except subprocess.TimeoutExpired:
+        logger.error("FFmpeg timeout")
+        raise HTTPException(status_code=500, detail="Frame extraction timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Frame extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
