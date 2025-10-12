@@ -3833,12 +3833,26 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 
         if subtitle_language_secondary and subtitle_language_secondary != "":
             secondary_lang = language_instructions.get(subtitle_language_secondary, "")
-            lang_instruction = f"""**중요 - 자막 언어 지시사항**:
-- **기본 자막 (2-0)**: 한국어로 작성 (모든 사용자용 기본 자막)
-- **주 자막 (2-1, 상단)**: {primary_lang}로 작성
-- **보조 자막 (2-2, 하단)**: {secondary_lang}로 작성
-- 각 프레임마다 **세 가지 언어로 자막을 모두 제공**해주세요.
-- 형식: "### 2-0. 한글 자막", "### 2-1. 주 자막 ({primary_lang})", "### 2-2. 보조 자막 ({secondary_lang})" 순서로 작성"""
+            lang_instruction = f"""**🚨 필수 - 자막 언어 지시사항 🚨**:
+
+각 프레임마다 반드시 다음 **3개의 자막을 모두 작성**해야 합니다:
+
+1️⃣ **2-0. 한글 자막 (기본 자막)** ← 필수!
+   - 반드시 한국어로 작성
+   - 모든 한국 사용자를 위한 기본 자막
+   - 예시: "개와 고양이의 대결!"
+
+2️⃣ **2-1. 주 자막 ({primary_lang})** ← 필수!
+   - 반드시 {primary_lang}로 작성
+   - 화면 상단 배치용
+   - 예시: "Epic Pet Battle!"
+
+3️⃣ **2-2. 보조 자막 ({secondary_lang})** ← 필수!
+   - 반드시 {secondary_lang}로 작성
+   - 화면 하단 배치용
+   - 예시: "ペット大決闘！"
+
+⚠️ **중요**: 하나라도 빠뜨리지 말고 반드시 세 개 모두 작성하세요!"""
         else:
             lang_instruction = f"**중요**: 모든 자막과 나레이션은 **{primary_lang}**로 작성해주세요."
 
@@ -3867,17 +3881,20 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         else:
             # 자막 섹션 구성
             if subtitle_language_secondary and subtitle_language_secondary != "":
-                subtitle_section = f"""### 2-0. 한글 자막 (기본 자막)
-- 한국어로 작성된 기본 자막 (20자 이내)
-- 모든 한국 사용자를 위한 자막
+                subtitle_section = f"""### 2-0. 한글 자막 (기본 자막) ✅ 필수
+- 한국어로 작성 (20자 이내)
+- 원본 영상 제목의 키워드를 반영한 임팩트 있는 한글 문구
+- 예: "개와 고양이 격투!", "우정의 시작"
 
-### 2-1. 주 자막 ({primary_lang}) - 상단 배치용
-- 화면 상단에 표시될 임팩트 있는 텍스트 (20자 이내)
-- 강조할 키워드나 문구
+### 2-1. 주 자막 ({primary_lang}) - 상단 배치용 ✅ 필수
+- {primary_lang}로 작성 (20자 이내)
+- 화면 상단에 표시될 임팩트 있는 텍스트
+- 원본 영상 제목의 키워드를 반영
 
-### 2-2. 보조 자막 ({secondary_lang}) - 하단 배치용
-- 화면 하단에 표시될 임팩트 있는 텍스트 (20자 이내)
-- 강조할 키워드나 문구"""
+### 2-2. 보조 자막 ({secondary_lang}) - 하단 배치용 ✅ 필수
+- {secondary_lang}로 작성 (20자 이내)
+- 화면 하단에 표시될 임팩트 있는 텍스트
+- 원본 영상 제목의 키워드를 반영"""
             else:
                 subtitle_section = """### 2. 화면 텍스트 (자막/캡션)
 - 화면에 표시될 임팩트 있는 텍스트 (20자 이내)
@@ -3899,7 +3916,19 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 - 시청자가 느껴야 할 감정이나 반응
 - 주목해야 할 포인트
 
+**중요: 다음 자막 섹션은 모두 필수입니다. 반드시 모든 섹션을 작성하세요!**
+
 {subtitle_section}
+
+**자막 작성 예시:**
+### 2-0. 한글 자막 (기본 자막)
+- "개와 고양이의 대결!"
+
+### 2-1. 주 자막 (English) - 상단 배치용
+- "Epic Pet Battle!"
+
+### 2-2. 보조 자막 (日本語) - 하단 배치용
+- "ペット大決闘！"
 
 ### 3. 나레이션 스크립트
 - 보이스오버로 읽을 대사 (자연스럽고 구어체로)
