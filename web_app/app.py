@@ -3819,6 +3819,7 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         custom_prompt = payload.get("custom_prompt")
         subtitle_language_primary = payload.get("subtitle_language_primary", "korean")
         subtitle_language_secondary = payload.get("subtitle_language_secondary", "")
+        original_titles = payload.get("original_titles", [])
 
         # 언어별 지시사항
         language_instructions = {
@@ -3843,9 +3844,25 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         if not frames:
             raise HTTPException(status_code=400, detail="분석할 프레임이 없습니다.")
 
+        # 원본 제목 정보 구성
+        original_titles_text = ""
+        if original_titles and len(original_titles) > 0:
+            titles_list = "\n".join([f"- [{t.get('frame')}] {t.get('title')}" for t in original_titles])
+            original_titles_text = f"""
+**중요 - 원본 영상 제목 참고**:
+이 영상들의 원본 제목은 다음과 같습니다:
+{titles_list}
+
+원본 제목의 키워드와 분위기를 **반드시** 반영하여 분석해주세요.
+예를 들어 "fight", "battle", "vs"가 포함되어 있다면 싸움이나 대립 상황으로,
+"friendship", "love", "together"가 포함되어 있다면 우정이나 친밀함으로 해석해주세요.
+원본 제목을 무시하고 임의로 해석하지 마세요.
+
+"""
+
         # 커스텀 프롬프트가 제공되면 사용, 아니면 기본 프롬프트 사용
         if analysis_type == "custom" and custom_prompt:
-            prompt = custom_prompt
+            prompt = original_titles_text + custom_prompt
         else:
             # 자막 섹션 구성
             if subtitle_language_secondary and subtitle_language_secondary != "":
@@ -3863,7 +3880,7 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 
             # 프롬프트 생성
             prompts = {
-                "shorts-production": f"""다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
+                "shorts-production": f"""{original_titles_text}다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
 이 프레임들을 바탕으로 YouTube 쇼츠(Shorts) 제작을 위한 종합 분석을 해주세요.
 
 {lang_instruction}
@@ -3903,7 +3920,7 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 
 전체 쇼츠는 60초 이내로 구성됩니다. 각 프레임이 전체 스토리 흐름에서 어떤 역할을 하는지 고려해주세요.""",
 
-                "scene-description": f"""다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
+                "scene-description": f"""{original_titles_text}다음은 '{video_name}' 영상에서 추출한 {len(frames)}개의 프레임입니다.
 각 프레임을 상세히 분석하여 다음 정보를 제공해주세요:
 
 1. 각 프레임의 장면 설명 (무엇이 보이는지, 어떤 상황인지)
@@ -3913,7 +3930,7 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 
 프레임 순서대로 분석해주세요.""",
 
-                "object-detection": f"""'{video_name}' 영상의 {len(frames)}개 프레임에서 보이는 모든 객체를 인식하고 나열해주세요.
+                "object-detection": f"""{original_titles_text}'{video_name}' 영상의 {len(frames)}개 프레임에서 보이는 모든 객체를 인식하고 나열해주세요.
 
 각 프레임별로:
 - 사람 (수, 성별, 연령대 등)
@@ -3923,7 +3940,7 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 
 을 자세히 분석해주세요.""",
 
-                "text-extraction": f"""'{video_name}' 영상의 {len(frames)}개 프레임에서 보이는 모든 텍스트를 추출해주세요.
+                "text-extraction": f"""{original_titles_text}'{video_name}' 영상의 {len(frames)}개 프레임에서 보이는 모든 텍스트를 추출해주세요.
 
 각 프레임별로:
 - 화면에 표시된 모든 텍스트
@@ -3933,7 +3950,7 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 
 을 분석해주세요.""",
 
-                "story-flow": f"""'{video_name}' 영상의 {len(frames)}개 프레임을 시간순으로 분석하여 스토리의 흐름을 파악해주세요.
+                "story-flow": f"""{original_titles_text}'{video_name}' 영상의 {len(frames)}개 프레임을 시간순으로 분석하여 스토리의 흐름을 파악해주세요.
 
 다음을 포함해주세요:
 - 전체 스토리 요약
@@ -3943,7 +3960,7 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 
 영상의 내러티브를 이해할 수 있도록 분석해주세요.""",
 
-                "thumbnail-suggest": f"""'{video_name}' 영상의 {len(frames)}개 프레임 중에서 썸네일로 사용하기 가장 좋은 프레임을 추천해주세요.
+                "thumbnail-suggest": f"""{original_titles_text}'{video_name}' 영상의 {len(frames)}개 프레임 중에서 썸네일로 사용하기 가장 좋은 프레임을 추천해주세요.
 
 다음 기준으로 평가해주세요:
 - 시각적 임팩트
