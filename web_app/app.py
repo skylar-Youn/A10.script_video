@@ -3983,6 +3983,157 @@ async def api_delete_video_file(payload: Dict[str, Any] = Body(...)) -> Dict[str
         raise HTTPException(status_code=500, detail=f"파일 삭제 실패: {str(e)}")
 
 
+@app.post("/api/video-analyzer/translate-subtitles")
+async def api_translate_subtitles(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """자막 번역 API"""
+    import os
+
+    try:
+        subtitles = payload.get("subtitles", [])
+        target_lang = payload.get("target_lang", "en")
+
+        if not subtitles:
+            raise HTTPException(status_code=400, detail="번역할 자막이 없습니다.")
+
+        logging.info(f"자막 번역 시작: {len(subtitles)}개 자막을 {target_lang}로 번역")
+
+        # 언어 코드를 언어 이름으로 변환
+        lang_names = {
+            'en': 'English',
+            'ja': 'Japanese',
+            'zh': 'Chinese',
+            'es': 'Spanish',
+            'fr': 'French',
+            'de': 'German',
+            'vi': 'Vietnamese',
+            'th': 'Thai'
+        }
+        target_lang_name = lang_names.get(target_lang, target_lang)
+
+        # Anthropic API 사용 (Claude)
+        try:
+            import anthropic
+
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY가 설정되지 않았습니다.")
+
+            client = anthropic.Anthropic(api_key=api_key)
+
+            # 자막 텍스트만 추출
+            subtitle_texts = [sub.get('text', '') for sub in subtitles]
+
+            # 번역 요청
+            prompt = f"""Translate the following subtitles to {target_lang_name}.
+Keep the same number of lines and maintain the timing structure.
+Only return the translated text for each subtitle, one per line, without any additional formatting or explanations.
+
+Original subtitles:
+{chr(10).join(subtitle_texts)}"""
+
+            message = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=8000,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            # 번역 결과 파싱
+            translated_text = message.content[0].text
+            translated_lines = translated_text.strip().split('\n')
+
+            # 번역된 텍스트를 원본 자막 구조에 매핑
+            translated_subtitles = []
+            for i, subtitle in enumerate(subtitles):
+                if i < len(translated_lines):
+                    translated_subtitles.append({
+                        'start': subtitle.get('start'),
+                        'end': subtitle.get('end'),
+                        'text': translated_lines[i].strip()
+                    })
+                else:
+                    # 번역 결과가 부족한 경우 원본 유지
+                    translated_subtitles.append(subtitle)
+
+            logging.info(f"번역 완료: {len(translated_subtitles)}개 자막")
+
+            return {
+                "success": True,
+                "translated_subtitles": translated_subtitles,
+                "target_lang": target_lang,
+                "count": len(translated_subtitles)
+            }
+
+        except ImportError:
+            # Anthropic이 없으면 OpenAI 시도
+            try:
+                import openai
+
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
+
+                client = openai.OpenAI(api_key=api_key)
+
+                # 자막 텍스트만 추출
+                subtitle_texts = [sub.get('text', '') for sub in subtitles]
+
+                # 번역 요청
+                prompt = f"""Translate the following subtitles to {target_lang_name}.
+Keep the same number of lines and maintain the timing structure.
+Only return the translated text for each subtitle, one per line, without any additional formatting or explanations.
+
+Original subtitles:
+{chr(10).join(subtitle_texts)}"""
+
+                response = client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=8000
+                )
+
+                # 번역 결과 파싱
+                translated_text = response.choices[0].message.content
+                translated_lines = translated_text.strip().split('\n')
+
+                # 번역된 텍스트를 원본 자막 구조에 매핑
+                translated_subtitles = []
+                for i, subtitle in enumerate(subtitles):
+                    if i < len(translated_lines):
+                        translated_subtitles.append({
+                            'start': subtitle.get('start'),
+                            'end': subtitle.get('end'),
+                            'text': translated_lines[i].strip()
+                        })
+                    else:
+                        # 번역 결과가 부족한 경우 원본 유지
+                        translated_subtitles.append(subtitle)
+
+                logging.info(f"번역 완료: {len(translated_subtitles)}개 자막")
+
+                return {
+                    "success": True,
+                    "translated_subtitles": translated_subtitles,
+                    "target_lang": target_lang,
+                    "count": len(translated_subtitles)
+                }
+
+            except ImportError:
+                raise HTTPException(
+                    status_code=500,
+                    detail="번역 API 라이브러리가 설치되지 않았습니다. anthropic 또는 openai 패키지를 설치해주세요."
+                )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("자막 번역 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"자막 번역 실패: {str(e)}")
+
+
 @app.post("/api/ytdl/start")
 async def api_start_download(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """백그라운드로 다운로드 시작"""
