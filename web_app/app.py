@@ -3846,6 +3846,7 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
         subtitle_language_primary = payload.get("subtitle_language_primary", "korean")
         subtitle_language_secondary = payload.get("subtitle_language_secondary", "")
         original_titles = payload.get("original_titles", [])
+        structured_output_enabled = analysis_type == "shorts-production"
 
         # 디버깅: 받은 데이터 로깅
         logging.info(f"🔍 AI 분석 요청 데이터:")
@@ -4074,6 +4075,42 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
 
             prompt = prompts.get(analysis_type, prompts["scene-description"])
 
+        if structured_output_enabled:
+            json_instruction = r"""
+출력 형식 규칙:
+- 반드시 **하나의 JSON 객체**만 반환하세요.
+- 어떠한 설명, 마크다운, 코드 블록, 텍스트도 JSON 외에는 포함하지 마세요.
+- JSON은 다음 키를 모두 포함해야 합니다:
+  {
+    "analysis_markdown": "string. 섹션마다 🔥, 🎯 등의 이모지를 활용한 Markdown. YouTube 제목/부제목, 프레임별 분석, 편집 노트를 포함.",
+    "youtube_package": {
+      "icon": "string. 예: \"🔥\"",
+      "title": "string. 60자 이하, 한국어 YouTube 제목",
+      "subtitle": "string. 80자 이하, 보조 제목 또는 훅",
+      "description": "string. 1~2문장 요약",
+      "tags": ["string", "..."]
+    },
+    "timeline_segments": [
+      {
+        "frame_index": 1,
+        "time_seconds": 0.0,
+        "duration_seconds": 3.0,
+        "headline": "string. 아이콘 포함 권장 (예: \"🔥 임팩트 훅\")",
+        "korean_caption": "string. 20자 이내",
+        "primary_caption": "string. 20자 이내",
+        "secondary_caption": "string. 20자 이내. 없으면 빈 문자열",
+        "narration": "string. 2~3문장",
+        "notes": "string. 편집/이미지 프롬프트/효과 등 제안",
+        "icon": "string. 예: \"🔥\""
+      }
+    ],
+    "download_text": "string. 제목, 부제목, 타임라인 요약을 한글 위주로 정리한 텍스트"
+  }
+- 모든 문자열은 JSON에서 올바르게 이스케이프 처리하세요.
+- timeline_segments 배열은 선택한 프레임과 동일한 순서를 유지하세요.
+"""
+            prompt = f"{prompt}\n\n{json_instruction}"
+
         # AI 모델별 처리
         if model in ["sonnet", "haiku"]:
             # Claude API 사용
@@ -4097,11 +4134,19 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
                     }
                 })
 
-            message = client.messages.create(
-                model=model_map[model],
-                max_tokens=4000,
-                messages=[{"role": "user", "content": content}]
-            )
+            message_kwargs: Dict[str, Any] = {
+                "model": model_map[model],
+                "max_tokens": 4000,
+                "messages": [{"role": "user", "content": content}],
+            }
+
+            if structured_output_enabled:
+                message_kwargs["system"] = (
+                    "You are an elite video editor assistant. "
+                    "Follow the user's instructions exactly and respond with a single valid JSON object only."
+                )
+
+            message = client.messages.create(**message_kwargs)
 
             analysis_result = message.content[0].text
 
@@ -4125,22 +4170,98 @@ async def api_analyze_frames_with_ai(payload: Dict[str, Any] = Body(...)) -> Dic
                     }
                 })
 
-            response = client.chat.completions.create(
-                model=model_map.get(model, "gpt-4o-mini"),
-                messages=[{"role": "user", "content": content}],
-                max_tokens=4000
-            )
+            response_kwargs: Dict[str, Any] = {
+                "model": model_map.get(model, "gpt-4o-mini"),
+                "messages": [{"role": "user", "content": content}],
+                "max_tokens": 4000,
+            }
+
+            if structured_output_enabled:
+                response_kwargs["response_format"] = {"type": "json_object"}
+
+            response = client.chat.completions.create(**response_kwargs)
 
             analysis_result = response.choices[0].message.content
+
+        analysis_package: Optional[Dict[str, Any]] = None
+        analysis_text = analysis_result
+
+        if structured_output_enabled:
+            def try_parse_json(raw_text: str) -> Optional[Dict[str, Any]]:
+                raw_text = (raw_text or "").strip()
+                if not raw_text:
+                    return None
+                try:
+                    return json.loads(raw_text)
+                except json.JSONDecodeError:
+                    start = raw_text.find("{")
+                    end = raw_text.rfind("}")
+                    if start != -1 and end != -1 and end > start:
+                        try:
+                            return json.loads(raw_text[start : end + 1])
+                        except json.JSONDecodeError:
+                            return None
+                    return None
+
+            def seconds_to_srt(seconds: float) -> str:
+                total_ms = max(int(round(seconds * 1000)), 0)
+                hours, remainder = divmod(total_ms, 3600_000)
+                minutes, remainder = divmod(remainder, 60_000)
+                secs, milliseconds = divmod(remainder, 1000)
+                return f"{hours:02}:{minutes:02}:{secs:02},{milliseconds:03}"
+
+            analysis_package = try_parse_json(analysis_result)
+
+            if analysis_package:
+                segments = analysis_package.get("timeline_segments") or []
+                processed_segments: List[Dict[str, Any]] = []
+
+                for segment in segments:
+                    if not isinstance(segment, dict):
+                        continue
+
+                    time_seconds = segment.get("time_seconds", 0.0)
+                    duration_seconds = segment.get("duration_seconds", 3.0)
+
+                    try:
+                        time_seconds = float(time_seconds)
+                    except (TypeError, ValueError):
+                        time_seconds = 0.0
+
+                    try:
+                        duration_seconds = float(duration_seconds)
+                    except (TypeError, ValueError):
+                        duration_seconds = 3.0
+
+                    if duration_seconds <= 0:
+                        duration_seconds = 3.0
+
+                    start_seconds = max(time_seconds, 0.0)
+                    end_seconds = start_seconds + duration_seconds
+
+                    segment["time_seconds"] = round(time_seconds, 3)
+                    segment["duration_seconds"] = round(duration_seconds, 3)
+                    segment["start_seconds"] = round(start_seconds, 3)
+                    segment["end_seconds"] = round(end_seconds, 3)
+                    segment["start_srt"] = seconds_to_srt(segment["start_seconds"])
+                    segment["end_srt"] = seconds_to_srt(segment["end_seconds"])
+
+                    processed_segments.append(segment)
+
+                analysis_package["timeline_segments"] = processed_segments
+                analysis_text = analysis_package.get("analysis_markdown") or analysis_text
+            else:
+                logging.warning("⚠️ AI JSON 응답을 파싱하지 못했습니다. 원시 텍스트를 사용합니다.")
 
         logging.info(f"AI 프레임 분석 완료: {len(frames)}개 프레임, 모델: {model}, 타입: {analysis_type}")
 
         return {
             "success": True,
-            "analysis_result": analysis_result,
+            "analysis_result": analysis_text,
             "frames_count": len(frames),
             "model": model,
-            "analysis_type": analysis_type
+            "analysis_type": analysis_type,
+            "analysis_package": analysis_package,
         }
 
     except HTTPException:

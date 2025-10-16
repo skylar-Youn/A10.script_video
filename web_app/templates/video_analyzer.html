@@ -1085,6 +1085,24 @@
                             </div>
                         </div>
                     </div>
+                    <div id="frame-ai-package" style="display: none; margin-bottom: 12px; padding: 14px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(15, 185, 129, 0.35); border-radius: 10px; backdrop-filter: blur(4px);">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap;">
+                            <div style="display: flex; gap: 12px; align-items: flex-start;">
+                                <div id="frame-ai-package-icon" style="font-size: 2.2rem; filter: drop-shadow(0 0 6px rgba(252, 211, 77, 0.5));">🔥</div>
+                                <div>
+                                    <div id="frame-ai-package-title" style="font-size: 1.2rem; font-weight: 700; color: #fcd34d; margin-bottom: 4px;">제목을 불러오는 중...</div>
+                                    <div id="frame-ai-package-subtitle" style="font-size: 0.95rem; color: #e0e6ed; margin-bottom: 6px;">부제목을 불러오는 중...</div>
+                                    <div id="frame-ai-package-description" style="font-size: 0.85rem; color: #94a3b8;"></div>
+                                    <div id="frame-ai-package-tags" style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;"></div>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button onclick="downloadFrameAiPackage()" class="btn-secondary" style="padding: 6px 12px; background: #0ea5e9; font-size: 0.85rem; font-weight: 600;" title="AI 패키지를 JSON으로 다운로드">💾 패키지 저장</button>
+                                <button onclick="pushFrameAiToTimeline()" class="btn-secondary" style="padding: 6px 12px; background: #f97316; font-size: 0.85rem; font-weight: 600;" title="타임라인 보조자막 트랙에 적용">⏱️ 타임라인 적용</button>
+                            </div>
+                        </div>
+                        <div id="frame-ai-segment-list" style="margin-top: 12px; display: grid; gap: 8px;"></div>
+                    </div>
                     <textarea id="frame-analysis-content" style="width: 100%; min-height: 300px; padding: 15px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; color: #e0e6ed; font-family: 'Noto Sans KR', sans-serif; font-size: 0.95rem; line-height: 1.6; resize: vertical;" placeholder="✨ 프레임을 선택하고 &quot;🤖 분석 시작&quot; 버튼을 클릭하면 쇼츠 제작을 위한 종합 분석 결과가 여기에 표시됩니다.
 
 📝 포함 내용: 시청자용 콘텐츠 설명, 화면 텍스트(자막), 나레이션 스크립트, AI 이미지 생성 프롬프트, 편집 노트
@@ -4653,6 +4671,227 @@ function downloadFile(content, filename, mimeType) {
     URL.revokeObjectURL(url);
 }
 
+// AI 패키지 UI 업데이트
+function updateFrameAiPackageUI(packageData) {
+    const container = document.getElementById('frame-ai-package');
+    const iconEl = document.getElementById('frame-ai-package-icon');
+    const titleEl = document.getElementById('frame-ai-package-title');
+    const subtitleEl = document.getElementById('frame-ai-package-subtitle');
+    const descEl = document.getElementById('frame-ai-package-description');
+    const tagsEl = document.getElementById('frame-ai-package-tags');
+
+    if (!container) return;
+
+    if (!packageData) {
+        container.style.display = 'none';
+        if (titleEl) titleEl.textContent = '';
+        if (subtitleEl) subtitleEl.textContent = '';
+        if (descEl) {
+            descEl.textContent = '';
+            descEl.style.display = 'none';
+        }
+        if (tagsEl) tagsEl.innerHTML = '';
+        const segmentListEl = document.getElementById('frame-ai-segment-list');
+        if (segmentListEl) segmentListEl.innerHTML = '';
+        return;
+    }
+
+    container.style.display = 'block';
+
+    const youtubePackage = packageData.youtube_package || {};
+
+    if (iconEl) {
+        iconEl.textContent = youtubePackage.icon || '🔥';
+    }
+
+    if (titleEl) {
+        titleEl.textContent = youtubePackage.title || 'AI가 제목을 생성하지 못했습니다';
+    }
+
+    if (subtitleEl) {
+        subtitleEl.textContent = youtubePackage.subtitle || '';
+        subtitleEl.style.display = youtubePackage.subtitle ? 'block' : 'none';
+    }
+
+    if (descEl) {
+        descEl.textContent = youtubePackage.description || '';
+        descEl.style.display = youtubePackage.description ? 'block' : 'none';
+    }
+
+    if (tagsEl) {
+        tagsEl.innerHTML = '';
+        if (Array.isArray(youtubePackage.tags) && youtubePackage.tags.length > 0) {
+            youtubePackage.tags.slice(0, 8).forEach((tag) => {
+                const tagEl = document.createElement('span');
+                tagEl.textContent = `#${String(tag || '').replace(/^#/, '')}`;
+                tagEl.style.cssText = 'background: rgba(252, 211, 77, 0.12); border: 1px solid rgba(252, 211, 77, 0.3); color: #fcd34d; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem;';
+                tagsEl.appendChild(tagEl);
+            });
+        }
+    }
+
+    renderFrameAiSegmentList(packageData.timeline_segments || []);
+}
+
+// 타임라인 요약 렌더링
+function renderFrameAiSegmentList(segments) {
+    const segmentListEl = document.getElementById('frame-ai-segment-list');
+    if (!segmentListEl) return;
+
+    segmentListEl.innerHTML = '';
+
+    if (!Array.isArray(segments) || segments.length === 0) {
+        const emptyEl = document.createElement('div');
+        emptyEl.textContent = '타임라인 제안이 아직 없습니다.';
+        emptyEl.style.cssText = 'color: #94a3b8; font-size: 0.85rem;';
+        segmentListEl.appendChild(emptyEl);
+        return;
+    }
+
+    segments.forEach((segment, index) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex; gap:10px; align-items:flex-start; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 8px 12px;';
+
+        const icon = document.createElement('div');
+        icon.textContent = segment.icon || '🔥';
+        icon.style.cssText = 'font-size:1.4rem; line-height:1;';
+
+        const body = document.createElement('div');
+        body.style.cssText = 'display:flex; flex-direction:column; gap:4px; flex:1;';
+
+        const headline = document.createElement('div');
+        headline.textContent = segment.headline || `세그먼트 ${index + 1}`;
+        headline.style.cssText = 'color:#e2e8f0; font-weight:600; font-size:0.95rem;';
+
+        const timing = document.createElement('div');
+        const startDisplay = segment.start_srt || secondsToSrt(segment.start_seconds || 0);
+        const endDisplay = segment.end_srt || secondsToSrt(segment.end_seconds || 0);
+        timing.textContent = `${startDisplay} → ${endDisplay}`;
+        timing.style.cssText = 'color:#94a3b8; font-size:0.75rem;';
+
+        body.appendChild(headline);
+        body.appendChild(timing);
+
+        const captionText = segment.korean_caption || segment.primary_caption || segment.secondary_caption || '';
+        if (captionText) {
+            const caption = document.createElement('div');
+            caption.textContent = captionText;
+            caption.style.cssText = 'color:#f8fafc; font-size:0.8rem;';
+            body.appendChild(caption);
+        }
+
+        if (segment.narration) {
+            const narration = document.createElement('div');
+            narration.textContent = `🎙️ ${segment.narration}`;
+            narration.style.cssText = 'color:#38bdf8; font-size:0.75rem;';
+            body.appendChild(narration);
+        }
+
+        if (segment.notes) {
+            const notes = document.createElement('div');
+            notes.textContent = `💡 ${segment.notes}`;
+            notes.style.cssText = 'color:#fbbf24; font-size:0.75rem;';
+            body.appendChild(notes);
+        }
+
+        item.appendChild(icon);
+        item.appendChild(body);
+        segmentListEl.appendChild(item);
+    });
+}
+
+// AI 패키지 적용
+function applyFrameAnalysisPackage(packageData) {
+    if (!packageData || typeof packageData !== 'object') {
+        currentFrameAiPackage = null;
+        updateFrameAiPackageUI(null);
+        return;
+    }
+
+    currentFrameAiPackage = packageData;
+    updateFrameAiPackageUI(packageData);
+
+    const youtubePackage = packageData.youtube_package || {};
+    const titleInput = document.getElementById('overlay-title-input');
+    if (titleInput && youtubePackage.title) {
+        if (!titleInput.value || titleInput.value === '' || titleInput.value === titleInput.placeholder) {
+            titleInput.value = youtubePackage.title;
+        }
+    }
+
+    const subtitleInput = document.getElementById('overlay-subtitle-input');
+    if (subtitleInput && youtubePackage.subtitle) {
+        if (!subtitleInput.value || subtitleInput.value === '' || subtitleInput.value === subtitleInput.placeholder) {
+            subtitleInput.value = youtubePackage.subtitle;
+        }
+    }
+
+    const firstSegment = Array.isArray(packageData.timeline_segments) && packageData.timeline_segments.length > 0
+        ? packageData.timeline_segments[0]
+        : null;
+
+    if (firstSegment) {
+        const koreanInput = document.getElementById('overlay-korean-input');
+        if (koreanInput && firstSegment.korean_caption) {
+            if (!koreanInput.value || koreanInput.value === '' || koreanInput.value === koreanInput.placeholder) {
+                koreanInput.value = firstSegment.korean_caption;
+            }
+        }
+
+        const englishInput = document.getElementById('overlay-english-input');
+        if (englishInput && firstSegment.primary_caption) {
+            if (!englishInput.value || englishInput.value === '' || englishInput.value === englishInput.placeholder) {
+                englishInput.value = firstSegment.primary_caption;
+            }
+        }
+    }
+
+    if (typeof updateTextOverlays === 'function') {
+        setTimeout(() => updateTextOverlays(), 0);
+    }
+}
+
+// AI 패키지 다운로드
+function downloadFrameAiPackage() {
+    if (!currentFrameAiPackage) {
+        alert('저장할 AI 패키지가 없습니다. 먼저 분석을 실행해주세요.');
+        return;
+    }
+
+    const baseName = (currentVideoInfo?.name || 'video').replace(/\.[^.]+$/, '');
+    const filename = `${baseName}_ai_package.json`;
+    downloadJSON(currentFrameAiPackage, filename);
+    alert(`💾 "${filename}" 파일이 다운로드되었습니다.`);
+}
+
+// 타임라인에 패키지 적용
+function pushFrameAiToTimeline() {
+    if (!currentFrameAiPackage || !Array.isArray(currentFrameAiPackage.timeline_segments) || currentFrameAiPackage.timeline_segments.length === 0) {
+        alert('타임라인에 추가할 AI 세그먼트가 없습니다.');
+        return;
+    }
+
+    const subtitles = currentFrameAiPackage.timeline_segments.map((segment, index) => {
+        const start = segment.start_srt || secondsToSrt(segment.start_seconds || 0);
+        const end = segment.end_srt || secondsToSrt(segment.end_seconds || 0);
+        const icon = segment.icon || '🔥';
+        const caption = segment.korean_caption || segment.primary_caption || segment.secondary_caption || segment.headline || `세그먼트 ${index + 1}`;
+
+        return {
+            start,
+            end,
+            text: `${icon} ${caption}`.trim()
+        };
+    });
+
+    loadedSubtitles.description = subtitles;
+    loadedSubtitleFiles.description = 'AI 패키지';
+    updateSubtitleFileDisplay();
+    displaySubtitlesOnTimeline(subtitles, 'description');
+
+    alert('✅ AI 타임라인 제안을 보조자막 트랙에 적용했습니다.');
+}
+
 // 프레임 분석 결과 전체 저장 (파일로)
 function saveFrameAnalysisResult() {
     const resultContent = document.getElementById('frame-analysis-content').value;
@@ -4691,7 +4930,8 @@ function saveAnalysisToStorage() {
             name: name,
             videoName: currentVideoInfo.name || 'unknown',
             content: resultContent,
-            frameCount: document.querySelectorAll('.frame-item').length
+            frameCount: document.querySelectorAll('.frame-item').length,
+            analysisPackage: currentFrameAiPackage
         };
 
         // 기존 저장 목록 가져오기
@@ -4813,6 +5053,8 @@ function loadAnalysisFromStorage(id) {
     const contentDiv = document.getElementById('frame-analysis-content');
     resultDiv.style.display = 'block';
     contentDiv.value = analysis.content;
+
+    applyFrameAnalysisPackage(analysis.analysisPackage || null);
 
     // 백드롭 제거
     const backdrop = document.getElementById('dialog-backdrop');
@@ -4947,6 +5189,9 @@ async function generateNewShortsContent() {
     const resultDiv = document.getElementById('frame-analysis-result');
     const contentDiv = document.getElementById('frame-analysis-content');
     resultDiv.style.display = 'block';
+
+    currentFrameAiPackage = null;
+    updateFrameAiPackageUI(null);
 
     // 예상 시간 계산
     const estimatedSeconds = Math.ceil(frames.length * 4);
@@ -5127,6 +5372,9 @@ async function continueGeneratingShortsContent() {
     // 결과 영역 표시
     const resultDiv = document.getElementById('frame-analysis-result');
     resultDiv.style.display = 'block';
+
+    currentFrameAiPackage = null;
+    updateFrameAiPackageUI(null);
 
     // 예상 시간 계산
     const estimatedSeconds = Math.ceil(frames.length * 4);
@@ -5353,6 +5601,10 @@ async function analyzeFramesWithAI() {
         return;
     }
 
+    // 이전 AI 패키지 초기화
+    currentFrameAiPackage = null;
+    updateFrameAiPackageUI(null);
+
     // 결과 영역 표시
     const resultDiv = document.getElementById('frame-analysis-result');
     const contentDiv = document.getElementById('frame-analysis-content');
@@ -5423,6 +5675,10 @@ async function analyzeFramesWithAI() {
         // 결과 표시
         contentDiv.value = result.analysis_result;
 
+        if (result.analysis_package) {
+            applyFrameAnalysisPackage(result.analysis_package);
+        }
+
         // 성공 알림
         alert('✅ AI 프레임 분석이 완료되었습니다!');
 
@@ -5432,6 +5688,8 @@ async function analyzeFramesWithAI() {
 
         console.error('AI 프레임 분석 오류:', error);
         contentDiv.value = `❌ 오류 발생: ${error.message}`;
+        currentFrameAiPackage = null;
+        updateFrameAiPackageUI(null);
         alert(`AI 프레임 분석 중 오류가 발생했습니다:\n${error.message}`);
     }
 }
@@ -7857,6 +8115,9 @@ const loadedSubtitles = {
     description: []
 };
 
+// AI 프레임 분석 패키지
+let currentFrameAiPackage = null;
+
 // 로드된 자막 파일명 저장
 const loadedSubtitleFiles = {
     main: null,
@@ -8840,6 +9101,17 @@ function srtTimeToSeconds(srtTime) {
     const milliseconds = parseInt(secondsParts[1]);
 
     return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
+}
+
+// 초를 SRT 형식으로 변환
+function secondsToSrt(seconds) {
+    const totalMs = Math.max(Math.round(Number(seconds || 0) * 1000), 0);
+    const hours = Math.floor(totalMs / 3600000);
+    const minutes = Math.floor((totalMs % 3600000) / 60000);
+    const secs = Math.floor((totalMs % 60000) / 1000);
+    const ms = totalMs % 1000;
+
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
 }
 
 // 타임라인에 자막 표시
