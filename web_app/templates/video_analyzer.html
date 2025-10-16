@@ -440,7 +440,13 @@
 
             <!-- 출처 표시 컨트롤 -->
             <div style="margin-bottom: 15px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;">
-                <label style="display: block; color: white; margin-bottom: 8px; font-weight: bold;">🔗 출처 표시</label>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <label style="color: white; font-weight: bold; margin: 0;">🔗 출처 표시</label>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="source-overlay-hide" style="cursor: pointer; width: 16px; height: 16px;">
+                        <label for="source-overlay-hide" style="cursor: pointer; color: #94a3b8; font-size: 0.85rem; margin: 0;" title="체크하면 출처 오버레이를 숨깁니다">🙈 화면에서 숨기기</label>
+                    </div>
+                </div>
                 <input type="text" id="overlay-source-input" placeholder="출처를 입력하세요 (예: 출처: YouTube)"
                        style="width: 100%; padding: 8px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; margin-bottom: 8px; color: #1a1a1a;">
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
@@ -1017,6 +1023,15 @@
                                             onmouseout="this.style.background='rgba(16, 185, 129, 0.2)'"
                                             title="자막 파일 불러오기">
                                         📂 자막 불러오기
+                                    </button>
+                                    <button onclick="clearQuickSubtitle()"
+                                            style="background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #ef4444;
+                                                   padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; cursor: pointer;
+                                                   transition: all 0.2s; display: flex; align-items: center; gap: 4px;"
+                                            onmouseover="this.style.background='rgba(239, 68, 68, 0.3)'"
+                                            onmouseout="this.style.background='rgba(239, 68, 68, 0.2)'"
+                                            title="불러온 자막 비우기">
+                                        🗑️ 비우기
                                     </button>
                                     <span id="loaded-subtitle-files" style="color: #10b981; font-size: 0.85rem; font-weight: 500;"></span>
                                 </div>
@@ -7148,6 +7163,26 @@ function applySource() {
     console.log(`✅ 출처 적용: ${text}`);
 }
 
+// 빠른 자막 불러오기 비우기 함수
+function clearQuickSubtitle() {
+    if (confirm('🗑️ 불러온 자막을 비우시겠습니까?')) {
+        // 파일 입력 초기화
+        const fileInput = document.getElementById('quick-subtitle-file-input');
+        if (fileInput) {
+            fileInput.value = '';
+        }
+
+        // 표시된 파일명 초기화
+        const fileNameSpan = document.getElementById('loaded-subtitle-files');
+        if (fileNameSpan) {
+            fileNameSpan.textContent = '';
+        }
+
+        console.log('🗑️ 빠른 자막 불러오기 비움');
+        alert('✅ 불러온 자막이 비워졌습니다.');
+    }
+}
+
 // 타임라인 자막을 화면 오버레이에 표시하는 함수
 function updateSubtitleOverlaysFromTimeline(currentTime) {
     // 체크박스 상태 확인
@@ -7458,6 +7493,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 자막 드래그 초기화
     initSubtitleDragging();
+
+    // 출처 오버레이 숨기기 체크박스 이벤트
+    const sourceHideCheckbox = document.getElementById('source-overlay-hide');
+    const sourceOverlay = document.getElementById('source-overlay');
+
+    if (sourceHideCheckbox && sourceOverlay) {
+        sourceHideCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                sourceOverlay.style.display = 'none';
+            } else {
+                sourceOverlay.style.display = 'block';
+            }
+        });
+    }
 });
 
 // 자막 미리보기 함수
