@@ -746,6 +746,8 @@ def _build_drawtext_filter(
 
     # 오버레이 타입에 따라 색상 강제 설정
     overlay_type = overlay.get("type", "")
+    overlay_opacity = overlay.get("opacity")
+
     if overlay_type in ["korean", "english"]:
         # korean/english 오버레이는 항상 흰색으로 고정 (검정 배경에 표시되므로)
         font_hex = "FFFFFF"
@@ -753,7 +755,6 @@ def _build_drawtext_filter(
     else:
         # title, subtitle 등은 기존 색상 유지
         font_hex, font_alpha = _parse_css_color(overlay.get("color"))
-        overlay_opacity = overlay.get("opacity")
         if overlay_opacity is not None:
             try:
                 opacity_value = float(overlay_opacity)
