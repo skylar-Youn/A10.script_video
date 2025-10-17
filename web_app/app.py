@@ -4472,24 +4472,27 @@ async def api_create_final_video(
                     # 자막 파일 경로 이스케이프
                     sub_path_escaped = sub_path.replace("\\", "\\\\\\\\").replace(":", "\\:").replace("'", "\\'")
 
+                    # 한글 지원 폰트 사용 (NanumGothic)
+                    font_name = "NanumGothic"
+
                     # 자막 위치 및 스타일 설정 (웹 설정과 동일한 색상 사용)
                     if sub_type == "translation":
                         font_size = korean_font_size
                         primary_color = korean_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName=Arial,FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=80"
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=80"
                     elif sub_type == "description":
                         font_size = english_font_size
                         primary_color = english_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName=Arial,FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=20"
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=20"
                     else:
                         font_size = title_font_size
                         primary_color = title_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName=Arial,FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=5,MarginV=20"
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=5,MarginV=20"
 
-                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_size}px, 색상={primary_color}, 외곽선={outline_width}px")
+                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px")
                     video_filters.append(f"subtitles={sub_path_escaped}:force_style='{style}'")
 
             # FFmpeg 명령어 구성
