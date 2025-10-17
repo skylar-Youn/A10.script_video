@@ -4592,21 +4592,24 @@ async def api_create_final_video(
                         font_size = korean_font_size
                         primary_color = korean_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=150"
+                        margin_v = 150
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
                     elif sub_type == "description":
                         # 보조자막: 하단에서 80px 위 (하단 검정 배경 내부)
                         font_size = english_font_size
                         primary_color = english_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=80"
+                        margin_v = 80
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
                     else:
                         # 메인자막: 하단에서 220px 위 (하단 검정 배경 내부, 주자막 위)
                         font_size = title_font_size
                         primary_color = title_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=220"
+                        margin_v = 220
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
 
-                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px, 하단여백=MarginV")
+                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px, MarginV={margin_v}")
                     video_filters.append(f"subtitles={sub_path_escaped}:force_style='{style}'")
 
             # FFmpeg 명령어 구성
