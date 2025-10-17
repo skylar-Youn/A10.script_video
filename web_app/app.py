@@ -506,13 +506,19 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
         if "nanum" in normalized_family:
             if prefer_bold:
                 add_candidate("nanumgothicbold.ttf")
+                add_candidate("nanumsquareb.ttf")
+                add_candidate("nanumbarungothicbold.ttf")
             add_candidate("nanumgothic.ttf")
+            add_candidate("nanumsquarer.ttf")
+            add_candidate("nanumbarungothic.ttf")
         if "noto" in normalized_family:
             if prefer_bold:
                 add_candidate("notosans-bold.ttf")
                 add_candidate("notosanscjkk-bold.otf")
+                add_candidate("notosanscjkkr-bold.otf")
             add_candidate("notosans-regular.ttf")
             add_candidate("notosanscjkkr-regular.otf")
+            add_candidate("notosanscjk-regular.ttc")
         if "arial" in normalized_family:
             if prefer_bold:
                 add_candidate("arialbd.ttf")
@@ -522,14 +528,19 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
                 add_candidate("segoeuib.ttf")
             add_candidate("segoeui.ttf")
 
+    # 기본 폰트 fallback 순서 (한글 지원 우선)
     if prefer_bold:
         add_candidate("pretendard-semibold.ttf")
         add_candidate("nanumgothicbold.ttf")
+        add_candidate("nanumsquareb.ttf")
+        add_candidate("nanumbarungothicbold.ttf")
         add_candidate("notosans-bold.ttf")
         add_candidate("arialbd.ttf")
 
     add_candidate("pretendard-regular.ttf")
     add_candidate("nanumgothic.ttf")
+    add_candidate("nanumsquarer.ttf")
+    add_candidate("nanumbarungothic.ttf")
     add_candidate("notosans-regular.ttf")
     add_candidate("dejavusans.ttf")
     add_candidate("arial.ttf")
@@ -673,7 +684,26 @@ def _build_drawtext_filter(
 
     font_family = overlay.get("fontFamily")
     font_weight = overlay.get("fontWeight")
+
+    # 한글이 포함된 경우 한글 폰트 강제 사용
+    has_korean = any('\uac00' <= char <= '\ud7a3' or '\u3131' <= char <= '\u318e' for char in text_raw)
+    if has_korean and not font_family:
+        # 한글이 있는데 폰트가 지정되지 않은 경우 나눔고딕 강제 사용
+        font_family = "NanumGothic"
+
     font_path = _resolve_font_file(font_family, font_weight)
+
+    # 한글이 있는데도 폰트를 찾지 못한 경우, 시스템 한글 폰트 직접 지정
+    if has_korean and not font_path:
+        fallback_fonts = [
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        ]
+        for fallback in fallback_fonts:
+            if Path(fallback).exists():
+                font_path = fallback
+                break
 
     font_hex, font_alpha = _parse_css_color(overlay.get("color"))
     overlay_opacity = overlay.get("opacity")
