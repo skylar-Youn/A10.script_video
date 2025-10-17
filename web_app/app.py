@@ -687,20 +687,33 @@ def _build_drawtext_filter(
     font_family = overlay.get("fontFamily")
     font_weight = overlay.get("fontWeight")
 
-    # 한글이 포함된 경우 한글 폰트 강제 사용
+    # CJK 문자 감지
     has_korean = any('\uac00' <= char <= '\ud7a3' or '\u3131' <= char <= '\u318e' for char in text_raw)
-    if has_korean and not font_family:
-        # 한글이 있는데 폰트가 지정되지 않은 경우 나눔고딕 강제 사용
-        font_family = "NanumGothic"
+    has_japanese = any(
+        '\u3040' <= char <= '\u309f' or  # 히라가나
+        '\u30a0' <= char <= '\u30ff' or  # 가타카나
+        '\u4e00' <= char <= '\u9faf'     # CJK 한자
+        for char in text_raw
+    )
+    has_cjk = has_korean or has_japanese
+
+    # CJK 문자에 맞는 폰트 선택
+    if has_cjk and not font_family:
+        if has_japanese:
+            # 일본어 우선: Noto Sans CJK 폰트 사용 (한자 + 가나 지원)
+            font_family = "NotoSans"
+        else:
+            # 한글 전용: NanumGothic 사용
+            font_family = "NanumGothic"
 
     font_path = _resolve_font_file(font_family, font_weight)
 
-    # 한글이 있는데도 폰트를 찾지 못한 경우, 시스템 한글 폰트 직접 지정
-    if has_korean and not font_path:
+    # CJK 폰트를 찾지 못한 경우, 시스템 폰트 직접 지정
+    if has_cjk and not font_path:
         fallback_fonts = [
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
             "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
             "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         ]
         for fallback in fallback_fonts:
             if Path(fallback).exists():
@@ -4472,8 +4485,9 @@ async def api_create_final_video(
                     # 자막 파일 경로 이스케이프
                     sub_path_escaped = sub_path.replace("\\", "\\\\\\\\").replace(":", "\\:").replace("'", "\\'")
 
-                    # 한글 지원 폰트 사용 (NanumGothic)
-                    font_name = "NanumGothic"
+                    # CJK(한글, 일본어, 중국어) 지원 폰트 사용
+                    # Noto Sans는 모든 CJK 문자를 지원
+                    font_name = "Noto Sans CJK KR"
 
                     # 자막 위치 및 스타일 설정 (웹 설정과 동일한 색상 사용)
                     if sub_type == "translation":
