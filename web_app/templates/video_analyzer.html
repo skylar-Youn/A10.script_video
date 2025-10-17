@@ -7850,6 +7850,9 @@ const loadedMedia = {
     bgm: null
 };
 
+const AUDIO_TRACK_TYPES = ['audio', 'commentary', 'bgm'];
+let audioSyncInitialized = false;
+
 // 로드된 자막 데이터
 const loadedSubtitles = {
     main: [],
@@ -8238,6 +8241,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
+    attachAudioTrackToggleListeners();
+
     // 빠른 자막 파일 로드 (제목자막 포함 옆 버튼)
     const quickSubtitleInput = document.getElementById('quick-subtitle-file-input');
     if (quickSubtitleInput) {
@@ -8513,6 +8518,9 @@ function handleVideoFileLoad(file, silent = false) {
 
                 // 시간 표시 동기화
                 initPlayheadSync();
+                initAudioSync();
+                syncAudioTrackVolume(videoPlayer);
+                syncAudioTrackRate(videoPlayer);
 
                 // IndexedDB에 파일 저장 (복원 모드가 아닐 때만)
                 if (!silent) {
@@ -8653,8 +8661,24 @@ function displayVideoClipOnTimeline(fileName, duration) {
 function handleAudioFileLoad(file, trackType) {
     console.log(`${trackType} 음성 파일 로드:`, file.name);
 
+    const previous = loadedMedia[trackType];
+    if (previous) {
+        if (previous.audioElement) {
+            try {
+                previous.audioElement.pause();
+            } catch (error) {
+                console.warn('이전 오디오 트랙 일시정지 실패:', error);
+            }
+        }
+        if (previous.objectUrl) {
+            URL.revokeObjectURL(previous.objectUrl);
+        }
+    }
+
     const url = URL.createObjectURL(file);
     const audio = new Audio(url);
+    audio.preload = 'auto';
+    audio.loop = false;
 
     audio.addEventListener('loadedmetadata', function() {
         const duration = audio.duration;
@@ -8664,7 +8688,9 @@ function handleAudioFileLoad(file, trackType) {
         loadedMedia[trackType] = {
             fileName: file.name,
             duration: duration,
-            file: file
+            file: file,
+            audioElement: audio,
+            objectUrl: url
         };
 
         // 파형 그리기
@@ -8672,6 +8698,18 @@ function handleAudioFileLoad(file, trackType) {
 
         // 타임라인에 음성 클립 표시
         displayAudioClipOnTimeline(file.name, duration, trackType);
+
+        attachAudioTrackToggleListeners();
+        initAudioSync();
+
+        const videoPlayer = document.getElementById('video-preview-player');
+        if (videoPlayer) {
+            syncAudioTrackRate(videoPlayer);
+            syncAudioTrackVolume(videoPlayer);
+            if (!videoPlayer.paused && !videoPlayer.ended) {
+                startAudioTracks(videoPlayer);
+            }
+        }
 
         alert(`음성 파일 "${file.name}"이 ${trackType} 트랙에 로드되었습니다.\n길이: ${duration.toFixed(2)}초`);
     });
@@ -8925,6 +8963,212 @@ function updateAllClipSizes() {
     }
 
     console.log('모든 클립 크기 업데이트 완료');
+}
+
+function getAudioTrackCheckboxId(trackType) {
+    switch (trackType) {
+        case 'audio':
+            return 'track-audio-enable';
+        case 'commentary':
+            return 'track-commentary-enable';
+        case 'bgm':
+            return 'track-bgm-enable';
+        default:
+            return null;
+    }
+}
+
+function isAudioTrackEnabled(trackType) {
+    const checkboxId = getAudioTrackCheckboxId(trackType);
+    if (!checkboxId) {
+        return true;
+    }
+    const checkbox = document.getElementById(checkboxId);
+    return !checkbox || checkbox.checked;
+}
+
+function getAudioTracks(includeDisabled = false) {
+    const tracks = [];
+    AUDIO_TRACK_TYPES.forEach((trackType) => {
+        const mediaInfo = loadedMedia[trackType];
+        if (mediaInfo && mediaInfo.audioElement) {
+            if (includeDisabled || isAudioTrackEnabled(trackType)) {
+                tracks.push({ trackType, mediaInfo });
+            }
+        }
+    });
+    return tracks;
+}
+
+function pauseAllAudioTracks() {
+    getAudioTracks(true).forEach(({ mediaInfo }) => {
+        try {
+            mediaInfo.audioElement.pause();
+        } catch (error) {
+            console.warn('오디오 일시정지 실패:', error);
+        }
+    });
+}
+
+function syncAudioTrackTimes(videoPlayer) {
+    if (!videoPlayer) {
+        return;
+    }
+    const currentTime = Number.isFinite(videoPlayer.currentTime) ? videoPlayer.currentTime : 0;
+    getAudioTracks().forEach(({ mediaInfo }) => {
+        const audioElement = mediaInfo.audioElement;
+        if (!audioElement || Number.isNaN(currentTime)) {
+            return;
+        }
+        if (Math.abs((audioElement.currentTime || 0) - currentTime) > 0.2) {
+            try {
+                audioElement.currentTime = currentTime;
+            } catch (error) {
+                console.warn('오디오 타임라인 동기화 실패:', error);
+            }
+        }
+    });
+}
+
+function syncAudioTrackRate(videoPlayer) {
+    if (!videoPlayer) {
+        return;
+    }
+    const playbackRate = Number.isFinite(videoPlayer.playbackRate) ? videoPlayer.playbackRate : 1;
+    getAudioTracks(true).forEach(({ mediaInfo }) => {
+        const audioElement = mediaInfo.audioElement;
+        if (audioElement) {
+            audioElement.playbackRate = playbackRate;
+        }
+    });
+}
+
+function syncAudioTrackVolume(videoPlayer) {
+    if (!videoPlayer) {
+        return;
+    }
+    const baseVolume = videoPlayer.muted ? 0 : (Number.isFinite(videoPlayer.volume) ? videoPlayer.volume : 1);
+    getAudioTracks(true).forEach(({ mediaInfo }) => {
+        const audioElement = mediaInfo.audioElement;
+        if (audioElement) {
+            audioElement.volume = baseVolume;
+        }
+    });
+}
+
+function startAudioTracks(videoPlayer) {
+    if (!videoPlayer) {
+        return;
+    }
+    const currentTime = Number.isFinite(videoPlayer.currentTime) ? videoPlayer.currentTime : 0;
+    const playbackRate = Number.isFinite(videoPlayer.playbackRate) ? videoPlayer.playbackRate : 1;
+    const baseVolume = videoPlayer.muted ? 0 : (Number.isFinite(videoPlayer.volume) ? videoPlayer.volume : 1);
+
+    getAudioTracks().forEach(({ mediaInfo }) => {
+        const audioElement = mediaInfo.audioElement;
+        if (!audioElement) {
+            return;
+        }
+        if (Number.isFinite(currentTime) && Math.abs((audioElement.currentTime || 0) - currentTime) > 0.05) {
+            try {
+                audioElement.currentTime = currentTime;
+            } catch (error) {
+                console.warn('오디오 재생 위치 설정 실패:', error);
+            }
+        }
+        audioElement.playbackRate = playbackRate;
+        audioElement.volume = baseVolume;
+
+        const playPromise = audioElement.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                console.warn('오디오 트랙 재생 실패:', error);
+            });
+        }
+    });
+}
+
+function attachAudioTrackToggleListeners() {
+    AUDIO_TRACK_TYPES.forEach((trackType) => {
+        const checkboxId = getAudioTrackCheckboxId(trackType);
+        if (!checkboxId) {
+            return;
+        }
+        const checkbox = document.getElementById(checkboxId);
+        if (!checkbox || checkbox.dataset.audioToggleAttached === 'true') {
+            return;
+        }
+        checkbox.dataset.audioToggleAttached = 'true';
+        checkbox.addEventListener('change', () => {
+            const trackInfo = loadedMedia[trackType];
+            if (!trackInfo || !trackInfo.audioElement) {
+                return;
+            }
+            if (checkbox.checked) {
+                const videoPlayer = document.getElementById('video-preview-player');
+                if (videoPlayer && !videoPlayer.paused && !videoPlayer.ended) {
+                    startAudioTracks(videoPlayer);
+                }
+            } else {
+                try {
+                    trackInfo.audioElement.pause();
+                } catch (error) {
+                    console.warn('오디오 트랙 일시정지 실패:', error);
+                }
+            }
+        });
+    });
+}
+
+function initAudioSync() {
+    if (audioSyncInitialized) {
+        attachAudioTrackToggleListeners();
+        return;
+    }
+    const videoPlayer = document.getElementById('video-preview-player');
+    if (!videoPlayer) {
+        return;
+    }
+
+    videoPlayer.addEventListener('play', () => {
+        startAudioTracks(videoPlayer);
+    });
+
+    videoPlayer.addEventListener('pause', () => {
+        pauseAllAudioTracks();
+    });
+
+    videoPlayer.addEventListener('ended', () => {
+        pauseAllAudioTracks();
+    });
+
+    videoPlayer.addEventListener('seeking', () => {
+        pauseAllAudioTracks();
+    });
+
+    videoPlayer.addEventListener('seeked', () => {
+        syncAudioTrackTimes(videoPlayer);
+        if (!videoPlayer.paused && !videoPlayer.ended) {
+            startAudioTracks(videoPlayer);
+        }
+    });
+
+    videoPlayer.addEventListener('timeupdate', () => {
+        if (!videoPlayer.paused && !videoPlayer.ended) {
+            syncAudioTrackTimes(videoPlayer);
+        }
+    });
+
+    videoPlayer.addEventListener('ratechange', () => {
+        syncAudioTrackRate(videoPlayer);
+    });
+
+    videoPlayer.addEventListener('volumechange', () => {
+        syncAudioTrackVolume(videoPlayer);
+    });
+
+    attachAudioTrackToggleListeners();
+    audioSyncInitialized = true;
 }
 
 // 주자막 언어 선택 다이얼로그 표시
@@ -9217,6 +9461,17 @@ function clearMediaTrack(trackType) {
 
     // 로드된 미디어 데이터 초기화
     if (loadedMedia[trackType]) {
+        const mediaInfo = loadedMedia[trackType];
+        if (mediaInfo && mediaInfo.audioElement) {
+            try {
+                mediaInfo.audioElement.pause();
+            } catch (error) {
+                console.warn('오디오 트랙 일시정지 실패:', error);
+            }
+        }
+        if (mediaInfo && mediaInfo.objectUrl) {
+            URL.revokeObjectURL(mediaInfo.objectUrl);
+        }
         loadedMedia[trackType] = null;
     }
 
@@ -9228,10 +9483,11 @@ function clearMediaTrack(trackType) {
             videoTrack.innerHTML = '';
         }
         // 비디오 플레이어 초기화
-        const videoPlayer = document.getElementById('video-player');
+        const videoPlayer = document.getElementById('video-preview-player');
         if (videoPlayer) {
             videoPlayer.src = '';
             videoPlayer.load();
+            pauseAllAudioTracks();
         }
     } else {
         // 오디오 트랙 초기화 (audio, commentary, bgm)
@@ -9242,6 +9498,16 @@ function clearMediaTrack(trackType) {
         if (canvas) {
             const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        const trackId = trackType === 'audio' ? 'audio-track' :
+                        trackType === 'commentary' ? 'commentary-audio-track' :
+                        'bgm-audio-track';
+        const audioTrack = document.getElementById(trackId);
+        if (audioTrack) {
+            const overlay = audioTrack.querySelector('.audio-clip-overlay');
+            if (overlay) {
+                overlay.remove();
+            }
         }
     }
 
