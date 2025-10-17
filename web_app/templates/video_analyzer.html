@@ -695,10 +695,23 @@
                 </div>
             </div>
 
+            <!-- 현재 설정 상태 표시 -->
+            <div id="current-settings-status" style="margin-bottom: 10px; padding: 10px; background: rgba(59, 130, 246, 0.1); border-radius: 6px; border-left: 3px solid #3b82f6;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+                    <span style="font-weight: bold; color: #3b82f6;">📊 현재 적용 중인 설정</span>
+                </div>
+                <div id="settings-info" style="font-size: 0.85rem; color: #1e293b;">
+                    <span id="saved-settings-name">기본 설정</span> |
+                    <span id="saved-settings-time">미저장</span>
+                </div>
+            </div>
+
             <!-- 저장/불러오기 버튼 -->
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
                 <button onclick="saveTextOverlaySettings()" class="btn-primary" style="padding: 8px 16px; background: #10b981;">💾 설정 저장</button>
+                <button onclick="saveTextOverlaySettingsAs()" class="btn-primary" style="padding: 8px 16px; background: #059669;">💾 다른 이름으로 저장</button>
                 <button onclick="loadTextOverlaySettings()" class="btn-secondary" style="padding: 8px 16px; background: #3b82f6;">📂 설정 불러오기</button>
+                <button onclick="browseSettingsFile()" class="btn-secondary" style="padding: 8px 16px; background: #6366f1;">🔍 파일에서 불러오기</button>
                 <button onclick="clearTextOverlay()" class="btn-secondary" style="padding: 8px 16px; background: #ef4444;">🗑️ 텍스트 지우기</button>
             </div>
         </div>
@@ -744,7 +757,7 @@
                 <div class="custom-subtitle-overlay" id="korean-subtitle-overlay" data-lang="korean"
                      style="position: absolute; top: 80%; left: 50%; transform: translateX(-50%);
                             color: #000000; font-size: 32px; font-weight: bold;
-                            text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+                            text-shadow: -0.04em -0.04em 0 #fff, 0.04em -0.04em 0 #fff, -0.04em 0.04em 0 #fff, 0.04em 0.04em 0 #fff, -0.06em 0 0 #fff, 0.06em 0 0 #fff, 0 -0.06em 0 #fff, 0 0.06em 0 #fff;
                             cursor: move; user-select: none; z-index: 8;
                             pointer-events: auto; display: block; padding: 8px 16px;
                             background: rgba(255, 255, 255, 0.1); border-radius: 4px; opacity: 0.5;
@@ -756,7 +769,7 @@
                 <div class="custom-subtitle-overlay" id="english-subtitle-overlay" data-lang="english"
                      style="position: absolute; top: 90%; left: 50%; transform: translateX(-50%);
                             color: #000000; font-size: 28px; font-weight: bold;
-                            text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+                            text-shadow: -0.04em -0.04em 0 #fff, 0.04em -0.04em 0 #fff, -0.04em 0.04em 0 #fff, 0.04em 0.04em 0 #fff, -0.06em 0 0 #fff, 0.06em 0 0 #fff, 0 -0.06em 0 #fff, 0 0.06em 0 #fff;
                             cursor: move; user-select: none; z-index: 7;
                             pointer-events: auto; display: block; padding: 8px 16px;
                             background: rgba(255, 255, 255, 0.1); border-radius: 4px; opacity: 0.5;
@@ -1016,7 +1029,7 @@
             <div class="video-preview-actions" style="margin-top: 15px;">
                 <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                     <button onclick="useThisVideo()" class="btn-primary">이 영상으로 자막 불러오기</button>
-                    <button onclick="createPreviewVideo()" class="btn-primary" style="background: #f59e0b;">🎬 프리뷰영상제작하기</button>
+                    <button onclick="createFinalVideo()" class="btn-primary" style="background: #f59e0b;">🎬 영상제작하기</button>
                     <button onclick="closeVideoPreview()" class="btn-secondary" style="background: #666;">닫기</button>
                 </div>
                 <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
@@ -1793,17 +1806,31 @@ select option {
 
 /* ==================== 텍스트 오버레이 효과 ==================== */
 
+/* 기본 자막 오버레이 스타일 */
+.custom-subtitle-overlay {
+    /* 기본 외곽선 효과 (검은 배경용 흰색 외곽선) */
+    text-shadow:
+        -0.04em -0.04em 0 #fff,
+         0.04em -0.04em 0 #fff,
+        -0.04em  0.04em 0 #fff,
+         0.04em  0.04em 0 #fff,
+        -0.06em  0      0 #fff,
+         0.06em  0      0 #fff,
+         0      -0.06em 0 #fff,
+         0       0.06em 0 #fff;
+}
+
 /* 정적 효과 (스타일) */
 .effect-outline {
     text-shadow:
-        -2px -2px 0 #000,
-         2px -2px 0 #000,
-        -2px  2px 0 #000,
-         2px  2px 0 #000,
-        -3px  0   0 #000,
-         3px  0   0 #000,
-         0   -3px 0 #000,
-         0    3px 0 #000 !important;
+        -0.04em -0.04em 0 #000,
+         0.04em -0.04em 0 #000,
+        -0.04em  0.04em 0 #000,
+         0.04em  0.04em 0 #000,
+        -0.06em  0      0 #000,
+         0.06em  0      0 #000,
+         0      -0.06em 0 #000,
+         0       0.06em 0 #000 !important;
 }
 
 .effect-shadow {
@@ -2430,6 +2457,32 @@ function updateProgress(percentage, message) {
     document.getElementById('progress-message').textContent = message;
 }
 
+function parsePixelValue(value) {
+    const numeric = parseFloat(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function extractOutlineColor(computedStyle, overlayType) {
+    if (!computedStyle) {
+        return (overlayType === 'korean' || overlayType === 'english')
+            ? 'rgba(255, 255, 255, 1)'
+            : 'rgba(0, 0, 0, 0.85)';
+    }
+
+    const textShadow = computedStyle.textShadow;
+    if (textShadow && textShadow !== 'none') {
+        const matches = textShadow.match(/(rgba?\([^)]*\)|#[0-9a-fA-F]{3,8})/g);
+        if (matches && matches.length) {
+            const solid = matches.find((color) => !/rgba?\([^)]*,\s*0(?:\.0+)?\)/.test(color.trim()));
+            return (solid || matches[0]).trim();
+        }
+    }
+
+    return (overlayType === 'korean' || overlayType === 'english')
+        ? 'rgba(255, 255, 255, 1)'
+        : 'rgba(0, 0, 0, 0.85)';
+}
+
 async function createPreviewVideo() {
     if (!currentVideoInfo || !currentVideoInfo.path) {
         alert('먼저 영상을 선택해주세요.');
@@ -2479,6 +2532,22 @@ async function createPreviewVideo() {
         const fontSize = parseInt(computedStyle.fontSize);
         const color = computedStyle.color;
         const fontWeight = computedStyle.fontWeight;
+        const outlineColor = extractOutlineColor(computedStyle, overlayType);
+        const fontFamily = computedStyle.fontFamily;
+        const fontStyle = computedStyle.fontStyle;
+        const letterSpacing = computedStyle.letterSpacing;
+        const textShadow = computedStyle.textShadow;
+        const backgroundColor = computedStyle.backgroundColor;
+        const opacity = parseFloat(computedStyle.opacity || element.style.opacity || '1');
+        const textAlign = computedStyle.textAlign;
+        const textTransform = computedStyle.textTransform;
+        const lineHeight = computedStyle.lineHeight;
+        const padding = {
+            top: parsePixelValue(computedStyle.paddingTop),
+            right: parsePixelValue(computedStyle.paddingRight),
+            bottom: parsePixelValue(computedStyle.paddingBottom),
+            left: parsePixelValue(computedStyle.paddingLeft)
+        };
 
         return {
             text: text,
@@ -2487,6 +2556,17 @@ async function createPreviewVideo() {
             fontSize: Math.round(fontSize * videoWidth / displayWidth),
             color: color,
             fontWeight: fontWeight,
+            outlineColor: outlineColor,
+            fontFamily: fontFamily,
+            fontStyle: fontStyle,
+            letterSpacing: letterSpacing,
+            textShadow: textShadow,
+            backgroundColor: backgroundColor,
+            opacity: Number.isFinite(opacity) ? opacity : 1,
+            textAlign: textAlign,
+            textTransform: textTransform,
+            lineHeight: lineHeight,
+            padding: padding,
             type: overlayType
         };
     }
@@ -2513,6 +2593,43 @@ async function createPreviewVideo() {
         }
     };
 
+    // 트랙 체크박스 상태 확인 및 파일 경로 수집
+    const tracks = {
+        video: {
+            enabled: document.getElementById('track-video-enable')?.checked || false,
+            muted: document.getElementById('video-audio-mute')?.classList.contains('muted') || false
+        },
+        audio: {
+            enabled: document.getElementById('track-audio-enable')?.checked || false,
+            file: loadedMedia.audio?.file || null,
+            fileName: loadedMedia.audio?.fileName || null
+        },
+        commentary: {
+            enabled: document.getElementById('track-commentary-enable')?.checked || false,
+            file: loadedMedia.commentary?.file || null,
+            fileName: loadedMedia.commentary?.fileName || null
+        },
+        bgm: {
+            enabled: document.getElementById('track-bgm-enable')?.checked || false,
+            file: loadedMedia.bgm?.file || null,
+            fileName: loadedMedia.bgm?.fileName || null
+        },
+        mainSubtitle: {
+            enabled: document.getElementById('track-main-subtitle-enable')?.checked || false,
+            data: loadedSubtitles.main || null
+        },
+        translationSubtitle: {
+            enabled: document.getElementById('track-translation-subtitle-enable')?.checked || false,
+            data: loadedSubtitles.translation || null
+        },
+        descriptionSubtitle: {
+            enabled: document.getElementById('track-description-subtitle-enable')?.checked || false,
+            data: loadedSubtitles.description || null
+        }
+    };
+
+    console.log('📋 트랙 상태:', tracks);
+
     // API 요청 데이터
     const requestData = {
         video_path: currentVideoInfo.path,
@@ -2520,7 +2637,16 @@ async function createPreviewVideo() {
         video_width: videoWidth,
         video_height: videoHeight,
         overlays: overlays,
-        black_bars: blackBars
+        black_bars: blackBars,
+        tracks: {
+            video: {
+                enabled: tracks.video.enabled,
+                muted: tracks.video.muted
+            },
+            mainSubtitle: tracks.mainSubtitle,
+            translationSubtitle: tracks.translationSubtitle,
+            descriptionSubtitle: tracks.descriptionSubtitle
+        }
     };
 
     console.log('🎬 프리뷰 영상 생성 요청:', requestData);
@@ -2583,6 +2709,258 @@ async function createPreviewVideo() {
 
         console.error('❌ 프리뷰 영상 생성 오류:', error);
         alert(`프리뷰 영상 생성 중 오류가 발생했습니다:\n${error.message}`);
+    }
+}
+
+// 최종 영상 제작 (체크된 트랙만 포함)
+async function createFinalVideo() {
+    if (!currentVideoInfo || !currentVideoInfo.path) {
+        alert('먼저 영상을 선택해주세요.');
+        return;
+    }
+
+    // 비디오 플레이어 정보 가져오기
+    const videoPlayer = document.getElementById('video-preview-player');
+    const videoWidth = videoPlayer.videoWidth;
+    const videoHeight = videoPlayer.videoHeight;
+    const displayWidth = videoPlayer.offsetWidth;
+    const displayHeight = videoPlayer.offsetHeight;
+
+    if (!videoWidth || !videoHeight) {
+        alert('영상이 로드되지 않았습니다. 잠시 후 다시 시도해주세요.');
+        return;
+    }
+
+    console.log('📐 비디오 정보:', { videoWidth, videoHeight, displayWidth, displayHeight });
+
+    // 진행률 모달 표시
+    showProgressModal();
+
+    // 저장된 설정에서 원본 폰트 크기 가져오기
+    let savedSettings = null;
+    try {
+        const saved = localStorage.getItem('videoAnalyzerTextOverlay');
+        if (saved) {
+            savedSettings = JSON.parse(saved);
+        }
+    } catch (e) {
+        console.error('설정 로드 실패:', e);
+    }
+
+    // 오버레이 설정 수집 함수
+    function getOverlaySettings(elementId, overlayType, savedSize) {
+        const element = document.getElementById(elementId);
+        if (!element || element.style.display === 'none' || element.style.opacity === '0') {
+            return null;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const videoRect = videoPlayer.getBoundingClientRect();
+
+        // 비디오 플레이어 기준 상대 위치 계산
+        const relativeX = (rect.left + rect.width / 2 - videoRect.left) / videoRect.width;
+        const relativeY = (rect.top + rect.height / 2 - videoRect.top) / videoRect.height;
+
+        // 텍스트 내용
+        const text = element.textContent.trim();
+        if (!text || text === '영상 제목을 입력하세요' || text === '부제목을 입력하세요' ||
+            text === '주 자막을 입력하세요' || text === '보조 자막을 입력하세요') {
+            return null;
+        }
+
+        // 스타일 정보
+        const computedStyle = window.getComputedStyle(element);
+        const color = computedStyle.color;
+        const fontWeight = computedStyle.fontWeight;
+        const outlineColor = extractOutlineColor(computedStyle, overlayType);
+        const fontFamily = computedStyle.fontFamily;
+        const fontStyle = computedStyle.fontStyle;
+        const letterSpacing = computedStyle.letterSpacing;
+        const textShadow = computedStyle.textShadow;
+        const backgroundColor = computedStyle.backgroundColor;
+        const opacity = parseFloat(computedStyle.opacity || element.style.opacity || '1');
+        const textAlign = computedStyle.textAlign;
+        const textTransform = computedStyle.textTransform;
+        const lineHeight = computedStyle.lineHeight;
+        const padding = {
+            top: parsePixelValue(computedStyle.paddingTop),
+            right: parsePixelValue(computedStyle.paddingRight),
+            bottom: parsePixelValue(computedStyle.paddingBottom),
+            left: parsePixelValue(computedStyle.paddingLeft)
+        };
+
+        // 폰트 크기: 저장된 설정 값 사용 (스케일링 없이 원본 크기 유지)
+        // 저장된 설정이 없으면 현재 표시된 크기를 비디오 해상도에 맞게 스케일링
+        let fontSize;
+        if (savedSize) {
+            fontSize = parseInt(savedSize);
+            console.log(`📏 ${overlayType} 폰트 크기: ${fontSize}px (저장된 설정 사용)`);
+        } else {
+            const displayFontSize = parseInt(computedStyle.fontSize);
+            fontSize = Math.round(displayFontSize * videoWidth / displayWidth);
+            console.log(`📏 ${overlayType} 폰트 크기: ${fontSize}px (스케일링: ${displayFontSize}px → ${fontSize}px)`);
+        }
+
+        return {
+            text: text,
+            x: Math.round(relativeX * videoWidth),
+            y: Math.round(relativeY * videoHeight),
+            fontSize: fontSize,
+            color: color,
+            fontWeight: fontWeight,
+            type: overlayType,
+            outlineColor: outlineColor,
+            fontFamily: fontFamily,
+            fontStyle: fontStyle,
+            letterSpacing: letterSpacing,
+            textShadow: textShadow,
+            backgroundColor: backgroundColor,
+            opacity: Number.isFinite(opacity) ? opacity : 1,
+            textAlign: textAlign,
+            textTransform: textTransform,
+            lineHeight: lineHeight,
+            padding: padding
+        };
+    }
+
+    // 모든 오버레이 설정 수집
+    const overlays = {
+        title: getOverlaySettings('video-title-overlay', 'title', savedSettings?.title?.size),
+        subtitle: getOverlaySettings('video-subtitle-overlay', 'subtitle', savedSettings?.subtitle?.size),
+        korean: getOverlaySettings('korean-subtitle-overlay', 'korean', savedSettings?.korean?.size),
+        english: getOverlaySettings('english-subtitle-overlay', 'english', savedSettings?.english?.size)
+    };
+
+    // 검정 배경 설정 수집
+    const blackBars = {
+        top: {
+            enabled: document.getElementById('top-bar-enable').checked,
+            height: parseInt(document.getElementById('top-bar-height').value),
+            opacity: parseInt(document.getElementById('top-bar-opacity').value) / 100
+        },
+        bottom: {
+            enabled: document.getElementById('bottom-bar-enable').checked,
+            height: parseInt(document.getElementById('bottom-bar-height').value),
+            opacity: parseInt(document.getElementById('bottom-bar-opacity').value) / 100
+        }
+    };
+
+    // 트랙 체크박스 상태 확인 및 파일 경로 수집
+    const tracks = {
+        video: {
+            enabled: document.getElementById('track-video-enable')?.checked || false,
+            muted: document.getElementById('video-audio-mute')?.classList.contains('muted') || false
+        },
+        audio: {
+            enabled: document.getElementById('track-audio-enable')?.checked || false,
+            file: loadedMedia.audio?.file || null,
+            fileName: loadedMedia.audio?.fileName || null
+        },
+        commentary: {
+            enabled: document.getElementById('track-commentary-enable')?.checked || false,
+            file: loadedMedia.commentary?.file || null,
+            fileName: loadedMedia.commentary?.fileName || null
+        },
+        bgm: {
+            enabled: document.getElementById('track-bgm-enable')?.checked || false,
+            file: loadedMedia.bgm?.file || null,
+            fileName: loadedMedia.bgm?.fileName || null
+        },
+        mainSubtitle: {
+            enabled: document.getElementById('track-main-subtitle-enable')?.checked || false,
+            data: loadedSubtitles.main || null
+        },
+        translationSubtitle: {
+            enabled: document.getElementById('track-translation-subtitle-enable')?.checked || false,
+            data: loadedSubtitles.translation || null
+        },
+        descriptionSubtitle: {
+            enabled: document.getElementById('track-description-subtitle-enable')?.checked || false,
+            data: loadedSubtitles.description || null
+        }
+    };
+
+    console.log('📋 트랙 상태:', tracks);
+
+    // FormData 생성 (파일 업로드를 위해)
+    const formData = new FormData();
+    formData.append('video_path', currentVideoInfo.path);
+    formData.append('video_width', videoWidth);
+    formData.append('video_height', videoHeight);
+    formData.append('overlays', JSON.stringify(overlays));
+    formData.append('black_bars', JSON.stringify(blackBars));
+    formData.append('tracks', JSON.stringify({
+        video: tracks.video,
+        mainSubtitle: tracks.mainSubtitle,
+        translationSubtitle: tracks.translationSubtitle,
+        descriptionSubtitle: tracks.descriptionSubtitle
+    }));
+
+    // 음성 파일 추가 (체크된 트랙만)
+    if (tracks.audio.enabled && tracks.audio.file) {
+        formData.append('audio_file', tracks.audio.file, tracks.audio.fileName);
+    }
+    if (tracks.commentary.enabled && tracks.commentary.file) {
+        formData.append('commentary_file', tracks.commentary.file, tracks.commentary.fileName);
+    }
+    if (tracks.bgm.enabled && tracks.bgm.file) {
+        formData.append('bgm_file', tracks.bgm.file, tracks.bgm.fileName);
+    }
+
+    // 가짜 진행률 시뮬레이션
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        if (progress < 90) {
+            progress += Math.random() * 10;
+            if (progress > 90) progress = 90;
+            updateProgress(Math.floor(progress), 'FFmpeg로 영상 합성 중...');
+        }
+    }, 500);
+
+    try {
+        updateProgress(10, '최종 영상 제작 시작...');
+
+        const response = await fetch('/api/video-analyzer/create-final-video', {
+            method: 'POST',
+            body: formData
+        });
+
+        clearInterval(progressInterval);
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || '최종 영상 생성 실패');
+        }
+
+        const result = await response.json();
+        console.log('✅ 최종 영상 생성 완료:', result);
+
+        // 100% 완료 표시
+        updateProgress(100, '완료!');
+
+        // 잠시 후 모달 닫기
+        setTimeout(() => {
+            hideProgressModal();
+
+            // 성공 메시지와 함께 다운로드 링크 제공
+            const downloadPath = result.output_path;
+            const fileName = result.file_name;
+
+            if (confirm(`최종 영상이 생성되었습니다!\n파일명: ${fileName}\n\n지금 다운로드하시겠습니까?`)) {
+                // 다운로드
+                const encodedPath = encodeURIComponent(downloadPath);
+                window.location.href = `/api/video-analyzer/download?path=${encodedPath}`;
+            }
+
+            alert('최종 영상이 생성되었습니다.\n영상 목록을 새로고침하여 확인하세요.');
+        }, 1000);
+
+    } catch (error) {
+        clearInterval(progressInterval);
+        hideProgressModal();
+
+        console.error('❌ 최종 영상 생성 오류:', error);
+        alert(`최종 영상 생성 중 오류가 발생했습니다:\n${error.message}`);
     }
 }
 
@@ -7276,21 +7654,31 @@ async function generateAITitleSubtitle() {
         if (titleInput && data.title) {
             titleInput.value = data.title;
             // 제목 자동 적용
-            applyTitle();
+            try {
+                applyTitle();
+                console.log('✅ 제목 자동 적용 완료');
+            } catch (e) {
+                console.warn('⚠️ 제목 자동 적용 실패:', e);
+            }
         }
 
         if (subtitleInput && data.subtitle) {
             subtitleInput.value = data.subtitle;
             // 부제목 자동 적용
-            applySubtitle();
+            try {
+                applySubtitle();
+                console.log('✅ 부제목 자동 적용 완료');
+            } catch (e) {
+                console.warn('⚠️ 부제목 자동 적용 실패:', e);
+            }
         }
 
         // 성공 메시지
         if (statusText) {
-            statusText.innerHTML = '✅ AI 제목과 부제목이 생성되었습니다!';
+            statusText.innerHTML = '✅ AI 제목과 부제목이 생성되어 입력 필드에 설정되었습니다!';
         }
         if (statusTimer) {
-            statusTimer.textContent = `완료 시간: ${totalTime}초 | 모델: ${data.model || selectedModel}`;
+            statusTimer.innerHTML = `완료 시간: ${totalTime}초 | 모델: ${data.model || selectedModel}<br><small style="color: #94a3b8;">💡 아래 "✅ 제목 적용" / "✅ 부제목 적용" 버튼을 눌러 영상에 적용하세요.</small>`;
         }
         if (statusDiv) {
             statusDiv.style.color = '#4ade80';
@@ -7335,44 +7723,80 @@ async function generateAITitleSubtitle() {
 }
 
 function applyTitle() {
-    const titleOverlay = document.querySelector('.title-overlay');
+    const titleOverlay = document.getElementById('video-title-overlay') || document.querySelector('.video-title-overlay');
     const text = document.getElementById('overlay-title-input').value.trim();
     const size = document.getElementById('overlay-title-size').value;
     const color = document.getElementById('overlay-title-color').value;
+    const staticEffect = document.getElementById('overlay-title-static-effect')?.value || 'none';
+    const dynamicEffect = document.getElementById('overlay-title-dynamic-effect')?.value || 'none';
 
-    if (titleOverlay) {
-        if (!text) {
-            titleOverlay.textContent = '영상 제목을 입력하세요';
-            titleOverlay.style.opacity = '0.5';
-        } else {
-            titleOverlay.textContent = text;
-            titleOverlay.style.fontSize = `${size}px`;
-            titleOverlay.style.color = color;
-            titleOverlay.style.opacity = '1';
-        }
-        console.log(`✅ 제목 적용: ${text}`);
+    if (!titleOverlay) {
+        console.error('❌ 제목 오버레이를 찾을 수 없습니다.');
+        alert('⚠️ 영상을 먼저 불러와주세요.');
+        return;
     }
+
+    if (!text) {
+        titleOverlay.textContent = '영상 제목을 입력하세요';
+        titleOverlay.style.opacity = '0.5';
+    } else {
+        titleOverlay.textContent = text;
+        titleOverlay.style.fontSize = `${size}px`;
+        titleOverlay.style.color = color;
+        titleOverlay.style.opacity = '1';
+        titleOverlay.style.display = 'block';
+
+        // 정적 효과 적용
+        titleOverlay.className = 'video-title-overlay video-text-overlay';
+        if (staticEffect && staticEffect !== 'none') {
+            titleOverlay.classList.add(`effect-${staticEffect}`);
+        }
+
+        // 동적 효과 적용
+        if (dynamicEffect && dynamicEffect !== 'none') {
+            titleOverlay.classList.add(`animation-${dynamicEffect}`);
+        }
+    }
+    console.log(`✅ 제목 적용: ${text}`);
 }
 
 // 부제목 적용
 function applySubtitle() {
-    const subtitleOverlay = document.querySelector('.subtitle-overlay');
+    const subtitleOverlay = document.getElementById('video-subtitle-overlay') || document.querySelector('.video-subtitle-overlay');
     const text = document.getElementById('overlay-subtitle-input').value.trim();
     const size = document.getElementById('overlay-subtitle-size').value;
     const color = document.getElementById('overlay-subtitle-color').value;
+    const staticEffect = document.getElementById('overlay-subtitle-static-effect')?.value || 'none';
+    const dynamicEffect = document.getElementById('overlay-subtitle-dynamic-effect')?.value || 'none';
 
-    if (subtitleOverlay) {
-        if (!text) {
-            subtitleOverlay.textContent = '부제목을 입력하세요';
-            subtitleOverlay.style.opacity = '0.5';
-        } else {
-            subtitleOverlay.textContent = text;
-            subtitleOverlay.style.fontSize = `${size}px`;
-            subtitleOverlay.style.color = color;
-            subtitleOverlay.style.opacity = '1';
-        }
-        console.log(`✅ 부제목 적용: ${text}`);
+    if (!subtitleOverlay) {
+        console.error('❌ 부제목 오버레이를 찾을 수 없습니다.');
+        alert('⚠️ 영상을 먼저 불러와주세요.');
+        return;
     }
+
+    if (!text) {
+        subtitleOverlay.textContent = '부제목을 입력하세요';
+        subtitleOverlay.style.opacity = '0.5';
+    } else {
+        subtitleOverlay.textContent = text;
+        subtitleOverlay.style.fontSize = `${size}px`;
+        subtitleOverlay.style.color = color;
+        subtitleOverlay.style.opacity = '1';
+        subtitleOverlay.style.display = 'block';
+
+        // 정적 효과 적용
+        subtitleOverlay.className = 'video-subtitle-overlay video-text-overlay';
+        if (staticEffect && staticEffect !== 'none') {
+            subtitleOverlay.classList.add(`effect-${staticEffect}`);
+        }
+
+        // 동적 효과 적용
+        if (dynamicEffect && dynamicEffect !== 'none') {
+            subtitleOverlay.classList.add(`animation-${dynamicEffect}`);
+        }
+    }
+    console.log(`✅ 부제목 적용: ${text}`);
 }
 
 // 출처 적용
@@ -7453,9 +7877,9 @@ function updateSubtitleOverlaysFromTimeline(currentTime) {
             koreanOverlay.style.opacity = '1';
             koreanOverlay.classList.remove('empty');
         } else {
-            // 현재 시간에 자막이 없으면 플레이스홀더 표시
-            koreanOverlay.textContent = '주 자막을 입력하세요';
-            koreanOverlay.style.opacity = '0.5';
+            // 현재 시간에 자막이 없으면 숨김 (플레이스홀더 표시 안 함)
+            koreanOverlay.textContent = '';
+            koreanOverlay.style.display = 'none';
             koreanOverlay.classList.add('empty');
         }
     }
@@ -7470,9 +7894,9 @@ function updateSubtitleOverlaysFromTimeline(currentTime) {
             englishOverlay.style.opacity = '1';
             englishOverlay.classList.remove('empty');
         } else {
-            // 현재 시간에 자막이 없으면 플레이스홀더 표시
-            englishOverlay.textContent = '보조 자막을 입력하세요';
-            englishOverlay.style.opacity = '0.5';
+            // 현재 시간에 자막이 없으면 숨김 (플레이스홀더 표시 안 함)
+            englishOverlay.textContent = '';
+            englishOverlay.style.display = 'none';
             englishOverlay.classList.add('empty');
         }
     }
@@ -7634,12 +8058,344 @@ function saveTextOverlaySettingsWithSubtitles() {
     };
 
     try {
+        // 저장 시간 추가
+        settings.savedAt = new Date().toISOString();
+        settings.name = '기본 설정';
+
         localStorage.setItem('videoAnalyzerTextOverlay', JSON.stringify(settings));
+        updateSettingsStatus('기본 설정', new Date());
         alert('✅ 텍스트 오버레이 및 검정 배경 설정이 저장되었습니다!');
         console.log('💾 설정 저장됨:', settings);
     } catch (e) {
         console.error('❌ 설정 저장 실패:', e);
         alert('❌ 설정 저장에 실패했습니다.');
+    }
+}
+
+// 다른 이름으로 저장
+function saveTextOverlaySettingsAs() {
+    const name = prompt('설정 이름을 입력하세요:', `설정_${new Date().toLocaleDateString()}`);
+    if (!name) return;
+
+    // 현재 설정 수집 (기존 함수와 동일)
+    const settings = {
+        name: name,
+        savedAt: new Date().toISOString(),
+        title: {
+            text: document.getElementById('overlay-title-input').value,
+            size: document.getElementById('overlay-title-size').value,
+            color: document.getElementById('overlay-title-color').value,
+            staticEffect: document.getElementById('overlay-title-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-title-dynamic-effect').value,
+            position: document.getElementById('video-title-overlay')?.style.transform || ''
+        },
+        subtitle: {
+            text: document.getElementById('overlay-subtitle-input').value,
+            size: document.getElementById('overlay-subtitle-size').value,
+            color: document.getElementById('overlay-subtitle-color').value,
+            staticEffect: document.getElementById('overlay-subtitle-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-subtitle-dynamic-effect').value,
+            position: document.getElementById('video-subtitle-overlay')?.style.transform || ''
+        },
+        source: {
+            text: document.getElementById('overlay-source-input').value,
+            size: document.getElementById('overlay-source-size').value,
+            color: document.getElementById('overlay-source-color').value,
+            x: document.getElementById('overlay-source-x').value,
+            y: document.getElementById('overlay-source-y').value,
+            effect: document.getElementById('overlay-source-effect').value,
+            hide: document.getElementById('source-overlay-hide').checked
+        },
+        korean: {
+            text: document.getElementById('overlay-korean-input').value,
+            size: document.getElementById('overlay-korean-size').value,
+            color: document.getElementById('overlay-korean-color').value,
+            x: document.getElementById('overlay-korean-x').value,
+            y: document.getElementById('overlay-korean-y').value,
+            effect: document.getElementById('overlay-korean-effect').value
+        },
+        english: {
+            text: document.getElementById('overlay-english-input').value,
+            size: document.getElementById('overlay-english-size').value,
+            color: document.getElementById('overlay-english-color').value,
+            x: document.getElementById('overlay-english-x').value,
+            y: document.getElementById('overlay-english-y').value,
+            effect: document.getElementById('overlay-english-effect').value
+        },
+        blackBars: {
+            top: {
+                enabled: document.getElementById('top-bar-enable').checked,
+                height: document.getElementById('top-bar-height').value,
+                opacity: document.getElementById('top-bar-opacity').value
+            },
+            bottom: {
+                enabled: document.getElementById('bottom-bar-enable').checked,
+                height: document.getElementById('bottom-bar-height').value,
+                opacity: document.getElementById('bottom-bar-opacity').value
+            }
+        }
+    };
+
+    try {
+        // 모든 설정 목록 가져오기
+        const allSettings = JSON.parse(localStorage.getItem('videoAnalyzerAllSettings') || '{}');
+        allSettings[name] = settings;
+        localStorage.setItem('videoAnalyzerAllSettings', JSON.stringify(allSettings));
+
+        updateSettingsStatus(name, new Date());
+        alert(`✅ "${name}" 설정이 저장되었습니다!`);
+        console.log('💾 설정 저장됨:', settings);
+    } catch (e) {
+        console.error('❌ 설정 저장 실패:', e);
+        alert('❌ 설정 저장에 실패했습니다.');
+    }
+}
+
+// 설정 불러오기 (개선된 버전)
+function loadTextOverlaySettings() {
+    try {
+        // 저장된 모든 설정 목록 가져오기
+        const allSettings = JSON.parse(localStorage.getItem('videoAnalyzerAllSettings') || '{}');
+        const settingsList = Object.keys(allSettings);
+
+        if (settingsList.length === 0) {
+            // 기본 설정만 있는 경우
+            const saved = localStorage.getItem('videoAnalyzerTextOverlay');
+            if (!saved) {
+                alert('⚠️ 저장된 설정이 없습니다.');
+                return;
+            }
+            const settings = JSON.parse(saved);
+            applySettings(settings);
+            updateSettingsStatus(settings.name || '기본 설정', settings.savedAt ? new Date(settings.savedAt) : null);
+            return;
+        }
+
+        // 설정 선택 다이얼로그
+        let message = '불러올 설정을 선택하세요:\n\n';
+        settingsList.forEach((name, index) => {
+            const setting = allSettings[name];
+            const date = setting.savedAt ? new Date(setting.savedAt).toLocaleString() : '알 수 없음';
+            message += `${index + 1}. ${name} (${date})\n`;
+        });
+        message += '\n번호를 입력하세요:';
+
+        const choice = prompt(message);
+        if (!choice) return;
+
+        const index = parseInt(choice) - 1;
+        if (index < 0 || index >= settingsList.length) {
+            alert('❌ 잘못된 번호입니다.');
+            return;
+        }
+
+        const selectedName = settingsList[index];
+        const settings = allSettings[selectedName];
+        applySettings(settings);
+        updateSettingsStatus(selectedName, settings.savedAt ? new Date(settings.savedAt) : null);
+        alert(`✅ "${selectedName}" 설정을 불러왔습니다!`);
+
+    } catch (e) {
+        console.error('❌ 설정 불러오기 실패:', e);
+        console.error('에러 상세:', e.message, e.stack);
+        alert(`❌ 설정 불러오기에 실패했습니다.\n에러: ${e.message}\n\n브라우저 콘솔(F12)을 확인하세요.`);
+    }
+}
+
+// 파일에서 설정 불러오기
+function browseSettingsFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            try {
+                const settings = JSON.parse(event.target.result);
+                applySettings(settings);
+                updateSettingsStatus(settings.name || file.name, settings.savedAt ? new Date(settings.savedAt) : null);
+                alert(`✅ "${file.name}" 파일에서 설정을 불러왔습니다!`);
+            } catch (e) {
+                console.error('❌ 파일 읽기 실패:', e);
+                alert('❌ 유효하지 않은 설정 파일입니다.');
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
+// 설정 적용 헬퍼 함수
+function applySettings(settings) {
+    // 제목 설정 적용
+    if (settings.title) {
+        document.getElementById('overlay-title-input').value = settings.title.text || '';
+        document.getElementById('overlay-title-size').value = settings.title.size || 48;
+        document.getElementById('overlay-title-color').value = settings.title.color || '#ffffff';
+        if (settings.title.staticEffect) document.getElementById('overlay-title-static-effect').value = settings.title.staticEffect;
+        if (settings.title.dynamicEffect) document.getElementById('overlay-title-dynamic-effect').value = settings.title.dynamicEffect;
+
+        // 크기 표시 업데이트
+        const titleSizeDisplay = document.getElementById('title-size-display');
+        if (titleSizeDisplay) titleSizeDisplay.textContent = (settings.title.size || 48) + 'px';
+
+        // 실제 오버레이에 적용
+        const titleOverlay = document.getElementById('video-title-overlay');
+        if (titleOverlay) {
+            if (settings.title.text) {
+                try {
+                    applyTitle();
+                } catch (err) {
+                    console.warn('제목 적용 실패 (영상이 로드되지 않았을 수 있음):', err);
+                }
+            }
+            // 위치 복원
+            if (settings.title.position) {
+                titleOverlay.style.transform = settings.title.position;
+            }
+        }
+    }
+
+    // 부제목 설정 적용
+    if (settings.subtitle) {
+        document.getElementById('overlay-subtitle-input').value = settings.subtitle.text || '';
+        document.getElementById('overlay-subtitle-size').value = settings.subtitle.size || 32;
+        document.getElementById('overlay-subtitle-color').value = settings.subtitle.color || '#ffe14d';
+        if (settings.subtitle.staticEffect) document.getElementById('overlay-subtitle-static-effect').value = settings.subtitle.staticEffect;
+        if (settings.subtitle.dynamicEffect) document.getElementById('overlay-subtitle-dynamic-effect').value = settings.subtitle.dynamicEffect;
+
+        // 크기 표시 업데이트
+        const subtitleSizeDisplay = document.getElementById('subtitle-size-display');
+        if (subtitleSizeDisplay) subtitleSizeDisplay.textContent = (settings.subtitle.size || 32) + 'px';
+
+        // 실제 오버레이에 적용
+        const subtitleOverlay = document.getElementById('video-subtitle-overlay');
+        if (subtitleOverlay) {
+            if (settings.subtitle.text) {
+                try {
+                    applySubtitle();
+                } catch (err) {
+                    console.warn('부제목 적용 실패 (영상이 로드되지 않았을 수 있음):', err);
+                }
+            }
+            // 위치 복원
+            if (settings.subtitle.position) {
+                subtitleOverlay.style.transform = settings.subtitle.position;
+            }
+        }
+    }
+
+    // 출처 설정 적용
+    if (settings.source) {
+        if (document.getElementById('overlay-source-input')) document.getElementById('overlay-source-input').value = settings.source.text || '';
+        if (document.getElementById('overlay-source-size')) document.getElementById('overlay-source-size').value = settings.source.size || 16;
+        if (document.getElementById('overlay-source-color')) document.getElementById('overlay-source-color').value = settings.source.color || '#ffffff';
+        if (document.getElementById('overlay-source-x')) document.getElementById('overlay-source-x').value = settings.source.x || 10;
+        if (document.getElementById('overlay-source-y')) document.getElementById('overlay-source-y').value = settings.source.y || 10;
+        if (document.getElementById('overlay-source-effect')) document.getElementById('overlay-source-effect').value = settings.source.effect || 'none';
+        if (document.getElementById('source-overlay-hide')) document.getElementById('source-overlay-hide').checked = settings.source.hide || false;
+    }
+
+    // 한글 자막 설정 적용
+    if (settings.korean) {
+        if (document.getElementById('overlay-korean-input')) document.getElementById('overlay-korean-input').value = settings.korean.text || '';
+        if (document.getElementById('overlay-korean-size')) document.getElementById('overlay-korean-size').value = settings.korean.size || 24;
+        if (document.getElementById('overlay-korean-color')) document.getElementById('overlay-korean-color').value = settings.korean.color || '#ffffff';
+        if (document.getElementById('overlay-korean-x')) document.getElementById('overlay-korean-x').value = settings.korean.x || 50;
+        if (document.getElementById('overlay-korean-y')) document.getElementById('overlay-korean-y').value = settings.korean.y || 80;
+        if (document.getElementById('overlay-korean-effect')) document.getElementById('overlay-korean-effect').value = settings.korean.effect || 'none';
+    }
+
+    // 영어 자막 설정 적용
+    if (settings.english) {
+        if (document.getElementById('overlay-english-input')) document.getElementById('overlay-english-input').value = settings.english.text || '';
+        if (document.getElementById('overlay-english-size')) document.getElementById('overlay-english-size').value = settings.english.size || 20;
+        if (document.getElementById('overlay-english-color')) document.getElementById('overlay-english-color').value = settings.english.color || '#ffe14d';
+        if (document.getElementById('overlay-english-x')) document.getElementById('overlay-english-x').value = settings.english.x || 50;
+        if (document.getElementById('overlay-english-y')) document.getElementById('overlay-english-y').value = settings.english.y || 90;
+        if (document.getElementById('overlay-english-effect')) document.getElementById('overlay-english-effect').value = settings.english.effect || 'none';
+    }
+
+    // 검정 배경 설정 적용
+    if (settings.blackBars) {
+        // 상단 검정 바
+        if (settings.blackBars.top) {
+            const topEnable = document.getElementById('top-bar-enable');
+            const topHeight = document.getElementById('top-bar-height');
+            const topOpacity = document.getElementById('top-bar-opacity');
+
+            if (topEnable) topEnable.checked = settings.blackBars.top.enabled || false;
+            if (topHeight) topHeight.value = settings.blackBars.top.height || 15;
+            if (topOpacity) topOpacity.value = settings.blackBars.top.opacity || 0.7;
+
+            // 표시 업데이트
+            const topHeightDisplay = document.getElementById('top-bar-height-display');
+            const topOpacityDisplay = document.getElementById('top-bar-opacity-display');
+            if (topHeightDisplay) topHeightDisplay.textContent = (settings.blackBars.top.height || 15) + '%';
+            if (topOpacityDisplay) topOpacityDisplay.textContent = (settings.blackBars.top.opacity || 70) + '%';
+        }
+
+        // 하단 검정 바
+        if (settings.blackBars.bottom) {
+            const bottomEnable = document.getElementById('bottom-bar-enable');
+            const bottomHeight = document.getElementById('bottom-bar-height');
+            const bottomOpacity = document.getElementById('bottom-bar-opacity');
+
+            if (bottomEnable) bottomEnable.checked = settings.blackBars.bottom.enabled || false;
+            if (bottomHeight) bottomHeight.value = settings.blackBars.bottom.height || 15;
+            if (bottomOpacity) bottomOpacity.value = settings.blackBars.bottom.opacity || 0.7;
+
+            // 표시 업데이트
+            const bottomHeightDisplay = document.getElementById('bottom-bar-height-display');
+            const bottomOpacityDisplay = document.getElementById('bottom-bar-opacity-display');
+            if (bottomHeightDisplay) bottomHeightDisplay.textContent = (settings.blackBars.bottom.height || 15) + '%';
+            if (bottomOpacityDisplay) bottomOpacityDisplay.textContent = (settings.blackBars.bottom.opacity || 70) + '%';
+        }
+
+        // 검정 배경 실제 적용
+        if (settings.blackBars.top) {
+            const topBar = document.getElementById('top-black-bar');
+            const topCheckbox = document.getElementById('top-bar-enable');
+            if (topBar && topCheckbox) {
+                if (topCheckbox.checked) {
+                    topBar.style.display = 'block';
+                    updateBlackBar('top');
+                } else {
+                    topBar.style.display = 'none';
+                }
+            }
+        }
+        if (settings.blackBars.bottom) {
+            const bottomBar = document.getElementById('bottom-black-bar');
+            const bottomCheckbox = document.getElementById('bottom-bar-enable');
+            if (bottomBar && bottomCheckbox) {
+                if (bottomCheckbox.checked) {
+                    bottomBar.style.display = 'block';
+                    updateBlackBar('bottom');
+                } else {
+                    bottomBar.style.display = 'none';
+                }
+            }
+        }
+    }
+
+    console.log('✅ 설정이 적용되었습니다:', settings);
+}
+
+// 현재 설정 상태 업데이트
+function updateSettingsStatus(name, savedAt) {
+    const nameEl = document.getElementById('saved-settings-name');
+    const timeEl = document.getElementById('saved-settings-time');
+
+    if (nameEl) nameEl.textContent = name || '기본 설정';
+    if (timeEl && savedAt) {
+        const date = new Date(savedAt);
+        timeEl.textContent = `저장 시간: ${date.toLocaleString()}`;
+    } else if (timeEl) {
+        timeEl.textContent = '미저장';
     }
 }
 
@@ -8360,6 +9116,25 @@ async function restoreSavedFiles() {
             errors.push(`보조자막: ${error.message || error}`);
         }
 
+        // 오디오 트랙 복원 (audio, commentary, bgm)
+        for (const trackType of ['audio', 'commentary', 'bgm']) {
+            try {
+                const audioData = await loadFileFromIndexedDB(trackType);
+                if (audioData && audioData.file) {
+                    console.log(`🎵 ${trackType} 파일 복원:`, audioData.metadata.fileName);
+                    const file = new File([audioData.file], audioData.metadata.fileName, { type: audioData.file.type });
+                    await handleAudioFileLoad(file, trackType);
+                    restoredCount++;
+                    console.log(`✅ ${trackType} 파일 복원 성공`);
+                } else {
+                    console.log(`ℹ️ 저장된 ${trackType} 파일 없음`);
+                }
+            } catch (error) {
+                console.error(`❌ ${trackType} 파일 복원 실패:`, error);
+                errors.push(`${trackType}: ${error.message || error}`);
+            }
+        }
+
         // 결과 메시지 표시
         if (restoredCount > 0 || errors.length > 0) {
             const statusMsg = document.createElement('div');
@@ -8409,6 +9184,68 @@ document.addEventListener('DOMContentLoaded', async function() {
         await restoreSavedFiles();
     } catch (error) {
         console.error('❌ IndexedDB 초기화 실패:', error);
+    }
+
+    // 텍스트 오버레이 설정 자동 복원
+    try {
+        const saved = localStorage.getItem('videoAnalyzerTextOverlay');
+        if (saved) {
+            const settings = JSON.parse(saved);
+            console.log('🔄 텍스트 오버레이 설정 복원 중...');
+
+            // 설정을 복원하지만 실제 오버레이는 영상 로드 후에만 적용
+            // 입력 필드 값만 복원
+            if (settings.title) {
+                const titleInput = document.getElementById('overlay-title-input');
+                const titleSize = document.getElementById('overlay-title-size');
+                const titleColor = document.getElementById('overlay-title-color');
+                if (titleInput) titleInput.value = settings.title.text || '';
+                if (titleSize) {
+                    titleSize.value = settings.title.size || 48;
+                    const titleSizeDisplay = document.getElementById('title-size-display');
+                    if (titleSizeDisplay) titleSizeDisplay.textContent = (settings.title.size || 48) + 'px';
+                }
+                if (titleColor) titleColor.value = settings.title.color || '#ffffff';
+            }
+
+            if (settings.subtitle) {
+                const subtitleInput = document.getElementById('overlay-subtitle-input');
+                const subtitleSize = document.getElementById('overlay-subtitle-size');
+                const subtitleColor = document.getElementById('overlay-subtitle-color');
+                if (subtitleInput) subtitleInput.value = settings.subtitle.text || '';
+                if (subtitleSize) {
+                    subtitleSize.value = settings.subtitle.size || 32;
+                    const subtitleSizeDisplay = document.getElementById('subtitle-size-display');
+                    if (subtitleSizeDisplay) subtitleSizeDisplay.textContent = (settings.subtitle.size || 32) + 'px';
+                }
+                if (subtitleColor) subtitleColor.value = settings.subtitle.color || '#ffe14d';
+            }
+
+            // 검정 배경 설정 복원
+            if (settings.blackBars) {
+                if (settings.blackBars.top) {
+                    const topEnable = document.getElementById('top-bar-enable');
+                    const topHeight = document.getElementById('top-bar-height');
+                    const topOpacity = document.getElementById('top-bar-opacity');
+                    if (topEnable) topEnable.checked = settings.blackBars.top.enabled || false;
+                    if (topHeight) topHeight.value = settings.blackBars.top.height || 15;
+                    if (topOpacity) topOpacity.value = settings.blackBars.top.opacity || 70;
+                }
+                if (settings.blackBars.bottom) {
+                    const bottomEnable = document.getElementById('bottom-bar-enable');
+                    const bottomHeight = document.getElementById('bottom-bar-height');
+                    const bottomOpacity = document.getElementById('bottom-bar-opacity');
+                    if (bottomEnable) bottomEnable.checked = settings.blackBars.bottom.enabled || false;
+                    if (bottomHeight) bottomHeight.value = settings.blackBars.bottom.height || 15;
+                    if (bottomOpacity) bottomOpacity.value = settings.blackBars.bottom.opacity || 70;
+                }
+            }
+
+            updateSettingsStatus(settings.name || '기본 설정', settings.savedAt ? new Date(settings.savedAt) : null);
+            console.log('✅ 텍스트 오버레이 설정 복원 완료');
+        }
+    } catch (error) {
+        console.error('❌ 텍스트 오버레이 설정 복원 실패:', error);
     }
 
     // 타임라인 줌 변경 이벤트

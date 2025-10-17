@@ -4,10 +4,12 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Literal
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Literal, Tuple
 from uuid import uuid4
 
 try:
@@ -44,6 +46,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from pydantic import BaseModel
+from PIL import ImageColor
 
 # AI Shorts Maker imports - optional module
 try:
@@ -205,6 +208,60 @@ class TextRemovalTrimRequest(BaseModel):
 
 
 logger = logging.getLogger(__name__)
+
+
+def open_video_with_transcode_fallback(video_path: Path) -> tuple[Any, Optional[Path]]:
+    """
+    OpenCV로 비디오를 열되, AV1 등으로 실패 시 H.264로 트랜스코딩하여 재시도.
+
+    Returns:
+        (cv2.VideoCapture, transcoded_file_path or None)
+    """
+    import subprocess
+    import tempfile
+
+    if cv2 is None:
+        raise RuntimeError("OpenCV가 설치되지 않았습니다.")
+
+    # 먼저 직접 열기 시도
+    cap = cv2.VideoCapture(str(video_path))
+    if cap.isOpened():
+        return cap, None
+
+    # 실패 시 트랜스코딩
+    logger.info(f"Failed to open video directly, attempting transcode: {video_path}")
+
+    temp_dir = Path(tempfile.gettempdir())
+    transcoded_file = temp_dir / f"transcoded_{uuid4().hex}.mp4"
+
+    transcode_cmd = [
+        "ffmpeg",
+        "-y",
+        "-hwaccel", "none",  # 하드웨어 가속 비활성화
+        "-i", str(video_path),
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-preset", "ultrafast",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # 해상도 유지 (짝수로 보정)
+        "-avoid_negative_ts", "make_zero",
+        str(transcoded_file)
+    ]
+
+    proc = subprocess.run(transcode_cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not transcoded_file.exists():
+        error_msg = proc.stderr.strip() or proc.stdout.strip() or "FFmpeg transcoding failed"
+        if transcoded_file.exists():
+            transcoded_file.unlink()
+        raise RuntimeError(f"Failed to transcode video: {error_msg}")
+
+    cap = cv2.VideoCapture(str(transcoded_file))
+    if not cap.isOpened():
+        if transcoded_file.exists():
+            transcoded_file.unlink()
+        raise RuntimeError("Failed to open transcoded video")
+
+    return cap, transcoded_file
+
 
 BASE_DIR = Path(__file__).resolve().parent
 PACKAGE_DIR = BASE_DIR.parent / "ai_shorts_maker"
@@ -385,6 +442,336 @@ def parse_resize_form(value: str) -> Optional[tuple[int, int]]:
         return width, height
     except Exception:  # pylint: disable=broad-except
         return None
+
+
+# ---------------------------------------------------------------------------
+# Styling helpers for video overlay rendering
+# ---------------------------------------------------------------------------
+
+FONT_SEARCH_DIRECTORIES: Tuple[Path, ...] = tuple(
+    directory
+    for directory in (
+        Path(__file__).resolve().parent / "static" / "fonts",
+        Path(__file__).resolve().parent.parent / "ai_shorts_maker" / "assets" / "fonts",
+        Path("/usr/share/fonts/truetype/noto"),
+        Path("/usr/share/fonts/truetype/nanum"),
+        Path("/usr/share/fonts/truetype/dejavu"),
+        Path("/usr/share/fonts/truetype/liberation"),
+    )
+    if directory.exists()
+)
+
+
+@lru_cache(maxsize=1)
+def _collect_font_inventory() -> Dict[str, Path]:
+    """Scan known directories for font files and cache the results."""
+    inventory: Dict[str, Path] = {}
+    for base_dir in FONT_SEARCH_DIRECTORIES:
+        try:
+            for font_file in base_dir.rglob("*"):
+                if font_file.is_file() and font_file.suffix.lower() in {".ttf", ".otf", ".ttc"}:
+                    inventory.setdefault(font_file.name.lower(), font_file)
+        except (OSError, PermissionError):
+            continue
+    return inventory
+
+
+@lru_cache(maxsize=None)
+def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -> Optional[str]:
+    """Find a matching font file for the requested family/weight."""
+    inventory = _collect_font_inventory()
+    if not inventory:
+        return None
+
+    normalized_family = (font_family or "").lower()
+    normalized_weight = (font_weight or "").lower()
+    prefer_bold = any(
+        normalized_weight.startswith(prefix) for prefix in ("bold", "600", "700", "800", "900")
+    )
+
+    candidate_names: List[str] = []
+
+    def add_candidate(name: str) -> None:
+        lower = name.lower()
+        if lower not in candidate_names:
+            candidate_names.append(lower)
+
+    if normalized_family:
+        if "pretendard" in normalized_family:
+            if prefer_bold:
+                add_candidate("pretendard-semibold.ttf")
+                add_candidate("pretendard-bold.ttf")
+            add_candidate("pretendard-regular.ttf")
+            add_candidate("pretendard.ttf")
+        if "nanum" in normalized_family:
+            if prefer_bold:
+                add_candidate("nanumgothicbold.ttf")
+            add_candidate("nanumgothic.ttf")
+        if "noto" in normalized_family:
+            if prefer_bold:
+                add_candidate("notosans-bold.ttf")
+                add_candidate("notosanscjkk-bold.otf")
+            add_candidate("notosans-regular.ttf")
+            add_candidate("notosanscjkkr-regular.otf")
+        if "arial" in normalized_family:
+            if prefer_bold:
+                add_candidate("arialbd.ttf")
+            add_candidate("arial.ttf")
+        if "segoe" in normalized_family:
+            if prefer_bold:
+                add_candidate("segoeuib.ttf")
+            add_candidate("segoeui.ttf")
+
+    if prefer_bold:
+        add_candidate("pretendard-semibold.ttf")
+        add_candidate("nanumgothicbold.ttf")
+        add_candidate("notosans-bold.ttf")
+        add_candidate("arialbd.ttf")
+
+    add_candidate("pretendard-regular.ttf")
+    add_candidate("nanumgothic.ttf")
+    add_candidate("notosans-regular.ttf")
+    add_candidate("dejavusans.ttf")
+    add_candidate("arial.ttf")
+
+    for candidate in candidate_names:
+        if candidate in inventory:
+            return str(inventory[candidate])
+        for file_name, path in inventory.items():
+            if candidate in file_name:
+                return str(path)
+
+    return None
+
+
+@lru_cache(maxsize=256)
+def _parse_css_color(value: Optional[str], default_hex: str = "0xFFFFFF") -> Tuple[str, Optional[float]]:
+    """Convert CSS color expressions into FFmpeg-compatible hex + alpha."""
+    if not value:
+        return default_hex, None
+    try:
+        r, g, b, a = ImageColor.getcolor(value.strip(), "RGBA")
+        hex_value = f"0x{r:02X}{g:02X}{b:02X}"
+        if a < 255:
+            return hex_value, round(a / 255.0, 4)
+        return hex_value, None
+    except Exception:  # pylint: disable=broad-except
+        return default_hex, None
+
+
+def _format_color_for_ffmpeg(color_hex: str, alpha: Optional[float]) -> str:
+    """Format a color + alpha for drawtext."""
+    if alpha is None:
+        return color_hex
+    alpha_clamped = max(0.0, min(1.0, float(alpha)))
+    if alpha_clamped >= 0.9999:
+        return color_hex
+    alpha_str = f"{alpha_clamped:.4f}".rstrip("0").rstrip(".")
+    return f"{color_hex}@{alpha_str}"
+
+
+def _parse_css_length(value: Optional[str], font_size: float) -> Optional[float]:
+    """Parse CSS length values (px, em, rem, %) into pixel units."""
+    if not value:
+        return None
+    lowered = value.strip().lower()
+    if not lowered or lowered in {"auto", "normal"}:
+        return None
+    try:
+        if lowered.endswith("px"):
+            return float(lowered[:-2])
+        if lowered.endswith("em"):
+            return float(lowered[:-2]) * font_size
+        if lowered.endswith("rem"):
+            return float(lowered[:-3]) * font_size
+        if lowered.endswith("%"):
+            return float(lowered[:-1]) * font_size / 100.0
+        return float(lowered)
+    except ValueError:
+        return None
+
+
+def _parse_text_shadow(shadow_value: Optional[str], font_size: float) -> Optional[Dict[str, Any]]:
+    """Extract the first text-shadow entry and convert it to pixel offsets."""
+    if not shadow_value:
+        return None
+    shadow_str = shadow_value.strip()
+    if not shadow_str or shadow_str.lower() == "none":
+        return None
+
+    entries: List[str] = []
+    buffer = ""
+    depth = 0
+    for char in shadow_str:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            if buffer.strip():
+                entries.append(buffer.strip())
+            buffer = ""
+        else:
+            buffer += char
+    if buffer.strip():
+        entries.append(buffer.strip())
+
+    if not entries:
+        return None
+
+    first_entry = entries[0]
+    color_match = re.search(r'(rgba?\([^)]*\)|#[0-9a-fA-F]{3,8}|[a-zA-Z]+)\s*$', first_entry)
+    color = color_match.group(1) if color_match else None
+    remainder = first_entry[: color_match.start()].strip() if color_match else first_entry
+
+    length_tokens = [token for token in re.split(r"\s+", remainder) if token]
+    dx = _parse_css_length(length_tokens[0], font_size) if len(length_tokens) > 0 else 0.0
+    dy = _parse_css_length(length_tokens[1], font_size) if len(length_tokens) > 1 else 0.0
+
+    return {
+        "color": color,
+        "dx": float(dx or 0.0),
+        "dy": float(dy or 0.0),
+    }
+
+
+def escape_ffmpeg_text(text: str) -> str:
+    """Escape characters that would break FFmpeg drawtext filters."""
+    escaped = text.replace("\\", "\\\\")
+    escaped = escaped.replace("'", "'\\''")
+    escaped = escaped.replace(":", "\\:")
+    escaped = escaped.replace("[", "\\[")
+    escaped = escaped.replace("]", "\\]")
+    return escaped
+
+
+def _build_drawtext_filter(
+    overlay: Dict[str, Any],
+    video_width: int,
+    video_height: int,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Construct a drawtext filter string that mirrors the web overlay styling."""
+    if not overlay or not overlay.get("text"):
+        return None
+
+    text_raw = str(overlay["text"])
+    text = escape_ffmpeg_text(text_raw)
+
+    try:
+        x_value = float(overlay.get("x", video_width / 2))
+    except (TypeError, ValueError):
+        x_value = video_width / 2
+    try:
+        y_value = float(overlay.get("y", video_height / 2))
+    except (TypeError, ValueError):
+        y_value = video_height / 2
+
+    try:
+        font_size = max(12, int(round(float(overlay.get("fontSize", 48)))))
+    except (TypeError, ValueError):
+        font_size = 48
+
+    font_family = overlay.get("fontFamily")
+    font_weight = overlay.get("fontWeight")
+    font_path = _resolve_font_file(font_family, font_weight)
+
+    font_hex, font_alpha = _parse_css_color(overlay.get("color"))
+    overlay_opacity = overlay.get("opacity")
+    if overlay_opacity is not None:
+        try:
+            opacity_value = float(overlay_opacity)
+            opacity_value = max(0.0, min(1.0, opacity_value))
+            if font_alpha is None:
+                font_alpha = opacity_value
+            else:
+                font_alpha = max(0.0, min(1.0, font_alpha * opacity_value))
+        except (TypeError, ValueError):
+            pass
+    font_color = _format_color_for_ffmpeg(font_hex, font_alpha)
+
+    outline_hex, outline_alpha = _parse_css_color(
+        overlay.get("outlineColor"),
+        default_hex="0x000000",
+    )
+    outline_color = _format_color_for_ffmpeg(outline_hex, outline_alpha)
+
+    overlay_type = (overlay.get("type") or "").lower()
+    if overlay_type in {"korean", "english"}:
+        border_width = max(2, int(round(font_size * 0.08)))
+    else:
+        border_width = max(1, int(round(font_size * 0.06)))
+
+    letter_spacing = overlay.get("letterSpacing")
+    spacing_value = _parse_css_length(letter_spacing, font_size) if letter_spacing else None
+
+    shadow_info = _parse_text_shadow(overlay.get("textShadow"), font_size)
+
+    background_color_raw = overlay.get("backgroundColor")
+    box_color_hex, box_alpha = _parse_css_color(background_color_raw, default_hex="0x000000")
+
+    padding = overlay.get("padding") or {}
+    padding_candidates = [
+        padding.get("top"),
+        padding.get("right"),
+        padding.get("bottom"),
+        padding.get("left"),
+    ]
+    padding_pixels = [
+        float(value)
+        for value in padding_candidates
+        if isinstance(value, (int, float)) and value > 0
+    ]
+    if not padding_pixels and background_color_raw:
+        padding_pixels = [font_size * 0.25]
+    padding_amount = int(round(max(padding_pixels))) if padding_pixels else 0
+
+    drawtext_params = [
+        f"text='{text}'",
+        f"x={x_value}-text_w/2",
+        f"y={y_value}-text_h/2",
+        f"fontsize={font_size}",
+        "text_shaping=1",
+        f"fontcolor={font_color}",
+    ]
+
+    if font_path:
+        sanitized_font = font_path.replace("\\", "\\\\").replace(":", "\\:")
+        drawtext_params.append(f"fontfile={sanitized_font}")
+
+    if spacing_value:
+        drawtext_params.append(f"spacing={spacing_value:.2f}")
+
+    if border_width > 0:
+        drawtext_params.append(f"borderw={border_width}")
+        drawtext_params.append(f"bordercolor={outline_color}")
+
+    if shadow_info and shadow_info.get("color"):
+        shadow_hex, shadow_alpha = _parse_css_color(shadow_info["color"], default_hex="0x000000")
+        shadow_color = _format_color_for_ffmpeg(shadow_hex, shadow_alpha)
+        drawtext_params.append(f"shadowcolor={shadow_color}")
+        drawtext_params.append(f"shadowx={int(round(shadow_info.get('dx', 0.0)))}")
+        drawtext_params.append(f"shadowy={int(round(shadow_info.get('dy', 0.0)))}")
+
+    if background_color_raw and (box_alpha is None or box_alpha > 0):
+        drawtext_params.append("box=1")
+        drawtext_params.append(f"boxcolor={_format_color_for_ffmpeg(box_color_hex, box_alpha)}")
+        drawtext_params.append(f"boxborderw={max(1, padding_amount)}")
+
+    filter_str = "drawtext=" + ":".join(drawtext_params)
+    meta = {
+        "font_size": font_size,
+        "fontfile": font_path,
+        "font_color": font_color,
+        "outline_color": outline_color,
+        "border_width": border_width,
+        "letter_spacing": spacing_value,
+        "shadow": shadow_info,
+        "background": background_color_raw,
+        "padding": padding_amount,
+        "opacity": overlay_opacity,
+    }
+
+    return filter_str, meta
 
 
 def build_dashboard_project(summary: ProjectSummary) -> DashboardProject:
@@ -2776,11 +3163,9 @@ async def api_extract_frame(payload: Dict[str, Any] = Body(...)):
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
 
+    transcoded_file = None
     try:
-        cap = cv2.VideoCapture(str(video_path))
-
-        if not cap.isOpened():
-            raise HTTPException(status_code=400, detail="비디오 파일을 열 수 없습니다.")
+        cap, transcoded_file = open_video_with_transcode_fallback(video_path)
 
         if frame_type == "first":
             # 첫 프레임
@@ -2802,6 +3187,14 @@ async def api_extract_frame(payload: Dict[str, Any] = Body(...)):
 
         cap.release()
 
+        # 임시 파일 정리
+        if transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+                logger.info(f"Cleaned up transcoded file: {transcoded_file}")
+            except Exception as cleanup_exc:
+                logger.warning(f"Failed to clean up transcoded file: {cleanup_exc}")
+
         if not ret:
             raise HTTPException(status_code=400, detail="프레임을 읽을 수 없습니다.")
 
@@ -2815,6 +3208,12 @@ async def api_extract_frame(payload: Dict[str, Any] = Body(...)):
         }
 
     except Exception as e:
+        # 에러 발생 시에도 임시 파일 정리
+        if transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
         logging.exception("프레임 추출 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
 
@@ -2838,11 +3237,9 @@ async def api_extract_frames_interval(payload: Dict[str, Any] = Body(...)):
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
 
+    transcoded_file = None
     try:
-        cap = cv2.VideoCapture(str(video_path))
-
-        if not cap.isOpened():
-            raise HTTPException(status_code=400, detail="비디오 파일을 열 수 없습니다.")
+        cap, transcoded_file = open_video_with_transcode_fallback(video_path)
 
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -2883,12 +3280,25 @@ async def api_extract_frames_interval(payload: Dict[str, Any] = Body(...)):
 
         cap.release()
 
+        # 임시 파일 정리
+        if transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
+
         return {
             "frames": frames_data,
             "total_duration": round(duration, 2)
         }
 
     except Exception as e:
+        # 에러 발생 시에도 임시 파일 정리
+        if transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
         logging.exception("프레임 추출 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
 
@@ -2964,9 +3374,8 @@ async def api_extract_frames_by_segments(payload: Dict[str, Any] = Body(...)):
             raise HTTPException(status_code=400, detail="자막 파일에서 시간 정보를 찾을 수 없습니다.")
 
         # 영상 열기
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            raise HTTPException(status_code=400, detail="비디오 파일을 열 수 없습니다.")
+        transcoded_file = None
+        cap, transcoded_file = open_video_with_transcode_fallback(video_path)
 
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -3018,6 +3427,13 @@ async def api_extract_frames_by_segments(payload: Dict[str, Any] = Body(...)):
 
         cap.release()
 
+        # 임시 파일 정리
+        if transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
+
         return {
             "frames": frames_data,
             "total_segments": len(segments),
@@ -3026,8 +3442,20 @@ async def api_extract_frames_by_segments(payload: Dict[str, Any] = Body(...)):
         }
 
     except HTTPException:
+        # 에러 발생 시에도 임시 파일 정리
+        if 'transcoded_file' in locals() and transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
         raise
     except Exception as e:
+        # 에러 발생 시에도 임시 파일 정리
+        if 'transcoded_file' in locals() and transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
         logging.exception("세그먼트별 프레임 추출 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
 
@@ -3410,10 +3838,8 @@ async def api_extract_frames_by_times(payload: Dict[str, Any] = Body(...)) -> Di
             raise HTTPException(status_code=400, detail="추출할 시간 목록이 필요합니다.")
 
         # OpenCV로 영상 열기
-        cap = cv2.VideoCapture(str(video_path))
-
-        if not cap.isOpened():
-            raise HTTPException(status_code=500, detail="영상 파일을 열 수 없습니다.")
+        transcoded_file = None
+        cap, transcoded_file = open_video_with_transcode_fallback(video_path)
 
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -3449,14 +3875,33 @@ async def api_extract_frames_by_times(payload: Dict[str, Any] = Body(...)) -> Di
 
         cap.release()
 
+        # 임시 파일 정리
+        if transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
+
         return {
             "frames": frames_data,
             "total_extracted": len(frames_data)
         }
 
     except HTTPException:
+        # 에러 발생 시에도 임시 파일 정리
+        if 'transcoded_file' in locals() and transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
         raise
     except Exception as e:
+        # 에러 발생 시에도 임시 파일 정리
+        if 'transcoded_file' in locals() and transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
         logging.exception("프레임 추출 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"프레임 추출 실패: {str(e)}")
 
@@ -3657,31 +4102,6 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
     """텍스트 오버레이와 자막이 적용된 프리뷰 영상 생성"""
     import subprocess
     import tempfile
-    import re
-
-    def rgb_to_hex(rgb_string: str) -> str:
-        """CSS rgb(r, g, b) 형식을 FFmpeg 0xRRGGBB 형식으로 변환"""
-        if not rgb_string:
-            return "0xFFFFFF"
-
-        # rgb(r, g, b) 또는 rgba(r, g, b, a) 파싱
-        match = re.search(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', rgb_string)
-        if match:
-            r, g, b = int(match.group(1)), int(match.group(2)), int(match.group(3))
-            return f"0x{r:02X}{g:02X}{b:02X}"
-
-        # 기본값
-        return "0xFFFFFF"
-
-    def escape_ffmpeg_text(text: str) -> str:
-        """FFmpeg drawtext를 위한 텍스트 이스케이프"""
-        # FFmpeg drawtext에서 특수문자 이스케이프
-        text = text.replace("\\", "\\\\")
-        text = text.replace("'", "'\\''")
-        text = text.replace(":", "\\:")
-        text = text.replace("[", "\\[")
-        text = text.replace("]", "\\]")
-        return text
 
     try:
         video_path = payload.get("video_path")
@@ -3734,20 +4154,17 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
 
         # 2. 텍스트 오버레이 추가 (제목, 부제목, 한글 자막, 영어 자막)
         for overlay_key, overlay_data in overlays.items():
-            if overlay_data and overlay_data.get("text"):
-                text = escape_ffmpeg_text(overlay_data["text"])
-                x = overlay_data.get("x", video_width // 2)
-                y = overlay_data.get("y", video_height // 2)
-                font_size = overlay_data.get("fontSize", 48)
-                color = rgb_to_hex(overlay_data.get("color", "white"))
-
-                # drawtext 필터 추가
-                # x, y는 중앙 정렬을 위해 조정
-                filters.append(
-                    f"drawtext=text='{text}':x={x}-text_w/2:y={y}-text_h/2:"
-                    f"fontsize={font_size}:fontcolor={color}:"
-                    f"box=1:boxcolor=black@0.3:boxborderw=5"
+            result = _build_drawtext_filter(overlay_data, video_width, video_height)
+            if result:
+                drawtext_filter, meta = result
+                logging.info(
+                    "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
+                    overlay_key,
+                    meta.get("font_size"),
+                    meta.get("fontfile") or "default",
                 )
+                logging.info(f"   FFmpeg 필터: {drawtext_filter}")
+                filters.append(drawtext_filter)
 
         # 3. 자막 파일 추가 (있는 경우)
         if subtitle_path and Path(subtitle_path).exists():
@@ -3828,6 +4245,335 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
     except Exception as e:
         logging.exception("프리뷰 영상 생성 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"프리뷰 영상 생성 실패: {str(e)}")
+
+
+@app.post("/api/video-analyzer/create-final-video")
+async def api_create_final_video(
+    video_path: str = Form(...),
+    video_width: int = Form(...),
+    video_height: int = Form(...),
+    overlays: str = Form(...),
+    black_bars: str = Form(...),
+    tracks: str = Form(...),
+    audio_file: UploadFile = File(None),
+    commentary_file: UploadFile = File(None),
+    bgm_file: UploadFile = File(None)
+) -> Dict[str, Any]:
+    """체크된 트랙을 합성하여 최종 MP4 영상 생성"""
+    import subprocess
+    import tempfile
+    import shutil
+
+    try:
+        # JSON 파싱
+        overlays_data = json.loads(overlays)
+        black_bars_data = json.loads(black_bars)
+        tracks_data = json.loads(tracks)
+
+        if not video_path or not Path(video_path).exists():
+            raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
+
+        video_file = Path(video_path)
+        output_dir = video_file.parent
+        output_name = f"{video_file.stem}_final.mp4"
+        output_path = output_dir / output_name
+
+        # 출력 파일이 이미 존재하면 고유한 이름 생성
+        counter = 1
+        while output_path.exists():
+            output_name = f"{video_file.stem}_final_{counter}.mp4"
+            output_path = output_dir / output_name
+            counter += 1
+
+        logging.info(f"🎬 최종 영상 생성 시작: {video_path}")
+        logging.info(f"📐 비디오 크기: {video_width}x{video_height}")
+        logging.info(f"📝 오버레이: {overlays_data}")
+        logging.info(f"⬛ 검정 배경: {black_bars_data}")
+        logging.info(f"🎵 트랙: {tracks_data}")
+
+        # 임시 디렉토리 생성
+        temp_dir = Path(tempfile.mkdtemp())
+        temp_audio_files = []
+
+        try:
+            # 업로드된 오디오 파일 저장
+            audio_inputs = []
+
+            if audio_file:
+                audio_path = temp_dir / audio_file.filename
+                with open(audio_path, "wb") as f:
+                    shutil.copyfileobj(audio_file.file, f)
+                temp_audio_files.append(audio_path)
+                audio_inputs.append(str(audio_path))
+                logging.info(f"🎵 Audio 파일 저장: {audio_path}")
+
+            if commentary_file:
+                commentary_path = temp_dir / commentary_file.filename
+                with open(commentary_path, "wb") as f:
+                    shutil.copyfileobj(commentary_file.file, f)
+                temp_audio_files.append(commentary_path)
+                audio_inputs.append(str(commentary_path))
+                logging.info(f"🎙️ Commentary 파일 저장: {commentary_path}")
+
+            if bgm_file:
+                bgm_path = temp_dir / bgm_file.filename
+                with open(bgm_path, "wb") as f:
+                    shutil.copyfileobj(bgm_file.file, f)
+                temp_audio_files.append(bgm_path)
+                audio_inputs.append(str(bgm_path))
+                logging.info(f"🎵 BGM 파일 저장: {bgm_path}")
+
+            # FFmpeg filter_complex 구성
+            video_filters = []
+
+            # 1. 검정 배경 추가
+            if black_bars_data.get("top", {}).get("enabled"):
+                top_height_percent = black_bars_data["top"].get("height", 15)
+                top_opacity = black_bars_data["top"].get("opacity", 0.8)
+                top_height = int(video_height * top_height_percent / 100)
+                video_filters.append(
+                    f"drawbox=x=0:y=0:w={video_width}:h={top_height}:color=black@{top_opacity}:t=fill"
+                )
+
+            if black_bars_data.get("bottom", {}).get("enabled"):
+                bottom_height_percent = black_bars_data["bottom"].get("height", 15)
+                bottom_opacity = black_bars_data["bottom"].get("opacity", 0.8)
+                bottom_height = int(video_height * bottom_height_percent / 100)
+                bottom_y = video_height - bottom_height
+                video_filters.append(
+                    f"drawbox=x=0:y={bottom_y}:w={video_width}:h={bottom_height}:color=black@{bottom_opacity}:t=fill"
+                )
+
+            for overlay_key, overlay_data in overlays_data.items():
+                result = _build_drawtext_filter(overlay_data, video_width, video_height)
+                if result:
+                    drawtext_filter, meta = result
+                    logging.info(
+                        "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
+                        overlay_key,
+                        meta.get("font_size"),
+                        meta.get("fontfile") or "default",
+                    )
+                    logging.info(f"   FFmpeg 필터: {drawtext_filter}")
+                    video_filters.append(drawtext_filter)
+
+            # 3. 자막 파일 생성 (SRT 형식)
+            subtitle_files = []
+
+            # 주자막 (translationSubtitle)
+            if tracks_data.get("translationSubtitle", {}).get("enabled") and tracks_data.get("translationSubtitle", {}).get("data"):
+                translation_srt = temp_dir / "translation.srt"
+                with open(translation_srt, "w", encoding="utf-8") as f:
+                    for idx, sub in enumerate(tracks_data["translationSubtitle"]["data"], 1):
+                        f.write(f"{idx}\n")
+                        f.write(f"{sub['start']} --> {sub['end']}\n")
+                        f.write(f"{sub['text']}\n\n")
+                subtitle_files.append(("translation", str(translation_srt)))
+                logging.info(f"📝 주자막 파일 생성: {translation_srt}")
+
+            # 보조자막 (descriptionSubtitle)
+            if tracks_data.get("descriptionSubtitle", {}).get("enabled") and tracks_data.get("descriptionSubtitle", {}).get("data"):
+                description_srt = temp_dir / "description.srt"
+                with open(description_srt, "w", encoding="utf-8") as f:
+                    for idx, sub in enumerate(tracks_data["descriptionSubtitle"]["data"], 1):
+                        f.write(f"{idx}\n")
+                        f.write(f"{sub['start']} --> {sub['end']}\n")
+                        f.write(f"{sub['text']}\n\n")
+                subtitle_files.append(("description", str(description_srt)))
+                logging.info(f"📝 보조자막 파일 생성: {description_srt}")
+
+            # 메인자막 (mainSubtitle)
+            if tracks_data.get("mainSubtitle", {}).get("enabled") and tracks_data.get("mainSubtitle", {}).get("data"):
+                main_srt = temp_dir / "main.srt"
+                with open(main_srt, "w", encoding="utf-8") as f:
+                    for idx, sub in enumerate(tracks_data["mainSubtitle"]["data"], 1):
+                        f.write(f"{idx}\n")
+                        f.write(f"{sub['start']} --> {sub['end']}\n")
+                        f.write(f"{sub['text']}\n\n")
+                subtitle_files.append(("main", str(main_srt)))
+                logging.info(f"📝 메인자막 파일 생성: {main_srt}")
+
+            # 자막 필터 추가 (비디오 해상도 기준으로 적절한 크기 사용)
+            if subtitle_files:
+                # overlays 폰트는 이미 스케일링된 큰 값이므로 50%로 축소
+                def adjust_subtitle_size(overlay_size):
+                    adjusted = int(overlay_size * 0.5)  # 50% 축소
+                    return max(24, min(adjusted, 60))  # 24-60px 범위로 제한
+
+                # CSS 색상을 ASS/SSA 형식(&HBBGGRR)으로 변환
+                def css_to_ass_color(css_color):
+                    """CSS color를 ASS/SSA 형식으로 변환 (BGR 순서)"""
+                    if not css_color:
+                        return "&H00FFFFFF"  # 기본: 흰색
+
+                    # rgb(r, g, b) 형식 파싱
+                    import re
+                    match = re.search(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', css_color)
+                    if match:
+                        r, g, b = int(match.group(1)), int(match.group(2)), int(match.group(3))
+                        # ASS는 BGR 순서
+                        return f"&H00{b:02X}{g:02X}{r:02X}"
+                    return "&H00FFFFFF"
+
+                # overlays에서 폰트 크기 및 색상 추출
+                korean_overlay = overlays_data.get("korean", {})
+                english_overlay = overlays_data.get("english", {})
+                title_overlay = overlays_data.get("title", {})
+
+                korean_overlay_size = korean_overlay.get("fontSize", 64)
+                english_overlay_size = english_overlay.get("fontSize", 56)
+                title_overlay_size = title_overlay.get("fontSize", 96)
+
+                korean_font_size = adjust_subtitle_size(korean_overlay_size)
+                english_font_size = adjust_subtitle_size(english_overlay_size)
+                title_font_size = adjust_subtitle_size(title_overlay_size)
+
+                # 색상 추출
+                korean_color = css_to_ass_color(korean_overlay.get("color"))
+                english_color = css_to_ass_color(english_overlay.get("color"))
+                title_color = css_to_ass_color(title_overlay.get("color"))
+
+                logging.info(f"📏 자막 크기 조정: korean {korean_overlay_size}→{korean_font_size}, english {english_overlay_size}→{english_font_size}, title {title_overlay_size}→{title_font_size}")
+                logging.info(f"🎨 자막 색상: korean={korean_color}, english={english_color}, title={title_color}")
+
+                for sub_type, sub_path in subtitle_files:
+                    # 자막 파일 경로 이스케이프
+                    sub_path_escaped = sub_path.replace("\\", "\\\\\\\\").replace(":", "\\:").replace("'", "\\'")
+
+                    # 자막 위치 및 스타일 설정 (웹 설정과 동일한 색상 사용)
+                    if sub_type == "translation":
+                        font_size = korean_font_size
+                        primary_color = korean_color
+                        outline_width = max(2, int(font_size * 0.06))
+                        style = f"FontName=Arial,FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=80"
+                    elif sub_type == "description":
+                        font_size = english_font_size
+                        primary_color = english_color
+                        outline_width = max(2, int(font_size * 0.06))
+                        style = f"FontName=Arial,FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=20"
+                    else:
+                        font_size = title_font_size
+                        primary_color = title_color
+                        outline_width = max(2, int(font_size * 0.06))
+                        style = f"FontName=Arial,FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=5,MarginV=20"
+
+                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_size}px, 색상={primary_color}, 외곽선={outline_width}px")
+                    video_filters.append(f"subtitles={sub_path_escaped}:force_style='{style}'")
+
+            # FFmpeg 명령어 구성
+            cmd = ["/usr/bin/ffmpeg", "-i", str(video_file.absolute())]
+
+            # 오디오 파일 입력 추가
+            for audio_input in audio_inputs:
+                cmd.extend(["-i", audio_input])
+
+            cmd.append("-y")  # 파일 덮어쓰기
+
+            # 비디오 필터 적용
+            if video_filters:
+                filter_string = ",".join(video_filters)
+                cmd.extend(["-vf", filter_string])
+
+            # 비디오에 오디오 스트림이 있는지 확인
+            video_has_audio = False
+            try:
+                probe_cmd = ["/usr/bin/ffprobe", "-v", "error", "-select_streams", "a:0",
+                           "-show_entries", "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1",
+                           str(video_file.absolute())]
+                probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+                video_has_audio = probe_result.returncode == 0 and probe_result.stdout.strip() == "audio"
+                logging.info(f"🔊 비디오 오디오 스트림 존재: {video_has_audio}")
+            except Exception as e:
+                logging.warning(f"오디오 스트림 확인 실패: {e}")
+                video_has_audio = False
+
+            # 오디오 믹싱
+            video_track_enabled = tracks_data.get("video", {}).get("enabled", True)
+            video_muted = tracks_data.get("video", {}).get("muted", False)
+
+            if len(audio_inputs) > 0:
+                # 오디오 입력이 있는 경우
+                audio_filter_inputs = []
+
+                # 비디오 원본 오디오 (음소거되지 않고 오디오 스트림이 있는 경우)
+                if video_track_enabled and not video_muted and video_has_audio:
+                    audio_filter_inputs.append("[0:a]")
+
+                # 추가 오디오 트랙들
+                for i in range(len(audio_inputs)):
+                    audio_filter_inputs.append(f"[{i+1}:a]")
+
+                if len(audio_filter_inputs) > 1:
+                    # 여러 오디오 믹싱
+                    audio_filter = f"{''.join(audio_filter_inputs)}amix=inputs={len(audio_filter_inputs)}:duration=first:dropout_transition=2[aout]"
+                    cmd.extend(["-filter_complex", audio_filter, "-map", "0:v", "-map", "[aout]"])
+                elif len(audio_filter_inputs) == 1:
+                    # 단일 오디오
+                    cmd.extend(["-map", "0:v", "-map", audio_filter_inputs[0].strip("[]")])
+                else:
+                    # 오디오 없음
+                    cmd.extend(["-map", "0:v", "-an"])
+            else:
+                # 오디오 입력이 없는 경우
+                if video_track_enabled and not video_muted and video_has_audio:
+                    cmd.extend(["-map", "0:v", "-map", "0:a"])
+                else:
+                    cmd.extend(["-map", "0:v", "-an"])
+
+            # 출력 옵션
+            cmd.extend([
+                "-c:v", "libx264",
+                "-preset", "medium",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                str(output_path)
+            ])
+
+            logging.info(f"🎬 FFmpeg 명령어: {' '.join(cmd)}")
+
+            # FFmpeg 실행
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+            if result.returncode != 0:
+                logging.error(f"FFmpeg 에러: {result.stderr}")
+                raise HTTPException(status_code=500, detail=f"최종 영상 생성 실패: {result.stderr}")
+
+            # 출력 파일 확인
+            if output_path.exists():
+                size_mb = output_path.stat().st_size / (1024 * 1024)
+                logging.info(f"✅ 최종 영상 생성 완료: {output_path} ({size_mb:.2f}MB)")
+
+                return {
+                    "success": True,
+                    "output_path": str(output_path),
+                    "file_name": output_name,
+                    "size_mb": round(size_mb, 2)
+                }
+            else:
+                raise HTTPException(status_code=500, detail="최종 영상 파일이 생성되지 않았습니다.")
+
+        finally:
+            # 임시 파일 정리
+            for temp_file in temp_audio_files:
+                try:
+                    if temp_file.exists():
+                        temp_file.unlink()
+                except Exception as e:
+                    logging.warning(f"임시 파일 삭제 실패: {temp_file}, {e}")
+            try:
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+            except Exception as e:
+                logging.warning(f"임시 디렉토리 삭제 실패: {temp_dir}, {e}")
+
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="최종 영상 생성 시간 초과 (10분)")
+    except Exception as e:
+        logging.exception("최종 영상 생성 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"최종 영상 생성 실패: {str(e)}")
 
 
 @app.post("/api/video-analyzer/analyze-frames-with-ai")
@@ -4446,10 +5192,11 @@ async def api_generate_title_subtitle(payload: Dict[str, Any] = Body(...)) -> Di
 
 요구사항:
 1. 영상 파일명과 자막 내용을 분석하여 매력적이고 클릭을 유도하는 제목을 만들어주세요.
-2. 부제목은 제목을 보완하고 추가 정보를 제공해야 합니다.
-3. 제목은 한글로 30자 이내, 부제목은 20자 이내로 작성해주세요.
-4. 응답은 반드시 다음 JSON 형식으로만 답변해주세요:
-{{"title": "제목", "subtitle": "부제목"}}
+2. **제목 앞에 관련있는 이모지 아이콘을 반드시 추가해주세요** (예: 🔥, 💰, 🎯, ⚡, 💡, 🚀, ✨ 등)
+3. 부제목은 제목을 보완하고 추가 정보를 제공해야 합니다.
+4. 제목은 이모지 포함 한글로 35자 이내, 부제목은 20자 이내로 작성해주세요.
+5. 응답은 반드시 다음 JSON 형식으로만 답변해주세요:
+{{"title": "🔥 제목", "subtitle": "부제목"}}
 
 추가 설명이나 다른 텍스트 없이 JSON만 반환해주세요."""
 

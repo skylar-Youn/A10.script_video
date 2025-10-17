@@ -415,6 +415,8 @@ async def api_extract_frames(payload: dict[str, Any] = Body(...)) -> dict[str, A
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
                 "-preset", "ultrafast",  # 빠른 트랜스코딩
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # 해상도 유지 (짝수로 보정)
+                "-avoid_negative_ts", "make_zero",  # 타임스탬프 문제 방지
                 str(transcoded_file)
             ]
 
