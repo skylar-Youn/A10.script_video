@@ -744,18 +744,26 @@ def _build_drawtext_filter(
                 font_path = fallback
                 break
 
-    font_hex, font_alpha = _parse_css_color(overlay.get("color"))
-    overlay_opacity = overlay.get("opacity")
-    if overlay_opacity is not None:
-        try:
-            opacity_value = float(overlay_opacity)
-            opacity_value = max(0.0, min(1.0, opacity_value))
-            if font_alpha is None:
-                font_alpha = opacity_value
-            else:
-                font_alpha = max(0.0, min(1.0, font_alpha * opacity_value))
-        except (TypeError, ValueError):
-            pass
+    # 오버레이 타입에 따라 색상 강제 설정
+    overlay_type = overlay.get("type", "")
+    if overlay_type in ["korean", "english"]:
+        # korean/english 오버레이는 항상 흰색으로 고정 (검정 배경에 표시되므로)
+        font_hex = "FFFFFF"
+        font_alpha = 1.0
+    else:
+        # title, subtitle 등은 기존 색상 유지
+        font_hex, font_alpha = _parse_css_color(overlay.get("color"))
+        overlay_opacity = overlay.get("opacity")
+        if overlay_opacity is not None:
+            try:
+                opacity_value = float(overlay_opacity)
+                opacity_value = max(0.0, min(1.0, opacity_value))
+                if font_alpha is None:
+                    font_alpha = opacity_value
+                else:
+                    font_alpha = max(0.0, min(1.0, font_alpha * opacity_value))
+            except (TypeError, ValueError):
+                pass
     font_color = _format_color_for_ffmpeg(font_hex, font_alpha)
 
     outline_hex, outline_alpha = _parse_css_color(
