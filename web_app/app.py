@@ -4568,13 +4568,13 @@ async def api_create_final_video(
                 english_font_size = adjust_subtitle_size(english_overlay_size)
                 title_font_size = adjust_subtitle_size(title_overlay_size)
 
-                # 색상 추출
-                korean_color = css_to_ass_color(korean_overlay.get("color", "rgb(255, 255, 255)"))
-                english_color = css_to_ass_color(english_overlay.get("color", "rgb(255, 255, 255)"))
-                title_color = css_to_ass_color(title_overlay.get("color", "rgb(255, 255, 255)"))
+                # SRT 자막은 모두 흰색으로 고정
+                korean_color = "&H00FFFFFF"  # 흰색
+                english_color = "&H00FFFFFF"  # 흰색
+                title_color = "&H00FFFFFF"  # 흰색
 
                 logging.info(f"📏 자막 크기 조정: korean {korean_overlay_size}→{korean_font_size}, english {english_overlay_size}→{english_font_size}, title {title_overlay_size}→{title_font_size}")
-                logging.info(f"🎨 자막 색상: korean={korean_color}, english={english_color}, title={title_color}")
+                logging.info(f"🎨 SRT 자막 색상: 모두 흰색 (korean={korean_color}, english={english_color}, title={title_color})")
 
                 for sub_type, sub_path in subtitle_files:
                     # 자막 파일 경로 이스케이프
