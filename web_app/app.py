@@ -665,7 +665,9 @@ def _build_drawtext_filter(
     if not overlay or not overlay.get("text"):
         return None
 
-    text_raw = str(overlay["text"])
+    text_raw = str(overlay.get("text", ""))
+    if not text_raw:
+        return None
     text = escape_ffmpeg_text(text_raw)
 
     try:
