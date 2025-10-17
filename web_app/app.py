@@ -4581,27 +4581,32 @@ async def api_create_final_video(
                     sub_path_escaped = sub_path.replace("\\", "\\\\\\\\").replace(":", "\\:").replace("'", "\\'")
 
                     # CJK(한글, 일본어, 중국어) 지원 폰트 사용
-                    # Noto Sans는 모든 CJK 문자를 지원
                     font_name = "Noto Sans CJK KR"
 
-                    # 자막 위치 및 스타일 설정 (웹 설정과 동일한 색상 사용)
+                    # 자막 위치 및 스타일 설정
+                    # 하단 검정 배경 영역에 자막 배치 (비디오 높이 기준)
+                    # 비디오 높이 1920이라고 가정하면, 하단 307px가 검정 배경
+                    # MarginV는 화면 하단에서부터의 거리
                     if sub_type == "translation":
+                        # 주자막: 하단에서 150px 위 (하단 검정 배경 내부)
                         font_size = korean_font_size
                         primary_color = korean_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=80"
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=150"
                     elif sub_type == "description":
+                        # 보조자막: 하단에서 80px 위 (하단 검정 배경 내부)
                         font_size = english_font_size
                         primary_color = english_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=20"
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=80"
                     else:
+                        # 메인자막: 하단에서 220px 위 (하단 검정 배경 내부, 주자막 위)
                         font_size = title_font_size
                         primary_color = title_color
                         outline_width = max(2, int(font_size * 0.06))
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=5,MarginV=20"
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV=220"
 
-                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px")
+                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px, 하단여백=MarginV")
                     video_filters.append(f"subtitles={sub_path_escaped}:force_style='{style}'")
 
             # FFmpeg 명령어 구성
