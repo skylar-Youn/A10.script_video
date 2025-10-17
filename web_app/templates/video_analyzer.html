@@ -90,7 +90,8 @@
         .timeline-content {
             position: relative;
             min-height: 300px;  /* 높이 줄임 */
-            width: 100%;  /* 컨테이너 너비에 맞춤 */
+            width: max-content;  /* 내용물 크기에 맞춰 늘어남 */
+            min-width: 100%;  /* 최소 너비는 컨테이너 너비 */
         }
 
         .timeline-ruler {
@@ -224,15 +225,73 @@
             opacity: 1;
         }
 
+        .audio-edit-toolbar {
+            display: none;  /* 편집 툴바 숨김 */
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 6px;
+            padding: 6px 10px;
+            margin: 6px 12px;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .audio-edit-toolbar .audio-selection-info {
+            color: #f8fafc;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .audio-edit-toolbar .audio-edit-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .audio-action-btn {
+            background: rgba(37, 99, 235, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            color: #bfdbfe;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .audio-action-btn:hover:not(:disabled) {
+            background: rgba(59, 130, 246, 0.25);
+            transform: translateY(-1px);
+        }
+
+        .audio-action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .audio-selection-marker {
+            position: absolute;
+            top: -6px;
+            width: 2px;
+            height: calc(100% + 12px);
+            background: #f97316;
+            pointer-events: none;
+            box-shadow: 0 0 8px rgba(249, 115, 22, 0.6);
+            z-index: 5;
+        }
+
         .track-content {
             height: 100%;  /* 부모 높이에 맞춤 */
             position: relative;
             background: rgba(255, 255, 255, 0.02);
             flex: 1;  /* 남은 공간 채우기 */
+            overflow: visible;  /* 캔버스가 컨테이너 밖으로 표시되도록 허용 */
         }
 
         .track-content canvas {
-            width: 100%;
+            width: auto;  /* JavaScript에서 설정한 너비 사용 */
             display: block;
         }
 
@@ -799,6 +858,14 @@
                                     <button class="track-clear" onclick="clearMediaTrack('audio')" title="트랙 비우기">🗑️</button>
                                 </div>
                             </div>
+                            <div class="audio-edit-toolbar" data-track="audio">
+                                <div class="audio-selection-info" id="audio-selection-info-audio">선택 위치: 없음</div>
+                                <div class="audio-edit-actions">
+                                    <button type="button" class="audio-action-btn" data-audio-action="trim-to-video" data-track="audio">✂️ 영상 길이 맞추기</button>
+                                    <button type="button" class="audio-action-btn" data-audio-action="delete-from-selection" data-track="audio">🗑️ 선택 이후 삭제</button>
+                                    <button type="button" class="audio-action-btn" data-audio-action="clear-selection" data-track="audio">❌ 선택 해제</button>
+                                </div>
+                            </div>
                             <div class="track-content" id="audio-track">
                                 <canvas id="timeline-waveform" height="50"></canvas>
                             </div>
@@ -817,6 +884,14 @@
                                     <button class="track-clear" onclick="clearMediaTrack('commentary')" title="트랙 비우기">🗑️</button>
                                 </div>
                             </div>
+                            <div class="audio-edit-toolbar" data-track="commentary">
+                                <div class="audio-selection-info" id="audio-selection-info-commentary">선택 위치: 없음</div>
+                                <div class="audio-edit-actions">
+                                    <button type="button" class="audio-action-btn" data-audio-action="trim-to-video" data-track="commentary">✂️ 영상 길이 맞추기</button>
+                                    <button type="button" class="audio-action-btn" data-audio-action="delete-from-selection" data-track="commentary">🗑️ 선택 이후 삭제</button>
+                                    <button type="button" class="audio-action-btn" data-audio-action="clear-selection" data-track="commentary">❌ 선택 해제</button>
+                                </div>
+                            </div>
                             <div class="track-content" id="commentary-audio-track">
                                 <canvas id="commentary-waveform" height="50"></canvas>
                             </div>
@@ -833,6 +908,14 @@
                                     <input type="file" id="bgm-file-input" accept="audio/*" style="display: none;">
                                     <button class="track-load" onclick="document.getElementById('bgm-file-input').click()" title="배경 음악 파일 로드">📂</button>
                                     <button class="track-clear" onclick="clearMediaTrack('bgm')" title="트랙 비우기">🗑️</button>
+                                </div>
+                            </div>
+                            <div class="audio-edit-toolbar" data-track="bgm">
+                                <div class="audio-selection-info" id="audio-selection-info-bgm">선택 위치: 없음</div>
+                                <div class="audio-edit-actions">
+                                    <button type="button" class="audio-action-btn" data-audio-action="trim-to-video" data-track="bgm">✂️ 영상 길이 맞추기</button>
+                                    <button type="button" class="audio-action-btn" data-audio-action="delete-from-selection" data-track="bgm">🗑️ 선택 이후 삭제</button>
+                                    <button type="button" class="audio-action-btn" data-audio-action="clear-selection" data-track="bgm">❌ 선택 해제</button>
                                 </div>
                             </div>
                             <div class="track-content" id="bgm-audio-track">
@@ -7852,6 +7935,7 @@ const loadedMedia = {
 
 const AUDIO_TRACK_TYPES = ['audio', 'commentary', 'bgm'];
 let audioSyncInitialized = false;
+let currentAudioSelection = null;
 
 // 로드된 자막 데이터
 const loadedSubtitles = {
@@ -8170,7 +8254,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         videoFileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
-                handleVideoFileLoad(file);
+                handleVideoFileLoad(file).catch((error) => {
+                    console.error('영상 파일 로드 실패:', error);
+                });
             }
         });
     }
@@ -8181,7 +8267,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         audioFileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
-                handleAudioFileLoad(file, 'audio');
+                handleAudioFileLoad(file, 'audio').catch((error) => {
+                    console.error('음성 파일 로드 실패:', error);
+                });
             }
         });
     }
@@ -8192,7 +8280,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         commentaryFileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
-                handleAudioFileLoad(file, 'commentary');
+                handleAudioFileLoad(file, 'commentary').catch((error) => {
+                    console.error('해설 음성 파일 로드 실패:', error);
+                });
             }
         });
     }
@@ -8203,7 +8293,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         bgmFileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
-                handleAudioFileLoad(file, 'bgm');
+                handleAudioFileLoad(file, 'bgm').catch((error) => {
+                    console.error('배경 음악 파일 로드 실패:', error);
+                });
             }
         });
     }
@@ -8218,6 +8310,41 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
     }
+
+    // 오디오 편집 버튼 동작
+    document.querySelectorAll('[data-audio-action]').forEach((button) => {
+        button.addEventListener('click', async function() {
+            const action = this.dataset.audioAction;
+            const trackType = this.dataset.track;
+            if (!trackType || !action) {
+                return;
+            }
+
+            if (action === 'clear-selection') {
+                clearAudioSelection(trackType);
+                return;
+            }
+
+            const originalText = this.textContent;
+            this.disabled = true;
+            this.textContent = '⏳ 처리 중...';
+
+            try {
+                if (action === 'trim-to-video') {
+                    await trimAudioToVideoLength(trackType);
+                } else if (action === 'delete-from-selection') {
+                    await deleteAudioFromSelection(trackType);
+                }
+            } catch (error) {
+                console.error('오디오 편집 작업 실패:', error);
+            } finally {
+                this.disabled = false;
+                this.textContent = originalText;
+            }
+        });
+    });
+
+    updateAudioSelectionUI();
 
     // 주자막 파일 로드
     const translationSubtitleInput = document.getElementById('translation-subtitle-file-input');
@@ -8658,8 +8785,16 @@ function displayVideoClipOnTimeline(fileName, duration) {
 }
 
 // 음성 파일 로드 처리
-function handleAudioFileLoad(file, trackType) {
+function handleAudioFileLoad(file, trackType, options = {}) {
     console.log(`${trackType} 음성 파일 로드:`, file.name);
+
+    const {
+        silent = false,
+        alertMessage,
+        skipAlert = false
+    } = options || {};
+
+    const showAlert = !silent && !skipAlert;
 
     const previous = loadedMedia[trackType];
     if (previous) {
@@ -8680,38 +8815,94 @@ function handleAudioFileLoad(file, trackType) {
     audio.preload = 'auto';
     audio.loop = false;
 
-    audio.addEventListener('loadedmetadata', function() {
-        const duration = audio.duration;
-        console.log(`${trackType} 음성 길이:`, duration, '초');
-
-        // 로드된 미디어 정보 저장
-        loadedMedia[trackType] = {
-            fileName: file.name,
-            duration: duration,
-            file: file,
-            audioElement: audio,
-            objectUrl: url
+    return new Promise((resolve, reject) => {
+        const cleanup = () => {
+            audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+            audio.removeEventListener('error', onAudioError);
         };
 
-        // 파형 그리기
-        drawWaveform(file, trackType, duration);
-
-        // 타임라인에 음성 클립 표시
-        displayAudioClipOnTimeline(file.name, duration, trackType);
-
-        attachAudioTrackToggleListeners();
-        initAudioSync();
-
-        const videoPlayer = document.getElementById('video-preview-player');
-        if (videoPlayer) {
-            syncAudioTrackRate(videoPlayer);
-            syncAudioTrackVolume(videoPlayer);
-            if (!videoPlayer.paused && !videoPlayer.ended) {
-                startAudioTracks(videoPlayer);
+        const onAudioError = (event) => {
+            cleanup();
+            console.error('오디오 메타데이터 로드 실패:', event);
+            if (!silent) {
+                alert('❌ 오디오 파일을 불러오는 중 문제가 발생했습니다.');
             }
-        }
+            URL.revokeObjectURL(url);
+            reject(event instanceof Error ? event : new Error('오디오 로드 실패'));
+        };
 
-        alert(`음성 파일 "${file.name}"이 ${trackType} 트랙에 로드되었습니다.\n길이: ${duration.toFixed(2)}초`);
+        const onLoadedMetadata = () => {
+            cleanup();
+
+            const duration = audio.duration;
+            console.log(`${trackType} 음성 길이:`, duration, '초');
+
+            // 로드된 미디어 정보 저장
+            loadedMedia[trackType] = {
+                fileName: file.name,
+                duration: duration,
+                file: file,
+                audioElement: audio,
+                objectUrl: url
+            };
+
+            clearAudioSelection(trackType);
+
+            // 파형 그리기
+            drawWaveform(file, trackType, duration);
+
+            // 타임라인에 음성 클립 표시
+            displayAudioClipOnTimeline(file.name, duration, trackType);
+
+            // 타임라인 전체 너비 업데이트
+            updateAllClipSizes();
+
+            attachAudioTrackToggleListeners();
+            initAudioSync();
+
+            const videoPlayer = document.getElementById('video-preview-player');
+            if (videoPlayer) {
+                syncAudioTrackRate(videoPlayer);
+                syncAudioTrackVolume(videoPlayer);
+                if (!videoPlayer.paused && !videoPlayer.ended) {
+                    startAudioTracks(videoPlayer);
+                }
+            }
+
+            if (showAlert) {
+                const message = alertMessage || `음성 파일 "${file.name}"이 ${trackType} 트랙에 로드되었습니다.\n길이: ${duration.toFixed(2)}초`;
+                alert(message);
+            } else {
+                console.log(`음성 파일이 ${trackType} 트랙에 로드되었습니다. (길이: ${duration.toFixed(2)}초)`);
+            }
+
+            // 자동 자르기: 음성이 영상보다 길면 자동으로 자를지 물어보기
+            const videoInfo = loadedMedia.video;
+            if (videoInfo && videoInfo.duration && duration > videoInfo.duration + 0.5) {
+                const shouldTrim = confirm(
+                    `음성 길이(${duration.toFixed(2)}초)가 영상 길이(${videoInfo.duration.toFixed(2)}초)보다 깁니다.\n\n영상 길이에 맞춰 자동으로 자르시겠습니까?`
+                );
+
+                if (shouldTrim) {
+                    // 비동기로 자르기 실행 (resolve 후에 실행)
+                    setTimeout(() => {
+                        trimAudioToVideoLength(trackType).catch(err => {
+                            console.error('자동 자르기 실패:', err);
+                            alert('음성 자르기에 실패했습니다.\n수동으로 "✂️ 영상 길이 맞추기" 버튼을 사용해주세요.');
+                        });
+                    }, 100);
+                }
+            }
+
+            resolve({ duration });
+        };
+
+        audio.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+        audio.addEventListener('error', onAudioError, { once: true });
+
+        if (audio.readyState >= 1 && Number.isFinite(audio.duration) && audio.duration > 0) {
+            onLoadedMetadata();
+        }
     });
 }
 
@@ -8735,6 +8926,8 @@ function displayAudioClipOnTimeline(fileName, duration, trackType) {
     // 클립 너비 계산
     const clipWidth = duration * pixelsPerSecond;
 
+    console.log(`[displayAudioClipOnTimeline] ${trackType} - duration: ${duration}s, zoom: ${zoomLevel}, clipWidth: ${clipWidth}px`);
+
     // 클립 정보 오버레이 생성 (캔버스 위에 표시)
     let overlay = audioTrack.querySelector('.audio-clip-overlay');
     if (!overlay) {
@@ -8755,7 +8948,8 @@ function displayAudioClipOnTimeline(fileName, duration, trackType) {
             color: #fff;
             font-weight: bold;
             z-index: 10;
-            pointer-events: none;
+            cursor: crosshair;
+            pointer-events: auto;
         `;
         audioTrack.style.position = 'relative';
         audioTrack.appendChild(overlay);
@@ -8764,6 +8958,15 @@ function displayAudioClipOnTimeline(fileName, duration, trackType) {
     overlay.style.width = `${clipWidth}px`;
     overlay.textContent = `🎵 ${fileName} (${duration.toFixed(2)}초)`;
     overlay.title = `${fileName} (${duration.toFixed(2)}초)`;
+    overlay.dataset.trackType = trackType;
+    overlay.dataset.duration = String(duration);
+
+    if (!overlay.dataset.selectionListenerAttached) {
+        overlay.addEventListener('click', handleAudioOverlayClick);
+        overlay.dataset.selectionListenerAttached = 'true';
+    }
+
+    updateAudioSelectionUI();
 
     console.log(`${trackType} 음성 클립이 타임라인에 표시되었습니다. 너비: ${clipWidth}px`);
 }
@@ -8782,21 +8985,29 @@ async function drawWaveform(file, trackType, duration) {
     // 줌 레벨에 따른 캔버스 너비 설정
     const zoomLevel = parseFloat(document.getElementById('timeline-zoom')?.value || 1);
     const pixelsPerSecond = 50 * zoomLevel;
-    const width = canvas.width = Math.max(duration * pixelsPerSecond, canvas.offsetWidth);
-    const height = canvas.height;
+    const calculatedWidth = duration * pixelsPerSecond;
+
+    // 캔버스 실제 너비 설정 (canvas.width는 픽셀 단위)
+    canvas.width = calculatedWidth;
+    const height = canvas.height = 50;  // 고정 높이
+
+    // CSS 스타일로도 너비 명시
+    canvas.style.width = calculatedWidth + 'px';
+
+    console.log(`[drawWaveform] ${trackType} - duration: ${duration}s, zoom: ${zoomLevel}, pixelsPerSecond: ${pixelsPerSecond}, width: ${calculatedWidth}px`);
 
     // 간단한 파형 표시 (실제 구현에서는 Web Audio API 사용)
     ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, calculatedWidth, height);
 
     // 임시 파형 그리기
-    for (let i = 0; i < width; i += 2) {
+    for (let i = 0; i < calculatedWidth; i += 2) {
         const barHeight = Math.random() * height * 0.8;
         const y = (height - barHeight) / 2;
         ctx.fillRect(i, y, 1, barHeight);
     }
 
-    console.log(`${trackType} 파형이 그려졌습니다. 너비: ${width}px`);
+    console.log(`${trackType} 파형이 그려졌습니다. 너비: ${calculatedWidth}px`);
 }
 
 // 자막 파일 로드 처리
@@ -8939,6 +9150,25 @@ function displaySubtitlesOnTimeline(subtitles, trackType) {
 function updateAllClipSizes() {
     console.log('타임라인 줌 변경 - 모든 클립 크기 업데이트 중...');
 
+    // 가장 긴 미디어 길이 찾기
+    let maxDuration = 0;
+    if (loadedMedia.video) maxDuration = Math.max(maxDuration, loadedMedia.video.duration);
+    if (loadedMedia.audio) maxDuration = Math.max(maxDuration, loadedMedia.audio.duration);
+    if (loadedMedia.commentary) maxDuration = Math.max(maxDuration, loadedMedia.commentary.duration);
+    if (loadedMedia.bgm) maxDuration = Math.max(maxDuration, loadedMedia.bgm.duration);
+
+    // 줌 레벨에 따른 타임라인 전체 너비 계산
+    const zoomLevel = parseFloat(document.getElementById('timeline-zoom')?.value || 1);
+    const pixelsPerSecond = 50 * zoomLevel;
+    const timelineWidth = Math.max(maxDuration * pixelsPerSecond, window.innerWidth - 200);
+
+    // 타임라인 콘텐츠 너비 설정
+    const timelineContent = document.getElementById('timeline-content');
+    if (timelineContent) {
+        timelineContent.style.minWidth = timelineWidth + 'px';
+        console.log(`타임라인 너비 설정: ${timelineWidth}px (maxDuration: ${maxDuration}s, zoom: ${zoomLevel})`);
+    }
+
     // 영상 클립 업데이트
     if (loadedMedia.video) {
         displayVideoClipOnTimeline(loadedMedia.video.fileName, loadedMedia.video.duration);
@@ -8963,6 +9193,7 @@ function updateAllClipSizes() {
     }
 
     console.log('모든 클립 크기 업데이트 완료');
+    updateAudioSelectionUI();
 }
 
 function getAudioTrackCheckboxId(trackType) {
@@ -9120,6 +9351,123 @@ function attachAudioTrackToggleListeners() {
     });
 }
 
+function handleAudioOverlayClick(event) {
+    const overlay = event.currentTarget;
+    const trackType = overlay.dataset.trackType;
+    const duration = parseFloat(overlay.dataset.duration || '0');
+    if (!trackType || !duration) {
+        return;
+    }
+
+    const rect = overlay.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const fraction = overlay.clientWidth > 0 ? Math.min(Math.max(offsetX / overlay.clientWidth, 0), 1) : 0;
+    const time = fraction * duration;
+
+    setAudioSelection(trackType, time);
+}
+
+function setAudioSelection(trackType, time) {
+    if (!trackType || !Number.isFinite(time)) {
+        return;
+    }
+    currentAudioSelection = {
+        trackType,
+        time: Math.max(0, time)
+    };
+    updateAudioSelectionUI();
+}
+
+function clearAudioSelection(trackType) {
+    if (!currentAudioSelection) {
+        updateAudioSelectionUI();
+        return;
+    }
+
+    if (!trackType || currentAudioSelection.trackType === trackType) {
+        currentAudioSelection = null;
+        updateAudioSelectionUI();
+    }
+}
+
+function getAudioTrackContentId(trackType) {
+    switch (trackType) {
+        case 'audio':
+            return 'audio-track';
+        case 'commentary':
+            return 'commentary-audio-track';
+        case 'bgm':
+            return 'bgm-audio-track';
+        default:
+            return null;
+    }
+}
+
+function formatSecondsWithMs(seconds) {
+    const totalSeconds = Math.max(0, Number(seconds) || 0);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = Math.floor(totalSeconds % 60);
+    const millis = Math.floor((totalSeconds - Math.floor(totalSeconds)) * 1000);
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
+}
+
+function updateAudioSelectionUI() {
+    AUDIO_TRACK_TYPES.forEach((trackType) => {
+        const trackContentId = getAudioTrackContentId(trackType);
+        const trackElement = trackContentId ? document.getElementById(trackContentId) : null;
+        const overlay = trackElement ? trackElement.querySelector('.audio-clip-overlay') : null;
+        const infoEl = document.getElementById(`audio-selection-info-${trackType}`);
+        let marker = trackElement ? trackElement.querySelector('.audio-selection-marker') : null;
+        const deleteBtn = document.querySelector(`[data-audio-action="delete-from-selection"][data-track="${trackType}"]`);
+
+        if (!currentAudioSelection || currentAudioSelection.trackType !== trackType || !overlay || !overlay.clientWidth) {
+            if (marker) {
+                marker.remove();
+            }
+            if (infoEl) {
+                infoEl.textContent = '선택 위치: 없음';
+            }
+            if (deleteBtn) {
+                deleteBtn.disabled = true;
+            }
+            return;
+        }
+
+        const duration = parseFloat(overlay.dataset.duration || `${loadedMedia[trackType]?.duration || 0}`);
+        if (!duration) {
+            if (marker) {
+                marker.remove();
+            }
+            if (infoEl) {
+                infoEl.textContent = '선택 위치: 없음';
+            }
+            if (deleteBtn) {
+                deleteBtn.disabled = true;
+            }
+            return;
+        }
+
+        const fraction = Math.min(Math.max(currentAudioSelection.time / duration, 0), 1);
+        const left = fraction * overlay.clientWidth;
+
+        if (!marker) {
+            marker = document.createElement('div');
+            marker.className = 'audio-selection-marker';
+            trackElement.appendChild(marker);
+        }
+
+        marker.style.left = `${left}px`;
+
+        if (infoEl) {
+            infoEl.textContent = `선택 위치: ${formatSecondsWithMs(currentAudioSelection.time)} / ${formatSecondsWithMs(duration)}`;
+        }
+
+        if (deleteBtn) {
+            deleteBtn.disabled = false;
+        }
+    });
+}
+
 function initAudioSync() {
     if (audioSyncInitialized) {
         attachAudioTrackToggleListeners();
@@ -9169,6 +9517,237 @@ function initAudioSync() {
 
     attachAudioTrackToggleListeners();
     audioSyncInitialized = true;
+}
+
+function getAudioTrackDisplayName(trackType) {
+    const names = {
+        audio: '음성',
+        commentary: '해설 음성',
+        bgm: '배경 음악'
+    };
+    return names[trackType] || trackType;
+}
+
+async function decodeAudioFileToBuffer(file) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+        throw new Error('이 브라우저에서는 오디오 편집을 지원하지 않습니다.');
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const audioCtx = new AudioCtx();
+    try {
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        return audioBuffer;
+    } finally {
+        if (typeof audioCtx.close === 'function') {
+            try {
+                await audioCtx.close();
+            } catch (closeError) {
+                console.warn('AudioContext 종료 실패:', closeError);
+            }
+        }
+    }
+}
+
+function audioBufferToWav(buffer) {
+    const numOfChan = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+    const channelData = [];
+
+    for (let channel = 0; channel < numOfChan; channel++) {
+        channelData.push(buffer.getChannelData(channel));
+    }
+
+    const interleaved = interleaveChannelData(channelData);
+
+    const bufferLength = interleaved.length * (bitDepth / 8);
+    const wavBuffer = new ArrayBuffer(44 + bufferLength);
+    const view = new DataView(wavBuffer);
+
+    // RIFF chunk descriptor
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + bufferLength, true);
+    writeString(view, 8, 'WAVE');
+
+    // FMT sub-chunk
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true); // SubChunk1Size
+    view.setUint16(20, format, true); // PCM
+    view.setUint16(22, numOfChan, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true); // ByteRate
+    view.setUint16(32, numOfChan * (bitDepth / 8), true); // BlockAlign
+    view.setUint16(34, bitDepth, true);
+
+    // data sub-chunk
+    writeString(view, 36, 'data');
+    view.setUint32(40, bufferLength, true);
+
+    // Write PCM samples
+    let offset = 44;
+    for (let i = 0; i < interleaved.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, interleaved[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return wavBuffer;
+}
+
+function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+    }
+}
+
+function interleaveChannelData(channels) {
+    const length = channels[0].length;
+    const numChannels = channels.length;
+    const interleaved = new Float32Array(length * numChannels);
+
+    let writeIndex = 0;
+    for (let i = 0; i < length; i++) {
+        for (let channel = 0; channel < numChannels; channel++) {
+            interleaved[writeIndex++] = channels[channel][i];
+        }
+    }
+    return interleaved;
+}
+
+async function trimAudioSegment(trackType, startSec, endSec, options = {}) {
+    const mediaInfo = loadedMedia[trackType];
+    if (!mediaInfo || !mediaInfo.file) {
+        alert(`먼저 ${getAudioTrackDisplayName(trackType)} 트랙에 오디오를 로드해주세요.`);
+        return;
+    }
+
+    try {
+        const audioBuffer = await decodeAudioFileToBuffer(mediaInfo.file);
+        const sampleRate = audioBuffer.sampleRate;
+        const duration = audioBuffer.duration;
+
+        const clampedStart = Math.max(0, Math.min(startSec, duration));
+        const clampedEnd = Math.max(clampedStart, Math.min(endSec, duration));
+
+        if (clampedEnd - clampedStart < 0.05) {
+            alert('편집하려는 구간이 너무 짧습니다. 조금 더 긴 구간을 선택해주세요.');
+            return;
+        }
+
+        const startSample = Math.floor(clampedStart * sampleRate);
+        const endSample = Math.floor(clampedEnd * sampleRate);
+        const frameCount = endSample - startSample;
+
+        let editedBuffer;
+        if (typeof AudioBuffer === 'function') {
+            editedBuffer = new AudioBuffer({
+                length: frameCount,
+                numberOfChannels: audioBuffer.numberOfChannels,
+                sampleRate
+            });
+        } else {
+            const TempCtx = window.AudioContext || window.webkitAudioContext;
+            if (!TempCtx) {
+                throw new Error('오디오 편집을 위한 AudioBuffer를 생성할 수 없습니다.');
+            }
+            const tempCtx = new TempCtx();
+            try {
+                editedBuffer = tempCtx.createBuffer(audioBuffer.numberOfChannels, frameCount, sampleRate);
+            } finally {
+                if (typeof tempCtx.close === 'function') {
+                    tempCtx.close();
+                }
+            }
+        }
+
+        for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+            const sourceData = audioBuffer.getChannelData(channel).subarray(startSample, endSample);
+            editedBuffer.copyToChannel(sourceData, channel, 0);
+        }
+
+        const wavArrayBuffer = audioBufferToWav(editedBuffer);
+        const blob = new Blob([wavArrayBuffer], { type: 'audio/wav' });
+
+        const baseName = (mediaInfo.fileName || mediaInfo.file.name || `${trackType}_audio`).replace(/\.[^.]+$/, '');
+        const suffix = options.nameSuffix || 'edited';
+        const newFileName = `${baseName}_${suffix}.wav`;
+        const editedFile = new File([blob], newFileName, { type: 'audio/wav' });
+
+        await handleAudioFileLoad(editedFile, trackType, { silent: true, skipAlert: true });
+        clearAudioSelection(trackType);
+        updateAudioSelectionUI();
+
+        if (!options.skipAlert) {
+            const message = options.successMessage || '오디오가 편집되었습니다.';
+            alert(message);
+        }
+
+        return {
+            file: editedFile,
+            duration: editedBuffer.length / sampleRate
+        };
+    } catch (error) {
+        console.error('오디오 편집 실패:', error);
+        if (!options.skipAlert) {
+            alert(`❌ 오디오 편집 중 오류가 발생했습니다.\n\n${error.message || error}`);
+        }
+        throw error;
+    }
+}
+
+async function trimAudioToVideoLength(trackType) {
+    const videoInfo = loadedMedia.video;
+    if (!videoInfo || !videoInfo.duration) {
+        alert('먼저 영상을 로드해주세요.');
+        return;
+    }
+
+    const mediaInfo = loadedMedia[trackType];
+    if (!mediaInfo || !mediaInfo.duration) {
+        alert(`먼저 ${getAudioTrackDisplayName(trackType)} 트랙에 오디오를 로드해주세요.`);
+        return;
+    }
+
+    if (mediaInfo.duration <= videoInfo.duration + 0.05) {
+        alert('이미 영상 길이와 같거나 더 짧은 오디오입니다.');
+        return;
+    }
+
+    const displayName = getAudioTrackDisplayName(trackType);
+    await trimAudioSegment(trackType, 0, videoInfo.duration, {
+        nameSuffix: 'trimmed',
+        successMessage: `${displayName} 트랙을 영상 길이(${formatSecondsWithMs(videoInfo.duration)})에 맞춰 잘랐습니다.`
+    });
+}
+
+async function deleteAudioFromSelection(trackType) {
+    if (!currentAudioSelection || currentAudioSelection.trackType !== trackType) {
+        alert('먼저 타임라인에서 삭제할 위치를 클릭하여 선택해주세요.');
+        return;
+    }
+
+    const mediaInfo = loadedMedia[trackType];
+    if (!mediaInfo || !mediaInfo.duration) {
+        alert(`먼저 ${getAudioTrackDisplayName(trackType)} 트랙에 오디오를 로드해주세요.`);
+        return;
+    }
+
+    const targetTime = Math.max(0, Math.min(currentAudioSelection.time, mediaInfo.duration));
+
+    if (targetTime <= 0.1) {
+        if (confirm('선택 위치가 0초에 가깝습니다. 전체 오디오를 삭제하시겠습니까?')) {
+            clearMediaTrack(trackType);
+        }
+        return;
+    }
+
+    const displayName = getAudioTrackDisplayName(trackType);
+    await trimAudioSegment(trackType, 0, targetTime, {
+        nameSuffix: 'cut',
+        successMessage: `${displayName} 트랙의 ${formatSecondsWithMs(targetTime)} 이후 구간을 삭제했습니다.`
+    });
 }
 
 // 주자막 언어 선택 다이얼로그 표시
@@ -9459,6 +10038,8 @@ function clearMediaTrack(trackType) {
         return;
     }
 
+    clearAudioSelection(trackType);
+
     // 로드된 미디어 데이터 초기화
     if (loadedMedia[trackType]) {
         const mediaInfo = loadedMedia[trackType];
@@ -9509,6 +10090,7 @@ function clearMediaTrack(trackType) {
                 overlay.remove();
             }
         }
+        pauseAllAudioTracks();
     }
 
     console.log(`✅ ${trackNames[trackType]} 트랙이 비워졌습니다.`);
