@@ -5750,3 +5750,123 @@ textarea:focus {
     flex-wrap: wrap;
     gap: 0.5rem;
 }
+
+/* 자막 템플릿 컨트롤 스타일 */
+.subtitle-template-controls {
+    margin-top: 20px;
+    padding: 20px;
+    background: rgba(26, 30, 46, 0.6);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.template-select-group {
+    display: flex;
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.template-option {
+    flex: 1;
+    background: rgba(42, 46, 62, 0.8);
+    border-radius: 8px;
+    padding: 15px;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.template-option:hover {
+    background: rgba(52, 56, 72, 0.9);
+    border-color: rgba(74, 158, 255, 0.5);
+}
+
+.template-option label {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.template-option input[type="radio"] {
+    margin-top: 4px;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.template-option input[type="radio"]:checked ~ .template-label {
+    color: var(--primary-color);
+}
+
+.template-option:has(input[type="radio"]:checked) {
+    border-color: var(--primary-color);
+    background: rgba(74, 158, 255, 0.1);
+}
+
+.template-label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.template-label strong {
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
+.template-label small {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.banner-text-controls {
+    padding: 15px;
+    background: rgba(42, 46, 62, 0.5);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.banner-text-controls h5 {
+    margin-bottom: 15px;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.banner-input-group {
+    margin-bottom: 15px;
+}
+
+.banner-input-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.banner-input-group input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    background: rgba(26, 30, 46, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+}
+
+.banner-input-group input[type="text"]:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    background: rgba(26, 30, 46, 1);
+}
+
+.banner-hint {
+    margin-top: 10px;
+    padding: 10px;
+    background: rgba(0, 255, 136, 0.05);
+    border-left: 3px solid var(--success-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}

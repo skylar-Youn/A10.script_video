@@ -70,6 +70,16 @@ _TEXTCLIP_SIGNATURE = inspect.signature(TextClip.__init__)
 _TEXT_PARAM = "text" if "text" in _TEXTCLIP_SIGNATURE.parameters else "txt"
 _FONT_SIZE_PARAM = "font_size" if "font_size" in _TEXTCLIP_SIGNATURE.parameters else "fontsize"
 
+_DEFAULT_SUBTITLE_FONT_PATH = Path("/usr/share/fonts/opentype/unifont/unifont_jp.otf")
+if _DEFAULT_SUBTITLE_FONT_PATH.exists():
+    current_font = os.getenv("SHORTS_SUBTITLE_FONT")
+    if not current_font or not Path(current_font).expanduser().exists():
+        os.environ["SHORTS_SUBTITLE_FONT"] = str(_DEFAULT_SUBTITLE_FONT_PATH)
+        logger.debug(
+            "SHORTS_SUBTITLE_FONT 환경 변수를 %s 로 설정했습니다.",
+            _DEFAULT_SUBTITLE_FONT_PATH,
+        )
+
 SUPPORTED_BROLL_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".jpg", ".jpeg", ".png"}
 SUPPORTED_MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac"}
 
@@ -89,6 +99,7 @@ _JAPANESE_FONT_PATHS = [
     "/usr/share/fonts/truetype/droid/DroidSansJapanese.ttf",
     "/usr/share/fonts/truetype/ipafont/ipag.ttf",
     "/usr/share/fonts/truetype/ipafont/ipam.ttf",
+    "/usr/share/fonts/opentype/unifont/unifont_jp.otf",
 ]
 
 _KOREAN_FONT_PATHS = [
@@ -119,11 +130,11 @@ def _ordered_font_candidates(language: Optional[str]) -> List[Optional[str]]:
             ordered.append(path)
             seen.add(path)
 
-    if language.startswith("ja"):
+    if language.startswith("ja") or language.startswith("jp"):
         _extend(_JAPANESE_FONT_PATHS)
         _extend(_COMMON_CJK_FONT_PATHS)
         _extend(_KOREAN_FONT_PATHS)
-    elif language.startswith("ko"):
+    elif language.startswith("ko") or language.startswith("kr"):
         _extend(_COMMON_CJK_FONT_PATHS)
         _extend(_KOREAN_FONT_PATHS)
         _extend(_JAPANESE_FONT_PATHS)
@@ -167,6 +178,7 @@ FONT_FILE_CANDIDATES = [
     "DroidSansJapanese.ttf",
     "ipag.ttf",
     "ipam.ttf",
+    "unifont_jp.otf",
     "NanumSquareRoundR.ttf",
     "NanumSquareR.ttf",
     "NanumGothic.ttf",

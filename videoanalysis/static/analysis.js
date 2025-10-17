@@ -17310,3 +17310,78 @@ window.forceRenderSubtitles = function() {
         });
     }
 };
+
+// ==================== 자막 템플릿 & 배너 설정 ====================
+
+// 템플릿 라디오 버튼 변경 시 배너 컨트롤 표시/숨김
+document.querySelectorAll('input[name="subtitle-template"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+        const bannerControls = document.getElementById('banner-text-controls');
+        if (e.target.value === 'banner') {
+            bannerControls.style.display = 'block';
+        } else {
+            bannerControls.style.display = 'none';
+        }
+    });
+});
+
+// 자막 스타일 적용 버튼 클릭 이벤트
+document.getElementById('apply-subtitle-style')?.addEventListener('click', async () => {
+    const template = document.querySelector('input[name="subtitle-template"]:checked')?.value || 'classic';
+    const bannerPrimaryText = document.getElementById('banner-primary-text')?.value || '';
+    const bannerSecondaryText = document.getElementById('banner-secondary-text')?.value || '';
+    
+    // 현재 로드된 프로젝트 확인 (전역 변수 또는 로컬 스토리지에서)
+    const currentProject = window.currentProjectBaseName || localStorage.getItem('currentProject');
+    
+    if (!currentProject) {
+        alert('⚠️ 먼저 프로젝트를 로드해주세요.');
+        return;
+    }
+    
+    try {
+        // API 호출: subtitle style 업데이트
+        const response = await fetch(`http://127.0.0.1:8001/api/projects/${currentProject}/subtitle-style`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                template: template,
+                banner_primary_text: bannerPrimaryText || null,
+                banner_secondary_text: bannerSecondaryText || null
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`API 오류: ${response.status}`);
+        }
+        
+        const updatedProject = await response.json();
+        console.log('✅ 자막 스타일 업데이트 완료:', updatedProject);
+        
+        // 성공 메시지
+        alert(`✅ 자막 스타일이 적용되었습니다!\n템플릿: ${template}\n\n💡 렌더링을 다시 실행하면 변경사항이 반영됩니다.`);
+        
+        // 렌더링 버튼 강조 (있는 경우)
+        const renderBtn = document.getElementById('create-output-video');
+        if (renderBtn) {
+            renderBtn.style.animation = 'pulse 1s ease-in-out 3';
+            renderBtn.style.background = 'linear-gradient(90deg, #FF6F00, #FF8F00)';
+        }
+        
+    } catch (error) {
+        console.error('❌ 자막 스타일 업데이트 실패:', error);
+        alert(`❌ 자막 스타일 업데이트에 실패했습니다.\n오류: ${error.message}`);
+    }
+});
+
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', () => {
+    // 템플릿이 banner인 경우 배너 컨트롤 표시
+    const checkedTemplate = document.querySelector('input[name="subtitle-template"]:checked');
+    if (checkedTemplate && checkedTemplate.value === 'banner') {
+        document.getElementById('banner-text-controls').style.display = 'block';
+    }
+});
+

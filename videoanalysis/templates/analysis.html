@@ -618,6 +618,45 @@
                             </div>
                         </div>
 
+                        <div class="subtitle-template-controls">
+                            <h4 class="area-title">🎭 자막 레이아웃 템플릿</h4>
+                            <div class="template-select-group">
+                                <div class="template-option">
+                                    <label>
+                                        <input type="radio" name="subtitle-template" value="classic" checked>
+                                        <span class="template-label">
+                                            <strong>Classic</strong>
+                                            <small>기본 레이아웃 - 하단에 실시간 자막 표시</small>
+                                        </span>
+                                    </label>
+                                </div>
+                                <div class="template-option">
+                                    <label>
+                                        <input type="radio" name="subtitle-template" value="banner">
+                                        <span class="template-label">
+                                            <strong>Banner</strong>
+                                            <small>상단 배너 포함 - 고정 텍스트 오버레이</small>
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="banner-text-controls" id="banner-text-controls" style="display: none; margin-top: 15px;">
+                                <h5>배너 텍스트 설정</h5>
+                                <div class="banner-input-group">
+                                    <label for="banner-primary-text">주 텍스트 (상단)</label>
+                                    <input type="text" id="banner-primary-text" placeholder="예: 충격적인 사건!">
+                                </div>
+                                <div class="banner-input-group">
+                                    <label for="banner-secondary-text">보조 텍스트 (하단) - 비워두면 실시간 자막 표시</label>
+                                    <input type="text" id="banner-secondary-text" placeholder="비워두면 실시간 자막이 표시됩니다">
+                                </div>
+                                <p class="banner-hint">💡 팁: 보조 텍스트를 비워두면 하단에서도 실시간 자막을 볼 수 있습니다.</p>
+                            </div>
+
+                            <button class="action-btn primary" id="apply-subtitle-style" style="margin-top: 15px;">✅ 자막 스타일 적용</button>
+                        </div>
+
                         <div class="realtime-style-controls">
                             <h4 class="area-title">📝 실시간 자막 스타일</h4>
                             <div class="realtime-style-grid">

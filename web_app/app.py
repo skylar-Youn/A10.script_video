@@ -4404,6 +4404,7 @@ async def api_create_final_video(
     overlays: str = Form(...),
     black_bars: str = Form(...),
     tracks: str = Form(...),
+    subtitle_style: str = Form("{}"),
     audio_file: UploadFile = File(None),
     commentary_file: UploadFile = File(None),
     bgm_file: UploadFile = File(None)
@@ -4418,6 +4419,7 @@ async def api_create_final_video(
         overlays_data = json.loads(overlays)
         black_bars_data = json.loads(black_bars)
         tracks_data = json.loads(tracks)
+        subtitle_style_data = json.loads(subtitle_style) if subtitle_style else {}
 
         if not video_path or not Path(video_path).exists():
             raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
@@ -4438,6 +4440,7 @@ async def api_create_final_video(
         logging.info(f"📐 비디오 크기: {video_width}x{video_height}")
         logging.info(f"📝 오버레이: {overlays_data}")
         logging.info(f"⬛ 검정 배경: {black_bars_data}")
+        logging.info(f"🎭 자막 스타일: {subtitle_style_data}")
         logging.info(f"🎵 트랙: {tracks_data}")
 
         # 임시 디렉토리 생성
@@ -4492,6 +4495,36 @@ async def api_create_final_video(
                 video_filters.append(
                     f"drawbox=x=0:y={bottom_y}:w={video_width}:h={bottom_height}:color=black@{bottom_opacity}:t=fill"
                 )
+
+            # 2. 배너 템플릿 처리
+            template_type = subtitle_style_data.get("template", "classic")
+            if template_type == "banner":
+                banner_primary = subtitle_style_data.get("banner_primary_text")
+                banner_secondary = subtitle_style_data.get("banner_secondary_text")
+
+                # 배너 배경 추가 (상단 21%)
+                banner_height = int(video_height * 0.21)
+                video_filters.append(
+                    f"drawbox=x=0:y=0:w={video_width}:h={banner_height}:color=black@0.92:t=fill"
+                )
+
+                # 주 텍스트 (상단)
+                if banner_primary:
+                    primary_y = int(banner_height * 0.35)
+                    primary_size = int(video_height * 0.025)  # 2.5% of height
+                    primary_filter = f"drawtext=text='{banner_primary}':fontfile=/usr/share/fonts/truetype/nanum/NanumGothic.ttf:fontsize={primary_size}:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y={primary_y}"
+                    video_filters.append(primary_filter)
+                    logging.info(f"🎭 배너 주 텍스트: {banner_primary} (크기: {primary_size}px)")
+
+                # 보조 텍스트 (하단) - 비어있으면 실시간 자막 표시됨
+                if banner_secondary:
+                    secondary_y = int(banner_height * 0.72)
+                    secondary_size = int(video_height * 0.022)  # 2.2% of height
+                    secondary_filter = f"drawtext=text='{banner_secondary}':fontfile=/usr/share/fonts/truetype/nanum/NanumGothic.ttf:fontsize={secondary_size}:fontcolor=#ffd400:borderw=2:bordercolor=black:x=(w-text_w)/2:y={secondary_y}"
+                    video_filters.append(secondary_filter)
+                    logging.info(f"🎭 배너 보조 텍스트: {banner_secondary} (크기: {secondary_size}px)")
+                else:
+                    logging.info("💡 배너 보조 텍스트가 비어있음 - 하단에 실시간 자막 표시")
 
             for overlay_key, overlay_data in overlays_data.items():
                 result = _build_drawtext_filter(overlay_data, video_width, video_height)

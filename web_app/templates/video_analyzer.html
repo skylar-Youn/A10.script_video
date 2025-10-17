@@ -1026,6 +1026,39 @@
                 </div>
             </div>
 
+            <!-- 자막 스타일 설정 -->
+            <div class="subtitle-style-settings" style="margin-top: 20px; padding: 15px; background: rgba(26, 30, 46, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <h4 style="margin: 0 0 15px 0; color: #f0f4f8; font-size: 1rem;">🎭 자막 레이아웃 템플릿</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
+                    <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: rgba(42, 46, 62, 0.8); border-radius: 6px; border: 2px solid transparent; cursor: pointer; transition: all 0.3s ease;" onmouseenter="this.style.borderColor='rgba(74, 158, 255, 0.5)'" onmouseleave="if(!this.querySelector('input').checked) this.style.borderColor='transparent'">
+                        <input type="radio" name="subtitle-template-video" value="classic" checked style="width: 18px; height: 18px; cursor: pointer;" onchange="toggleBannerControls()">
+                        <div>
+                            <strong style="display: block; color: #f0f4f8; font-size: 0.95rem;">Classic</strong>
+                            <small style="color: #b0c4de; font-size: 0.85rem;">하단 실시간 자막</small>
+                        </div>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: rgba(42, 46, 62, 0.8); border-radius: 6px; border: 2px solid transparent; cursor: pointer; transition: all 0.3s ease;" onmouseenter="this.style.borderColor='rgba(74, 158, 255, 0.5)'" onmouseleave="if(!this.querySelector('input').checked) this.style.borderColor='transparent'">
+                        <input type="radio" name="subtitle-template-video" value="banner" style="width: 18px; height: 18px; cursor: pointer;" onchange="toggleBannerControls()">
+                        <div>
+                            <strong style="display: block; color: #f0f4f8; font-size: 0.95rem;">Banner</strong>
+                            <small style="color: #b0c4de; font-size: 0.85rem;">상단 배너 + 자막</small>
+                        </div>
+                    </label>
+                </div>
+
+                <div id="banner-controls-video" style="display: none; padding: 12px; background: rgba(42, 46, 62, 0.5); border-radius: 6px;">
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.9rem;">주 텍스트 (상단)</label>
+                        <input type="text" id="banner-primary-video" placeholder="예: 충격적인 사건!" style="width: 100%; padding: 8px; background: rgba(26, 30, 46, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; color: #f0f4f8; font-size: 0.9rem;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.9rem;">보조 텍스트 (하단) - 비워두면 실시간 자막 표시</label>
+                        <input type="text" id="banner-secondary-video" placeholder="비워두면 실시간 자막이 표시됩니다" style="width: 100%; padding: 8px; background: rgba(26, 30, 46, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; color: #f0f4f8; font-size: 0.9rem;">
+                    </div>
+                    <p style="margin: 10px 0 0 0; padding: 8px; background: rgba(0, 255, 136, 0.05); border-left: 3px solid #00ff88; border-radius: 4px; color: #b0c4de; font-size: 0.85rem;">💡 팁: 보조 텍스트를 비워두면 하단에서도 실시간 자막을 볼 수 있습니다.</p>
+                </div>
+            </div>
+
             <div class="video-preview-actions" style="margin-top: 15px;">
                 <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                     <button onclick="useThisVideo()" class="btn-primary">이 영상으로 자막 불러오기</button>
@@ -2882,6 +2915,19 @@ async function createFinalVideo() {
 
     console.log('📋 트랙 상태:', tracks);
 
+    // 자막 템플릿 설정 수집
+    const subtitleTemplate = document.querySelector('input[name="subtitle-template-video"]:checked')?.value || 'classic';
+    const bannerPrimaryText = document.getElementById('banner-primary-video')?.value || '';
+    const bannerSecondaryText = document.getElementById('banner-secondary-video')?.value || '';
+
+    const subtitleStyleSettings = {
+        template: subtitleTemplate,
+        banner_primary_text: bannerPrimaryText || null,
+        banner_secondary_text: bannerSecondaryText || null
+    };
+
+    console.log('🎭 자막 템플릿 설정:', subtitleStyleSettings);
+
     // FormData 생성 (파일 업로드를 위해)
     const formData = new FormData();
     formData.append('video_path', currentVideoInfo.path);
@@ -2889,6 +2935,7 @@ async function createFinalVideo() {
     formData.append('video_height', videoHeight);
     formData.append('overlays', JSON.stringify(overlays));
     formData.append('black_bars', JSON.stringify(blackBars));
+    formData.append('subtitle_style', JSON.stringify(subtitleStyleSettings));
     formData.append('tracks', JSON.stringify({
         video: tracks.video,
         mainSubtitle: tracks.mainSubtitle,
@@ -11114,6 +11161,35 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     });
+});
+
+// ==================== 자막 템플릿 컨트롤 ====================
+function toggleBannerControls() {
+    const template = document.querySelector('input[name="subtitle-template-video"]:checked')?.value;
+    const bannerControls = document.getElementById('banner-controls-video');
+
+    if (template === 'banner') {
+        bannerControls.style.display = 'block';
+    } else {
+        bannerControls.style.display = 'none';
+    }
+
+    // 선택된 라디오 버튼의 label 스타일 업데이트
+    document.querySelectorAll('input[name="subtitle-template-video"]').forEach(radio => {
+        const label = radio.closest('label');
+        if (radio.checked) {
+            label.style.borderColor = 'rgba(74, 158, 255, 1)';
+            label.style.background = 'rgba(74, 158, 255, 0.1)';
+        } else {
+            label.style.borderColor = 'transparent';
+            label.style.background = 'rgba(42, 46, 62, 0.8)';
+        }
+    });
+}
+
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', () => {
+    toggleBannerControls();
 });
 </script>
 
