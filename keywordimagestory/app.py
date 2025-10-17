@@ -383,6 +383,8 @@ async def api_save_trimmed_frame(payload: dict[str, Any] = Body(...)) -> dict[st
 async def api_extract_frames(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """영상에서 지정된 간격으로 프레임을 추출합니다."""
     import cv2
+    import subprocess
+    import tempfile
 
     video_path = str(payload.get("video_path", "")).strip()
     interval = payload.get("interval", 10)  # 기본값 10초
@@ -394,11 +396,41 @@ async def api_extract_frames(payload: dict[str, Any] = Body(...)) -> dict[str, A
     if not video_file.exists():
         raise HTTPException(status_code=404, detail=f"Video file not found: {video_path}")
 
+    transcoded_file = None  # 임시 파일 추적용
     try:
-        # OpenCV로 영상 열기
+        # OpenCV로 영상 열기 시도
         cap = cv2.VideoCapture(str(video_file))
         if not cap.isOpened():
-            raise HTTPException(status_code=400, detail="Failed to open video file")
+            # AV1 코덱 등으로 인해 실패할 수 있으므로 FFmpeg로 H.264로 트랜스코딩 시도
+            logger.info(f"Failed to open video directly, attempting transcode: {video_file}")
+
+            temp_dir = Path(tempfile.gettempdir())
+            transcoded_file = temp_dir / f"transcoded_{uuid4().hex}.mp4"
+
+            transcode_cmd = [
+                "ffmpeg",
+                "-y",
+                "-hwaccel", "none",  # 하드웨어 가속 비활성화
+                "-i", str(video_file),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-preset", "ultrafast",  # 빠른 트랜스코딩
+                str(transcoded_file)
+            ]
+
+            proc = subprocess.run(transcode_cmd, capture_output=True, text=True)
+            if proc.returncode != 0 or not transcoded_file.exists():
+                error_msg = proc.stderr.strip() or proc.stdout.strip() or "FFmpeg transcoding failed"
+                if transcoded_file and transcoded_file.exists():
+                    transcoded_file.unlink()
+                raise HTTPException(status_code=400, detail=f"Failed to process video: {error_msg}")
+
+            # 트랜스코딩된 파일로 재시도
+            cap = cv2.VideoCapture(str(transcoded_file))
+            if not cap.isOpened():
+                if transcoded_file.exists():
+                    transcoded_file.unlink()
+                raise HTTPException(status_code=400, detail="Failed to open transcoded video file")
 
         # 영상 정보 가져오기
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -438,6 +470,14 @@ async def api_extract_frames(payload: dict[str, Any] = Body(...)) -> dict[str, A
 
         cap.release()
 
+        # 임시 트랜스코딩 파일 정리
+        if transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+                logger.info(f"Cleaned up transcoded file: {transcoded_file}")
+            except Exception as cleanup_exc:
+                logger.warning(f"Failed to clean up transcoded file: {cleanup_exc}")
+
         return {
             "success": True,
             "video_path": str(video_file),
@@ -450,6 +490,12 @@ async def api_extract_frames(payload: dict[str, Any] = Body(...)) -> dict[str, A
         }
 
     except Exception as exc:
+        # 에러 발생 시에도 임시 파일 정리
+        if transcoded_file and transcoded_file.exists():
+            try:
+                transcoded_file.unlink()
+            except Exception:
+                pass
         logger.exception("Frame extraction failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Frame extraction failed: {str(exc)}") from exc
 

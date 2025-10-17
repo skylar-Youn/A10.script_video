@@ -108,6 +108,7 @@ def trim_video_clip(
         return [
             "ffmpeg",
             "-y",
+            "-hwaccel", "none",  # 하드웨어 가속 비활성화 (AV1 소프트웨어 디코더 강제)
             "-ss",
             str(round(start, 3)),
             "-i",
@@ -653,6 +654,7 @@ def prepare_video_preview(video_path: Path, session_dir: Path) -> Tuple[np.ndarr
     cmd = [
         "ffmpeg",
         "-y",
+        "-hwaccel", "none",  # 하드웨어 가속 비활성화 (소프트웨어 디코더 강제)
         "-i",
         str(video_path),
         "-c:v",

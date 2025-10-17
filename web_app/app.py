@@ -4393,6 +4393,183 @@ Original subtitles:
         raise HTTPException(status_code=500, detail=f"자막 번역 실패: {str(e)}")
 
 
+@app.post("/api/video-analyzer/generate-title-subtitle")
+async def api_generate_title_subtitle(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """AI를 사용하여 영상 제목과 부제목 생성"""
+    import os
+
+    try:
+        video_path_str = payload.get("video_path", "")
+        video_info = payload.get("video_info", {})
+        selected_model = payload.get("model", "claude")  # 기본값은 claude
+
+        if not video_path_str:
+            raise HTTPException(status_code=400, detail="영상 경로가 필요합니다.")
+
+        video_path = Path(video_path_str)
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="영상 파일을 찾을 수 없습니다.")
+
+        logging.info(f"AI 제목/부제목 생성 시작: {video_path.name} (모델: {selected_model})")
+
+        # 영상 정보 추출
+        video_name = video_path.stem
+        video_ext = video_path.suffix
+
+        # 자막 파일 찾기 (같은 폴더에서)
+        subtitle_text = ""
+        for ext in ['.ko.srt', '.srt', '.en.srt']:
+            subtitle_path = video_path.parent / f"{video_path.stem}{ext}"
+            if subtitle_path.exists():
+                try:
+                    with open(subtitle_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        # 자막 번호와 타임코드 제거, 텍스트만 추출
+                        import re
+                        subtitle_blocks = re.split(r'\n\d+\n', content)
+                        text_lines = []
+                        for block in subtitle_blocks:
+                            lines = block.strip().split('\n')
+                            # 타임코드 라인 제거 (00:00:00,000 --> 00:00:00,000 형식)
+                            text_content = [line for line in lines if '-->' not in line]
+                            text_lines.extend(text_content)
+                        subtitle_text = ' '.join(text_lines[:50])  # 처음 50줄만 사용
+                        break
+                except Exception as e:
+                    logging.warning(f"자막 파일 읽기 실패: {e}")
+
+        # AI 프롬프트 구성
+        prompt = f"""영상 제목과 부제목을 생성해주세요.
+
+영상 파일명: {video_name}
+{'자막 내용: ' + subtitle_text if subtitle_text else '(자막 없음)'}
+
+요구사항:
+1. 영상 파일명과 자막 내용을 분석하여 매력적이고 클릭을 유도하는 제목을 만들어주세요.
+2. 부제목은 제목을 보완하고 추가 정보를 제공해야 합니다.
+3. 제목은 한글로 30자 이내, 부제목은 20자 이내로 작성해주세요.
+4. 응답은 반드시 다음 JSON 형식으로만 답변해주세요:
+{{"title": "제목", "subtitle": "부제목"}}
+
+추가 설명이나 다른 텍스트 없이 JSON만 반환해주세요."""
+
+        # 모델 선택에 따라 API 호출
+        import json
+        import re
+
+        if selected_model == "claude":
+            # Anthropic API 사용 (Claude)
+            try:
+                import anthropic
+
+                api_key = os.getenv("ANTHROPIC_API_KEY")
+                if not api_key:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="ANTHROPIC_API_KEY가 설정되지 않았습니다. GPT 모델을 선택하거나 Anthropic API 키를 설정해주세요."
+                    )
+
+                client = anthropic.Anthropic(api_key=api_key)
+
+                message = client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=1000,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+
+                # 응답 파싱
+                response_text = message.content[0].text.strip()
+
+            except ImportError:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Anthropic 라이브러리가 설치되지 않았습니다. pip install anthropic을 실행하거나 GPT 모델을 선택해주세요."
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Claude API 호출 실패: {str(e)}"
+                )
+
+        elif selected_model == "gpt":
+            # OpenAI API 사용 (GPT)
+            try:
+                import openai
+
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="OPENAI_API_KEY가 설정되지 않았습니다."
+                    )
+
+                client = openai.OpenAI(api_key=api_key)
+
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=1000
+                )
+
+                response_text = response.choices[0].message.content.strip()
+
+            except ImportError:
+                raise HTTPException(
+                    status_code=500,
+                    detail="OpenAI 라이브러리가 설치되지 않았습니다. pip install openai을 실행해주세요."
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"GPT API 호출 실패: {str(e)}"
+                )
+        else:
+            raise HTTPException(status_code=400, detail=f"지원하지 않는 모델입니다: {selected_model}")
+
+        # JSON 추출 (markdown 코드 블록이 있을 수 있음)
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+        if json_match:
+            json_text = json_match.group(1)
+        else:
+            # 그냥 JSON 찾기
+            json_match = re.search(r'\{.*?\}', response_text, re.DOTALL)
+            if json_match:
+                json_text = json_match.group(0)
+            else:
+                json_text = response_text
+
+        result = json.loads(json_text)
+
+        title = result.get("title", "")
+        subtitle = result.get("subtitle", "")
+
+        if not title:
+            raise ValueError("제목이 생성되지 않았습니다.")
+
+        logging.info(f"AI 제목/부제목 생성 완료 ({selected_model}): {title} / {subtitle}")
+
+        return {
+            "success": True,
+            "title": title,
+            "subtitle": subtitle,
+            "model": selected_model
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("AI 제목/부제목 생성 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"AI 제목/부제목 생성 실패: {str(e)}")
+
+
 @app.post("/api/ytdl/start")
 async def api_start_download(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """백그라운드로 다운로드 시작"""

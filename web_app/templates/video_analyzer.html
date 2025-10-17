@@ -411,6 +411,35 @@
         <div class="text-overlay-controls" style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; border: 2px solid rgba(102, 126, 234, 0.5);">
             <h3 style="margin: 0 0 15px 0; color: white;">🎨 텍스트 오버레이</h3>
 
+            <!-- AI 제목/부제목 생성 버튼 -->
+            <div style="margin-bottom: 15px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;">
+                <div style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
+                    <div style="flex: 1;">
+                        <label style="display: block; color: white; margin-bottom: 5px; font-size: 0.9rem;">🤖 AI 모델 선택</label>
+                        <select id="ai-model-select" style="width: 100%; padding: 8px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a; font-size: 14px; cursor: pointer;">
+                            <option value="claude">Claude 3.5 Sonnet (Anthropic)</option>
+                            <option value="gpt">GPT-4o Mini (OpenAI)</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="generateAITitleSubtitle()" class="btn-primary" style="padding: 10px 20px; width: 100%; background: linear-gradient(135deg, #FF6B6B 0%, #FFE66D 100%); color: #1a1a1a; font-weight: bold; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; transition: transform 0.2s;">
+                    🤖 AI 제목 & 부제목 만들기
+                </button>
+                <div id="ai-generation-status" style="margin-top: 8px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 4px; color: #94a3b8; font-size: 0.85rem; text-align: center; display: none;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                        <div class="spinner" style="width: 16px; height: 16px; border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: #60a5fa; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        <span id="ai-status-text">⏳ AI가 제목과 부제목을 생성하고 있습니다...</span>
+                    </div>
+                    <div id="ai-status-timer" style="margin-top: 5px; font-size: 0.75rem; color: #64748b;"></div>
+                </div>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            </div>
+
             <!-- 제목 컨트롤 -->
             <div style="margin-bottom: 15px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;">
                 <label style="display: block; color: white; margin-bottom: 8px; font-weight: bold;">📝 제목</label>
@@ -7163,6 +7192,148 @@ function applyEnglishSubtitle() {
 }
 
 // 제목 적용
+// AI 제목 & 부제목 생성
+async function generateAITitleSubtitle() {
+    const statusDiv = document.getElementById('ai-generation-status');
+    const statusText = document.getElementById('ai-status-text');
+    const statusTimer = document.getElementById('ai-status-timer');
+    const titleInput = document.getElementById('overlay-title-input');
+    const subtitleInput = document.getElementById('overlay-subtitle-input');
+
+    // 타이머 관련 변수
+    let startTime = Date.now();
+    let timerInterval = null;
+
+    try {
+        // 상태 표시
+        if (statusDiv) {
+            statusDiv.style.display = 'block';
+        }
+        if (statusText) {
+            statusText.textContent = '⏳ AI가 제목과 부제목을 생성하고 있습니다...';
+        }
+
+        // 경과 시간 표시 타이머 시작
+        timerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            if (statusTimer) {
+                statusTimer.textContent = `경과 시간: ${elapsed}초`;
+            }
+        }, 100);
+
+        // 현재 영상 정보 가져오기
+        const savedVideoInfo = localStorage.getItem(VIDEO_INFO_STORAGE_KEY);
+        if (!savedVideoInfo) {
+            throw new Error('영상 정보를 찾을 수 없습니다. 먼저 영상을 선택해주세요.');
+        }
+
+        const videoInfo = JSON.parse(savedVideoInfo);
+        const videoPath = videoInfo.path || videoInfo.file_path;
+
+        if (!videoPath) {
+            throw new Error('영상 경로를 찾을 수 없습니다.');
+        }
+
+        // 선택된 AI 모델 가져오기
+        const selectedModel = document.getElementById('ai-model-select')?.value || 'claude';
+
+        // 타임아웃 설정 (30초)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+        // AI 제목/부제목 생성 API 호출
+        const response = await fetch('/api/video-analyzer/generate-title-subtitle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                video_path: videoPath,
+                video_info: videoInfo,
+                model: selectedModel
+            }),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'AI 생성에 실패했습니다.');
+        }
+
+        const data = await response.json();
+
+        // 타이머 중지
+        if (timerInterval) {
+            clearInterval(timerInterval);
+        }
+
+        // 총 소요 시간 계산
+        const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        // 생성된 제목과 부제목을 입력 필드에 설정
+        if (titleInput && data.title) {
+            titleInput.value = data.title;
+            // 제목 자동 적용
+            applyTitle();
+        }
+
+        if (subtitleInput && data.subtitle) {
+            subtitleInput.value = data.subtitle;
+            // 부제목 자동 적용
+            applySubtitle();
+        }
+
+        // 성공 메시지
+        if (statusText) {
+            statusText.innerHTML = '✅ AI 제목과 부제목이 생성되었습니다!';
+        }
+        if (statusTimer) {
+            statusTimer.textContent = `완료 시간: ${totalTime}초 | 모델: ${data.model || selectedModel}`;
+        }
+        if (statusDiv) {
+            statusDiv.style.color = '#4ade80';
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+                statusDiv.style.color = '#94a3b8';
+            }, 5000);
+        }
+
+        console.log(`✅ AI 제목/부제목 생성 완료 (${totalTime}초):`, { title: data.title, subtitle: data.subtitle, model: data.model });
+
+    } catch (error) {
+        console.error('❌ AI 제목/부제목 생성 실패:', error);
+
+        // 타이머 중지
+        if (timerInterval) {
+            clearInterval(timerInterval);
+        }
+
+        // 에러 메시지 처리
+        let errorMessage = error.message;
+        if (error.name === 'AbortError') {
+            errorMessage = '요청 시간이 초과되었습니다 (30초). 다시 시도해주세요.';
+        }
+
+        if (statusText) {
+            statusText.innerHTML = `❌ ${errorMessage}`;
+        }
+        if (statusTimer) {
+            statusTimer.textContent = '';
+        }
+        if (statusDiv) {
+            statusDiv.style.color = '#f87171';
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+                statusDiv.style.color = '#94a3b8';
+            }, 8000);
+        }
+
+        alert(`AI 제목/부제목 생성 실패: ${errorMessage}`);
+    }
+}
+
 function applyTitle() {
     const titleOverlay = document.querySelector('.title-overlay');
     const text = document.getElementById('overlay-title-input').value.trim();
