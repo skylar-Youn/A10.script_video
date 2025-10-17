@@ -134,6 +134,7 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
     subtitle_style = SubtitleStyle()
     media_factory = MediaFactory(
         options.assets_dir,
+        language=options.lang,
         fps=options.fps,
         subtitle_font=subtitle_style.font_path,
         subtitle_fontsize=subtitle_style.font_size,
@@ -142,6 +143,7 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
         subtitle_animation=subtitle_style.animation,
     )
     subtitle_style.font_path = media_factory.subtitle_font
+    subtitle_style.font_size = media_factory.subtitle_fontsize
     logger.info("Building background visuals (duration %.2fs)...", voice_duration)
     background_clip = media_factory.build_broll_clip(voice_duration)
 

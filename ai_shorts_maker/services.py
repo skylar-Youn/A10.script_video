@@ -677,6 +677,7 @@ def render_project(base_name: str, *, burn_subs: bool = False) -> ProjectMetadat
     style = metadata.subtitle_style
     factory = MediaFactory(
         ASSETS_DIR,
+        language=metadata.language,
         fps=fps,
         subtitle_font=style.font_path,
         subtitle_fontsize=style.font_size,
@@ -692,6 +693,8 @@ def render_project(base_name: str, *, burn_subs: bool = False) -> ProjectMetadat
     )
     if style.font_path != factory.subtitle_font:
         style.font_path = factory.subtitle_font
+    if style.font_size != factory.subtitle_fontsize:
+        style.font_size = factory.subtitle_fontsize
     if style.template != factory.layout_template:
         style.template = factory.layout_template
 

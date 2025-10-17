@@ -1777,7 +1777,7 @@ def render_translated_project(project_id: str) -> TranslatorProject:
         from .media import MediaFactory
         from moviepy.editor import VideoFileClip
 
-        factory = MediaFactory(assets_dir=SHORTS_OUTPUT_DIR.parent / "assets")
+        factory = MediaFactory(assets_dir=SHORTS_OUTPUT_DIR.parent / "assets", language=project.target_lang)
 
         # 1. Load base video
         video_clip = VideoFileClip(project.source_video)

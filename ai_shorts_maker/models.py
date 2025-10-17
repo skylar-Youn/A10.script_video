@@ -62,7 +62,7 @@ class AudioSettings(BaseModel):
 
 
 class SubtitleStyle(BaseModel):
-    font_size: int = Field(default=62, ge=10, le=120)
+    font_size: int = Field(default=21, ge=10, le=120)
     y_offset: int = Field(default=0)
     stroke_width: int = Field(default=2, ge=0, le=10)
     font_path: Optional[str] = None

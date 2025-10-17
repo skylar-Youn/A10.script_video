@@ -73,17 +73,67 @@ _FONT_SIZE_PARAM = "font_size" if "font_size" in _TEXTCLIP_SIGNATURE.parameters 
 SUPPORTED_BROLL_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".jpg", ".jpeg", ".png"}
 SUPPORTED_MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac"}
 
-DEFAULT_FONT_CANDIDATES = [
-    os.getenv("SHORTS_SUBTITLE_FONT"),
+_COMMON_CJK_FONT_PATHS = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJKjp-Regular.otf",
+]
+
+_JAPANESE_FONT_PATHS = [
+    "/usr/share/fonts/opentype/noto/NotoSansJP-Regular.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSerifJP-Regular.otf",
+    "/usr/share/fonts/truetype/takao/TakaoPGothic.ttf",
+    "/usr/share/fonts/truetype/takao/TakaoMincho.ttf",
+    "/usr/share/fonts/truetype/droid/DroidSansJapanese.ttf",
+    "/usr/share/fonts/truetype/ipafont/ipag.ttf",
+    "/usr/share/fonts/truetype/ipafont/ipam.ttf",
+]
+
+_KOREAN_FONT_PATHS = [
     "/usr/share/fonts/truetype/nanum/NanumSquareRoundR.ttf",
     "/usr/share/fonts/truetype/nanum/NanumSquareR.ttf",
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/nanum/NanumBarunGothicLight.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf",
+]
+
+_GENERIC_FONT_PATHS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 ]
+
+
+def _ordered_font_candidates(language: Optional[str]) -> List[Optional[str]]:
+    language = (language or "").lower()
+    ordered: List[Optional[str]] = [os.getenv("SHORTS_SUBTITLE_FONT")]
+    seen: set[Optional[str]] = set()
+
+    def _extend(paths: Iterable[Optional[str]]):
+        for path in paths:
+            if not path or path in seen:
+                continue
+            ordered.append(path)
+            seen.add(path)
+
+    if language.startswith("ja"):
+        _extend(_JAPANESE_FONT_PATHS)
+        _extend(_COMMON_CJK_FONT_PATHS)
+        _extend(_KOREAN_FONT_PATHS)
+    elif language.startswith("ko"):
+        _extend(_COMMON_CJK_FONT_PATHS)
+        _extend(_KOREAN_FONT_PATHS)
+        _extend(_JAPANESE_FONT_PATHS)
+    else:
+        _extend(_COMMON_CJK_FONT_PATHS)
+        _extend(_JAPANESE_FONT_PATHS)
+        _extend(_KOREAN_FONT_PATHS)
+
+    _extend(_GENERIC_FONT_PATHS)
+    return ordered
 
 FONT_SEARCH_DIRS = [
     Path(path).expanduser()
@@ -97,24 +147,39 @@ FONT_SEARCH_DIRS = [
             "/usr/local/share/fonts",
             str(Path.home() / ".fonts"),
             str(Path.home() / ".local/share/fonts"),
+            "/Library/Fonts",
+            "/System/Library/Fonts",
         ],
     )
 ]
 
 FONT_FILE_CANDIDATES = [
+    "NotoSansCJK-Regular.ttc",
+    "NotoSansCJKjp-Regular.otf",
+    "NotoSansCJKjp-Regular.ttc",
+    "NotoSerifCJK-Regular.ttc",
+    "NotoSerifCJKjp-Regular.otf",
+    "NotoSansJP-Regular.otf",
+    "NotoSansJP-Regular.ttf",
+    "NotoSerifJP-Regular.otf",
+    "TakaoPGothic.ttf",
+    "TakaoMincho.ttf",
+    "DroidSansJapanese.ttf",
+    "ipag.ttf",
+    "ipam.ttf",
     "NanumSquareRoundR.ttf",
     "NanumSquareR.ttf",
     "NanumGothic.ttf",
     "NanumBarunGothic.ttf",
     "NanumBarunGothicLight.ttf",
-    "NotoSansCJK-Regular.ttc",
+    "NanumMyeongjo.ttf",
     "NotoSansKR-Regular.otf",
     "NotoSansKR-Regular.ttc",
 ]
 
 
-def _detect_font() -> Optional[str]:
-    for candidate in DEFAULT_FONT_CANDIDATES:
+def _detect_font(language: Optional[str] = None) -> Optional[str]:
+    for candidate in _ordered_font_candidates(language):
         if not candidate:
             continue
         path = Path(candidate).expanduser()
@@ -130,7 +195,18 @@ def _detect_font() -> Optional[str]:
             if candidate.exists():
                 logger.debug("Detected subtitle font %s", candidate)
                 return str(candidate)
-        for pattern in ("Nanum*.ttf", "Nanum*.otf", "NotoSansCJK-*.ttc", "NotoSansKR*.otf", "NotoSansKR*.ttc"):
+        for pattern in (
+            "Nanum*.ttf",
+            "Nanum*.otf",
+            "NotoSansCJK-*.ttc",
+            "NotoSansCJK*-*.otf",
+            "NotoSansJP-*.otf",
+            "NotoSansJP-*.ttf",
+            "NotoSerifJP-*.otf",
+            "NotoSerifCJK*-*.otf",
+            "IPAP*.ttf",
+            "Takao*.ttf",
+        ):
             try:
                 match = next(directory.rglob(pattern))
             except (StopIteration, PermissionError, OSError):
@@ -141,13 +217,16 @@ def _detect_font() -> Optional[str]:
     return None
 
 
-def _resolve_font_path(font_path: Optional[str]) -> Optional[str]:
+def _resolve_font_path(font_path: Optional[str], language: Optional[str] = None) -> Optional[str]:
     if font_path:
         candidate = Path(font_path).expanduser()
         if candidate.exists():
-            return str(candidate)
-        logger.warning("Subtitle font '%s' not found; falling back to auto-detection", font_path)
-    return _detect_font()
+            if _font_matches_language(candidate, language):
+                return str(candidate)
+            logger.debug("Subtitle font %s does not match language '%s'; re-detecting", candidate, language)
+        else:
+            logger.warning("Subtitle font '%s' not found; falling back to auto-detection", font_path)
+    return _detect_font(language)
 
 
 def _with_position(clip, position):
@@ -319,8 +398,9 @@ class MediaFactory:
         assets_dir: Path,
         canvas_size: tuple[int, int] = (1080, 1920),
         fps: int = 24,
+        language: Optional[str] = None,
         subtitle_font: Optional[str] = None,
-        subtitle_fontsize: int = 62,
+        subtitle_fontsize: int = 21,
         subtitle_y_offset: int = 0,
         subtitle_stroke_width: int = 2,
         subtitle_animation: str = "none",
@@ -336,8 +416,12 @@ class MediaFactory:
         self.music_dir = assets_dir / "music"
         self.canvas_size = canvas_size
         self.fps = fps
-        self.subtitle_font = _resolve_font_path(subtitle_font)
-        self.subtitle_fontsize = subtitle_fontsize
+        self.language = (language or "").lower() or None
+        self.subtitle_font = _resolve_font_path(subtitle_font, self.language)
+        raw_font_size = subtitle_fontsize or 0
+        if raw_font_size >= 30:
+            raw_font_size = max(int(round(raw_font_size / 3)), 10)
+        self.subtitle_fontsize = max(int(raw_font_size) if raw_font_size else 21, 10)
         self.subtitle_y_offset = subtitle_y_offset
         self.subtitle_stroke_width = subtitle_stroke_width
         self.subtitle_animation = (subtitle_animation or "none").lower()
@@ -678,7 +762,7 @@ class MediaFactory:
                 def _make_kwargs(include_font: bool):
                     kwargs = dict(base_kwargs)
                     kwargs[_TEXT_PARAM] = text
-                    size_value = font_size_override or max(int(self.subtitle_fontsize * 1.05), 48)
+                    size_value = font_size_override or max(int(self.subtitle_fontsize * 1.05), 16)
                     kwargs[_FONT_SIZE_PARAM] = max(size_value, 1)
                     if include_font and self.subtitle_font:
                         kwargs["font"] = self.subtitle_font
@@ -719,3 +803,16 @@ class MediaFactory:
 
         composite = CompositeVideoClip(layers, size=self.canvas_size)
         return _set_duration(composite, video_duration or subtitles_clip.duration)
+
+
+def _font_matches_language(path: Path, language: Optional[str]) -> bool:
+    if not language:
+        return True
+    name = path.name.lower()
+    if language.startswith("ja"):
+        keywords = ("cjk", "jp", "japan", "takao", "ipa", "sourcehan", "noto")
+        return any(key in name for key in keywords)
+    if language.startswith("ko"):
+        keywords = ("nanum", "kr", "hangul", "cjk", "noto", "sourcehan")
+        return any(key in name for key in keywords)
+    return True

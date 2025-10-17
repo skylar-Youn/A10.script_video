@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from functools import lru_cache
@@ -223,8 +224,31 @@ def open_video_with_transcode_fallback(video_path: Path) -> tuple[Any, Optional[
     if cv2 is None:
         raise RuntimeError("OpenCV가 설치되지 않았습니다.")
 
+    def _create_capture(path: Path):
+        api_preference = getattr(cv2, "CAP_FFMPEG", 0)
+        capture = cv2.VideoCapture()
+
+        if hasattr(cv2, "CAP_PROP_HW_ACCELERATION") and hasattr(cv2, "VIDEO_ACCELERATION_NONE"):
+            capture.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE)
+
+        opened = False
+        try:
+            opened = capture.open(str(path), api_preference)
+        except TypeError:  # pragma: no cover - older OpenCV fallback
+            opened = capture.open(str(path))
+
+        if not opened:
+            capture.release()
+            try:
+                capture = cv2.VideoCapture(str(path), api_preference)
+            except TypeError:  # pragma: no cover - older OpenCV fallback
+                capture = cv2.VideoCapture(str(path))
+            if hasattr(cv2, "CAP_PROP_HW_ACCELERATION") and hasattr(cv2, "VIDEO_ACCELERATION_NONE"):
+                capture.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE)
+        return capture
+
     # 먼저 직접 열기 시도
-    cap = cv2.VideoCapture(str(video_path))
+    cap = _create_capture(video_path)
     if cap.isOpened():
         return cap, None
 
@@ -254,7 +278,7 @@ def open_video_with_transcode_fallback(video_path: Path) -> tuple[Any, Optional[
             transcoded_file.unlink()
         raise RuntimeError(f"Failed to transcode video: {error_msg}")
 
-    cap = cv2.VideoCapture(str(transcoded_file))
+    cap = _create_capture(transcoded_file)
     if not cap.isOpened():
         if transcoded_file.exists():
             transcoded_file.unlink()
@@ -1828,7 +1852,6 @@ app.include_router(video_editor_router)
 
 def process_video_with_subtitles(project_id: str, video_path: str, template: str, subtitle_type: str, project: Any, external_subtitle_path: Optional[str] = None) -> Dict[str, Any]:
     """영상에 번역된 자막을 합성하는 함수"""
-    import subprocess
     from pathlib import Path
     import tempfile
     import os
@@ -1857,7 +1880,8 @@ def process_video_with_subtitles(project_id: str, video_path: str, template: str
         output_path = output_dir / output_filename
 
         # FFmpeg 명령어 구성 (템플릿에 따른 자막 스타일)
-        subtitle_style = get_subtitle_style_for_template(template)
+        project_language = getattr(project, "target_lang", None) or getattr(project, "language", None)
+        subtitle_style = get_subtitle_style_for_template(template, project_language)
 
         ffmpeg_cmd = [
             'ffmpeg', '-y',  # -y: 출력 파일 덮어쓰기
@@ -1935,13 +1959,84 @@ def format_time_for_srt(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millisecs:03d}"
 
 
-def get_subtitle_style_for_template(template: str) -> str:
+def _font_family_installed(family: str) -> bool:
+    """fontconfig를 통해 지정한 폰트 패밀리 사용 가능 여부 확인"""
+    try:
+        result = subprocess.run(
+            ["fc-match", "--format=%{family}", family],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        # fontconfig가 없는 환경에서는 확인 불가이지만, 일단 시도한다.
+        return True
+    matched = (result.stdout or "").strip()
+    return bool(matched)
+
+
+def _detect_font_family(language: Optional[str]) -> Optional[str]:
+    """자막 언어별로 적합한 폰트 패밀리를 탐색"""
+    lang = (language or "").lower()
+    candidates: List[str] = []
+
+    if lang.startswith("ja"):
+        candidates.extend(
+            [
+                "Noto Sans CJK JP",
+                "Noto Sans JP",
+                "Noto Serif CJK JP",
+                "Noto Serif JP",
+                "Droid Sans Japanese",
+                "IPAGothic",
+                "TakaoPGothic",
+            ]
+        )
+    elif lang.startswith("ko"):
+        candidates.extend(
+            [
+                "Noto Sans CJK KR",
+                "NanumGothic",
+                "NanumSquare",
+                "NanumSquareRound",
+                "NanumGothicCoding",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                "Noto Sans CJK KR",
+                "Noto Sans CJK JP",
+                "DejaVu Sans",
+            ]
+        )
+
+    # 모든 언어에서 사용할 수 있는 일반 후보 추가
+    candidates.extend(
+        [
+            "Noto Sans CJK KR",
+            "Noto Sans CJK JP",
+            "Noto Sans CJK SC",
+        ]
+    )
+
+    for family in candidates:
+        if _font_family_installed(family):
+            return family
+    return None
+
+
+def get_subtitle_style_for_template(template: str, language: Optional[str] = None) -> str:
     """템플릿에 따른 자막 스타일 반환"""
     styles = {
         "classic": "FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,Alignment=2,MarginV=20",
-        "banner": "FontSize=26,PrimaryColour=&Hffffff,OutlineColour=&H000000,BackColour=&H80ff0000,Bold=1,Outline=2,Shadow=1,Alignment=2,MarginV=300"
+        "banner": "FontSize=26,PrimaryColour=&Hffffff,OutlineColour=&H000000,BackColour=&H80ff0000,Bold=1,Outline=2,Shadow=1,Alignment=2,MarginV=300",
     }
-    return styles.get(template, styles["classic"])
+    base_style = styles.get(template, styles["classic"])
+    font_family = _detect_font_family(language)
+    if font_family:
+        return f"{base_style},FontName={font_family}"
+    return base_style
 
 
 def get_video_duration(video_path: str) -> Optional[float]:

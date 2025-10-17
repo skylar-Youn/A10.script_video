@@ -76,6 +76,72 @@ class DiffusionUnavailableError(RuntimeError):
     """Raised when diffusers/torch dependencies are missing."""
 
 
+def _open_video_capture(video_path: Path) -> "cv2.VideoCapture":
+    """Create a VideoCapture with hardware acceleration disabled."""
+
+    if cv2 is None:  # pragma: no cover - safeguarded by callers
+        raise TrackerUnavailableError(
+            "OpenCV (opencv-contrib-python) 패키지가 필요합니다."
+        ) from CV2_IMPORT_ERROR
+
+    api_preference = getattr(cv2, "CAP_FFMPEG", 0)
+    capture = cv2.VideoCapture()
+
+    if hasattr(cv2, "CAP_PROP_HW_ACCELERATION") and hasattr(cv2, "VIDEO_ACCELERATION_NONE"):
+        capture.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE)
+
+    opened = False
+    try:
+        opened = capture.open(str(video_path), api_preference)
+    except TypeError:  # pragma: no cover - older OpenCV fallback
+        opened = capture.open(str(video_path))
+
+    if not opened:
+        capture.release()
+        try:
+            capture = cv2.VideoCapture(str(video_path), api_preference)
+        except TypeError:  # pragma: no cover - older OpenCV fallback
+            capture = cv2.VideoCapture(str(video_path))
+        if hasattr(cv2, "CAP_PROP_HW_ACCELERATION") and hasattr(cv2, "VIDEO_ACCELERATION_NONE"):
+            capture.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE)
+
+    return capture
+
+
+def _probe_video_codec(video_path: Path) -> Optional[str]:
+    """Return the codec name for the first video stream, if detectable via PyAV."""
+
+    if av is None:
+        return None
+
+    try:
+        with av.open(str(video_path)) as container:
+            stream = next(
+                (s for s in container.streams if getattr(s, "type", None) == "video"),
+                None,
+            )
+            if stream is None:
+                return None
+
+            codec_ctx = getattr(stream, "codec_context", None)
+            codec_name = None
+            if codec_ctx is not None:
+                codec_name = getattr(codec_ctx, "name", None) or getattr(codec_ctx, "codec", None)
+                if codec_name and not isinstance(codec_name, str):
+                    codec_name = getattr(codec_name, "name", None)
+
+            if not codec_name:
+                codec = getattr(stream, "codec", None)
+                if codec is not None:
+                    codec_name = getattr(codec, "name", None)
+
+            return str(codec_name) if codec_name else None
+    except PyAVError:
+        return None
+    except Exception:  # pragma: no cover - defensive fallback
+        return None
+
+
 def trim_video_clip(
     source_path: Path,
     target_path: Path,
@@ -255,7 +321,7 @@ def run_text_removal(config: RemovalConfig) -> None:
     if output_path.exists():
         output_path.unlink()
 
-    cap = cv2.VideoCapture(str(video_path))
+    cap = _open_video_capture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"비디오 파일을 열 수 없습니다: {video_path}")
 
@@ -413,7 +479,7 @@ def extract_first_frame(video_path: Path) -> Optional[Tuple[np.ndarray, float, i
     if cv2 is None:  # pragma: no cover - optional dependency check handled earlier
         return None
 
-    cap = cv2.VideoCapture(str(video_path))
+    cap = _open_video_capture(video_path)
     if not cap.isOpened():
         cap.release()
         return None
@@ -503,7 +569,7 @@ def run_background_fill(config: BackgroundFillConfig) -> None:
     if output_path.exists():
         output_path.unlink()
 
-    cap = cv2.VideoCapture(str(video_path))
+    cap = _open_video_capture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"비디오 파일을 열 수 없습니다: {video_path}")
 
@@ -645,7 +711,12 @@ def prepare_video_preview(video_path: Path, session_dir: Path) -> Tuple[np.ndarr
             "OpenCV (opencv-contrib-python) 패키지가 필요합니다."
         ) from CV2_IMPORT_ERROR
 
-    result = extract_first_frame(video_path)
+    codec_name = _probe_video_codec(video_path)
+    prefer_transcode = bool(codec_name and codec_name.strip().lower().startswith("av1"))
+    if video_path.suffix.lower() == ".webm":
+        prefer_transcode = True
+
+    result = None if prefer_transcode else extract_first_frame(video_path)
     if result is not None:
         frame, fps, frame_count, width, height = result
         return frame, fps, frame_count, width, height, video_path, video_path
