@@ -4447,10 +4447,10 @@ async def api_create_final_video(
                         return f"&H00{b:02X}{g:02X}{r:02X}"
                     return "&H00FFFFFF"
 
-                # overlays에서 폰트 크기 및 색상 추출
-                korean_overlay = overlays_data.get("korean", {})
-                english_overlay = overlays_data.get("english", {})
-                title_overlay = overlays_data.get("title", {})
+                # overlays에서 폰트 크기 및 색상 추출 (None 안전 처리)
+                korean_overlay = overlays_data.get("korean") or {}
+                english_overlay = overlays_data.get("english") or {}
+                title_overlay = overlays_data.get("title") or {}
 
                 korean_overlay_size = korean_overlay.get("fontSize", 64)
                 english_overlay_size = english_overlay.get("fontSize", 56)
@@ -4461,9 +4461,9 @@ async def api_create_final_video(
                 title_font_size = adjust_subtitle_size(title_overlay_size)
 
                 # 색상 추출
-                korean_color = css_to_ass_color(korean_overlay.get("color"))
-                english_color = css_to_ass_color(english_overlay.get("color"))
-                title_color = css_to_ass_color(title_overlay.get("color"))
+                korean_color = css_to_ass_color(korean_overlay.get("color", "rgb(255, 255, 255)"))
+                english_color = css_to_ass_color(english_overlay.get("color", "rgb(255, 255, 255)"))
+                title_color = css_to_ass_color(title_overlay.get("color", "rgb(255, 255, 255)"))
 
                 logging.info(f"📏 자막 크기 조정: korean {korean_overlay_size}→{korean_font_size}, english {english_overlay_size}→{english_font_size}, title {title_overlay_size}→{title_font_size}")
                 logging.info(f"🎨 자막 색상: korean={korean_color}, english={english_color}, title={title_color}")
