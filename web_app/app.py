@@ -694,19 +694,53 @@ def _build_drawtext_filter(
         return None
     text = escape_ffmpeg_text(text_raw)
 
-    try:
-        x_value = float(overlay.get("x", video_width / 2))
-    except (TypeError, ValueError):
-        x_value = video_width / 2
-    try:
-        y_value = float(overlay.get("y", video_height / 2))
-    except (TypeError, ValueError):
-        y_value = video_height / 2
+    overlay_type = (overlay.get("type") or "").lower()
 
     try:
         font_size = max(12, int(round(float(overlay.get("fontSize", 48)))))
     except (TypeError, ValueError):
         font_size = 48
+
+    if overlay_type in {"korean", "english"}:
+        font_size = max(12, int(round(font_size / 5.0)))
+
+    def _coerce_position(value: Any, fallback: float) -> float:
+        try:
+            if value is None:
+                raise TypeError
+            return float(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    default_positions = {
+        "title": {"x": video_width / 2, "y": video_height * 0.82},
+        "subtitle": {"x": video_width / 2, "y": video_height * 0.9},
+        "korean": {"x": video_width * 0.898026, "y": video_height * 1.0},
+        "english": {"x": video_width * 1.0, "y": video_height * 0.886635},
+    }
+
+    fallback_position = default_positions.get(overlay_type, {"x": video_width / 2, "y": video_height / 2})
+    x_value = _coerce_position(overlay.get("x"), fallback_position.get("x", video_width / 2))
+    y_value = _coerce_position(overlay.get("y"), fallback_position.get("y", video_height / 2))
+
+    if overlay_type in {"title", "subtitle"} and overlay.get("y") in {None, ""}:
+        # 제목/부제목이 위치 값을 갖지 않는 경우 주/보조 자막 기본 위치와 맞춘다.
+        anchor_key = "korean" if overlay_type == "title" else "english"
+        anchor_fallback = default_positions.get(anchor_key)
+        if anchor_fallback and anchor_fallback.get("y") is not None:
+            y_value = anchor_fallback["y"]
+
+    # drawtext 좌표는 텍스트 상단/좌측 기준으로 다루며, CSS의 translateX(-50%) 효과를 모사한다.
+    x_expr = f"clip({x_value}-text_w/2,0,{video_width}-text_w)"
+
+    if overlay_type in {"korean", "english"}:
+        # 주/보조 자막은 top 좌표 기준을 유지
+        y_expr_base = f"{y_value}"
+    else:
+        # 제목/부제목 등은 중앙 정렬
+        y_expr_base = f"{y_value}-text_h/2"
+
+    y_expr = f"clip({y_expr_base},0,{video_height}-text_h)"
 
     font_family = overlay.get("fontFamily")
     font_weight = overlay.get("fontWeight")
@@ -745,7 +779,6 @@ def _build_drawtext_filter(
                 break
 
     # 오버레이 타입에 따라 색상 강제 설정
-    overlay_type = overlay.get("type", "")
     overlay_opacity = overlay.get("opacity")
 
     if overlay_type in ["korean", "english"]:
@@ -773,7 +806,6 @@ def _build_drawtext_filter(
     )
     outline_color = _format_color_for_ffmpeg(outline_hex, outline_alpha)
 
-    overlay_type = (overlay.get("type") or "").lower()
     if overlay_type in {"korean", "english"}:
         border_width = max(2, int(round(font_size * 0.08)))
     else:
@@ -805,8 +837,8 @@ def _build_drawtext_filter(
 
     drawtext_params = [
         f"text='{text}'",
-        f"x={x_value}-text_w/2",
-        f"y={y_value}-text_h/2",
+        f"x='{x_expr}'",
+        f"y='{y_expr}'",
         f"fontsize={font_size}",
         "text_shaping=1",
         f"fontcolor={font_color}",
@@ -4413,13 +4445,20 @@ async def api_create_final_video(
     import subprocess
     import tempfile
     import shutil
+    import time
+
+    # ⏱️ 성능 측정 시작
+    perf_start_total = time.time()
+    perf_marks = {}
 
     try:
-        # JSON 파싱
+        # JSON 파싱 성능 측정
+        perf_start = time.time()
         overlays_data = json.loads(overlays)
         black_bars_data = json.loads(black_bars)
         tracks_data = json.loads(tracks)
         subtitle_style_data = json.loads(subtitle_style) if subtitle_style else {}
+        perf_marks['json_parsing'] = time.time() - perf_start
 
         if not video_path or not Path(video_path).exists():
             raise HTTPException(status_code=404, detail="비디오 파일을 찾을 수 없습니다.")
@@ -4444,11 +4483,14 @@ async def api_create_final_video(
         logging.info(f"🎵 트랙: {tracks_data}")
 
         # 임시 디렉토리 생성
+        perf_start = time.time()
         temp_dir = Path(tempfile.mkdtemp())
         temp_audio_files = []
+        perf_marks['temp_dir_creation'] = time.time() - perf_start
 
         try:
             # 업로드된 오디오 파일 저장
+            perf_start = time.time()
             audio_inputs = []
 
             if audio_file:
@@ -4475,7 +4517,10 @@ async def api_create_final_video(
                 audio_inputs.append(str(bgm_path))
                 logging.info(f"🎵 BGM 파일 저장: {bgm_path}")
 
+            perf_marks['audio_file_save'] = time.time() - perf_start
+
             # FFmpeg filter_complex 구성
+            perf_start = time.time()
             video_filters = []
 
             # 1. 검정 배경 추가
@@ -4585,10 +4630,10 @@ async def api_create_final_video(
 
             # 자막 필터 추가 (비디오 해상도 기준으로 적절한 크기 사용)
             if subtitle_files:
-                # overlays 폰트는 이미 스케일링된 큰 값이므로 50%로 축소
+                # overlays 폰트 크기를 그대로 사용하되 안전한 범위 내로 제한
                 def adjust_subtitle_size(overlay_size):
-                    adjusted = int(overlay_size * 0.5)  # 50% 축소
-                    return max(24, min(adjusted, 60))  # 24-60px 범위로 제한
+                    adjusted = int(round(overlay_size / 5.0))
+                    return max(18, min(adjusted, 52))
 
                 # CSS 색상을 ASS/SSA 형식(&HBBGGRR)으로 변환
                 def css_to_ass_color(css_color):
@@ -4732,10 +4777,14 @@ async def api_create_final_video(
                 str(output_path)
             ])
 
+            perf_marks['filter_construction'] = time.time() - perf_start
+
             logging.info(f"🎬 FFmpeg 명령어: {' '.join(cmd)}")
 
             # FFmpeg 실행
+            perf_start = time.time()
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            perf_marks['ffmpeg_execution'] = time.time() - perf_start
 
             if result.returncode != 0:
                 logging.error(f"FFmpeg 에러: {result.stderr}")
@@ -4744,13 +4793,33 @@ async def api_create_final_video(
             # 출력 파일 확인
             if output_path.exists():
                 size_mb = output_path.stat().st_size / (1024 * 1024)
+
+                # 총 시간 계산
+                perf_marks['total_time'] = time.time() - perf_start_total
+
+                # 성능 로그 출력
                 logging.info(f"✅ 최종 영상 생성 완료: {output_path} ({size_mb:.2f}MB)")
+                logging.info("⏱️ 성능 측정 결과:")
+                logging.info(f"   - JSON 파싱: {perf_marks.get('json_parsing', 0):.3f}s")
+                logging.info(f"   - 임시 디렉토리 생성: {perf_marks.get('temp_dir_creation', 0):.3f}s")
+                logging.info(f"   - 오디오 파일 저장: {perf_marks.get('audio_file_save', 0):.3f}s")
+                logging.info(f"   - 필터 구성: {perf_marks.get('filter_construction', 0):.3f}s")
+                logging.info(f"   - FFmpeg 실행: {perf_marks.get('ffmpeg_execution', 0):.3f}s")
+                logging.info(f"   - 전체 시간: {perf_marks.get('total_time', 0):.3f}s")
 
                 return {
                     "success": True,
                     "output_path": str(output_path),
                     "file_name": output_name,
-                    "size_mb": round(size_mb, 2)
+                    "size_mb": round(size_mb, 2),
+                    "performance": {
+                        "json_parsing": round(perf_marks.get('json_parsing', 0), 3),
+                        "temp_dir_creation": round(perf_marks.get('temp_dir_creation', 0), 3),
+                        "audio_file_save": round(perf_marks.get('audio_file_save', 0), 3),
+                        "filter_construction": round(perf_marks.get('filter_construction', 0), 3),
+                        "ffmpeg_execution": round(perf_marks.get('ffmpeg_execution', 0), 3),
+                        "total_time": round(perf_marks.get('total_time', 0), 3)
+                    }
                 }
             else:
                 raise HTTPException(status_code=500, detail="최종 영상 파일이 생성되지 않았습니다.")

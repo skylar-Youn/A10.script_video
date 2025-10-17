@@ -1059,6 +1059,43 @@
                 </div>
             </div>
 
+            <!-- 브라우저 기능 진단 패널 -->
+            <div class="browser-diagnostic-panel" style="margin-top: 20px; padding: 15px; background: rgba(26, 30, 46, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="margin: 0; color: #f0f4f8; font-size: 1rem;">🔍 브라우저 기능 진단</h4>
+                    <button onclick="runBrowserDiagnostics()" class="btn-primary" style="padding: 6px 12px; background: #3b82f6; font-size: 0.9rem;">
+                        진단 실행
+                    </button>
+                </div>
+                <div id="browser-diagnostic-results" style="display: none;">
+                    <!-- 진단 결과가 여기에 표시됩니다 -->
+                </div>
+                <p style="margin: 10px 0 0 0; padding: 8px; background: rgba(59, 130, 246, 0.05); border-left: 3px solid #3b82f6; border-radius: 4px; color: #b0c4de; font-size: 0.85rem;">
+                    💡 이 진단은 브라우저가 WebCodecs, WebGL2, SharedArrayBuffer 등 최신 기능을 지원하는지 확인합니다.
+                </p>
+            </div>
+
+            <!-- 성능 대시보드 패널 -->
+            <div class="performance-dashboard-panel" style="margin-top: 20px; padding: 15px; background: rgba(26, 30, 46, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="margin: 0; color: #f0f4f8; font-size: 1rem;">📊 성능 대시보드</h4>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="showPerformanceReport()" class="btn-primary" style="padding: 6px 12px; background: #10b981; font-size: 0.9rem;">
+                            리포트 표시
+                        </button>
+                        <button onclick="clearPerformanceData()" class="btn-secondary" style="padding: 6px 12px; background: #ef4444; font-size: 0.9rem;">
+                            데이터 초기화
+                        </button>
+                    </div>
+                </div>
+                <div id="performance-dashboard-results" style="display: none;">
+                    <!-- 성능 리포트가 여기에 표시됩니다 -->
+                </div>
+                <p style="margin: 10px 0 0 0; padding: 8px; background: rgba(16, 185, 129, 0.05); border-left: 3px solid #10b981; border-radius: 4px; color: #b0c4de; font-size: 0.85rem;">
+                    💡 API 호출, DOM 렌더링, 메모리 사용량 등 실시간 성능 데이터를 수집합니다. 콘솔에서도 확인 가능합니다.
+                </p>
+            </div>
+
             <div class="video-preview-actions" style="margin-top: 15px;">
                 <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                     <button onclick="useThisVideo()" class="btn-primary">이 영상으로 자막 불러오기</button>
@@ -11191,7 +11228,105 @@ function toggleBannerControls() {
 document.addEventListener('DOMContentLoaded', () => {
     toggleBannerControls();
 });
+
+// ==================== 성능 대시보드 ====================
+function showPerformanceReport() {
+    const resultsDiv = document.getElementById('performance-dashboard-results');
+
+    try {
+        if (!window.performanceMonitor) {
+            throw new Error('Performance Monitor가 로드되지 않았습니다.');
+        }
+
+        const reportHTML = window.performanceMonitor.generateHTMLReport();
+        resultsDiv.innerHTML = reportHTML;
+        resultsDiv.style.display = 'block';
+
+        // 콘솔에도 출력
+        window.performanceMonitor.printReport();
+
+        console.log('📊 성능 대시보드 업데이트 완료');
+    } catch (error) {
+        console.error('성능 리포트 생성 중 오류:', error);
+        resultsDiv.innerHTML = `
+            <div style="padding: 15px; background: rgba(255, 68, 68, 0.1); border: 1px solid #ff4444; border-radius: 6px; color: #ff4444;">
+                <strong>⚠️ 리포트 생성 실패</strong>
+                <p style="margin: 5px 0 0 0; font-size: 0.9rem;">${error.message}</p>
+            </div>
+        `;
+        resultsDiv.style.display = 'block';
+    }
+}
+
+function clearPerformanceData() {
+    if (confirm('모든 성능 측정 데이터를 초기화하시겠습니까?')) {
+        window.performanceMonitor.clear();
+        const resultsDiv = document.getElementById('performance-dashboard-results');
+        resultsDiv.style.display = 'none';
+        console.log('✨ 성능 데이터 초기화 완료');
+    }
+}
+
+// ==================== 브라우저 진단 ====================
+let browserCapChecker = null;
+
+async function runBrowserDiagnostics() {
+    const resultsDiv = document.getElementById('browser-diagnostic-results');
+    const button = event.target;
+
+    // 버튼 비활성화 및 로딩 표시
+    button.disabled = true;
+    button.textContent = '진단 중...';
+
+    try {
+        // BrowserCapabilities 인스턴스 생성
+        if (!browserCapChecker) {
+            browserCapChecker = new BrowserCapabilities();
+        }
+
+        // 진단 실행
+        const capabilities = await browserCapChecker.checkAll();
+
+        // 결과 표시
+        resultsDiv.innerHTML = browserCapChecker.formatAsHTML();
+        resultsDiv.style.display = 'block';
+
+        // 콘솔에도 출력
+        browserCapChecker.printToConsole();
+
+        console.log('🔍 브라우저 기능 진단 완료:', capabilities);
+    } catch (error) {
+        console.error('브라우저 진단 중 오류:', error);
+        resultsDiv.innerHTML = `
+            <div style="padding: 15px; background: rgba(255, 68, 68, 0.1); border: 1px solid #ff4444; border-radius: 6px; color: #ff4444;">
+                <strong>⚠️ 진단 실패</strong>
+                <p style="margin: 5px 0 0 0; font-size: 0.9rem;">${error.message}</p>
+            </div>
+        `;
+        resultsDiv.style.display = 'block';
+    } finally {
+        // 버튼 복구
+        button.disabled = false;
+        button.textContent = '진단 재실행';
+    }
+}
+
 </script>
+
+<!-- 브라우저 기능 탐지 스크립트 로드 -->
+<script src="/static/browser-capabilities.js"></script>
+
+<!-- 성능 모니터링 스크립트 로드 -->
+<script src="/static/performance-monitor.js"></script>
+
+<!-- MP4Box.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+
+<!-- MP4 분석기 스크립트 로드 -->
+<script src="/static/mp4-analyzer.js"></script>
+
+<!-- Canvas 미리보기 스크립트 로드 -->
+<script src="/static/canvas-preview.js"></script>
 
 </body>
 </html>
