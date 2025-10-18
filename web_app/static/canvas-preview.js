@@ -59,6 +59,9 @@ class CanvasVideoPreview {
         this.fontsLoaded = false;
         this.initializeFonts();
 
+        // 일본어 감지 정규식 (히라가나, 가타카나, 확장, 반각, 한자)
+        this.japaneseRegex = /[\u3040-\u309F\u30A0-\u30FF\u31F0-\u31FF\uFF61-\uFF9F\u4E00-\u9FAF]/;
+
         // 드래그 상태
         this.isDragging = false;
         this.dragTarget = null; // 'title', 'subtitle', 'main', 'translation', 'description'
@@ -237,18 +240,7 @@ class CanvasVideoPreview {
         const fontSize = overlay.fontSize || 48;
 
         // 텍스트 언어 감지 후 폰트 선택 (일본어 우선 처리)
-        let fontFamily = overlay.fontFamily;
-        if (!fontFamily) {
-            // 일본어 문자 감지 (히라가나, 가타카나, 한자)
-            const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
-            if (hasJapanese) {
-                // 일본어가 포함된 경우 일본어 폰트 우선
-                fontFamily = '"Noto Sans JP Local", "Noto Sans CJK JP", "Noto Sans KR Local", "맑은 고딕", Arial, sans-serif';
-            } else {
-                // 한국어 또는 기타 언어
-                fontFamily = '"Noto Sans KR Local", "Noto Sans JP Local", "맑은 고딕", Arial, sans-serif';
-            }
-        }
+        const fontFamily = overlay.fontFamily || this.getFontFamilyForText(text);
 
         const color = overlay.color || '#ffffff';
         // 외곽선을 더 두껍게 (가독성 향상)
@@ -398,10 +390,24 @@ class CanvasVideoPreview {
     }
 
     /**
+     * 텍스트 내용에 맞춰 폰트 패밀리를 반환한다.
+     */
+    getFontFamilyForText(text = '') {
+        if (this.japaneseRegex.test(text)) {
+            return '"Noto Sans JP Local", "Noto Sans CJK JP", "Noto Sans KR Local", "맑은 고딕", Arial, sans-serif';
+        }
+        return '"Noto Sans KR Local", "Noto Sans JP Local", "맑은 고딕", Arial, sans-serif';
+    }
+
+    /**
      * 텍스트 오버레이 추가
      */
     addOverlay(overlay) {
-        this.overlays.push(overlay);
+        const resolvedOverlay = {
+            ...overlay,
+            fontFamily: overlay.fontFamily || this.getFontFamilyForText(overlay.text)
+        };
+        this.overlays.push(resolvedOverlay);
         this.render();
     }
 
@@ -765,12 +771,7 @@ class CanvasVideoPreview {
      */
     isPointInTextArea(pointX, pointY, text, textX, textY, fontSize) {
         // 언어별 폰트 자동 선택
-        const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
-        const fontFamily = hasJapanese
-            ? '"Noto Sans JP Local", "Noto Sans CJK JP", "Noto Sans KR Local", "맑은 고딕", Arial, sans-serif'
-            : '"Noto Sans KR Local", "Noto Sans JP Local", "맑은 고딕", Arial, sans-serif';
-
-        this.ctx.font = `bold ${fontSize}px ${fontFamily}`;
+        this.ctx.font = `bold ${fontSize}px ${this.getFontFamilyForText(text)}`;
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 

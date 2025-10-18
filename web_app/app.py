@@ -536,18 +536,35 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
             add_candidate("nanumsquarer.ttf")
             add_candidate("nanumbarungothic.ttf")
         if "noto" in normalized_family:
-            if prefer_bold:
-                add_candidate("notosans-bold.ttf")
-                add_candidate("notosanscjkk-bold.otf")
-                add_candidate("notosanscjkkr-bold.otf")
-                add_candidate("notosanskr-bold.ttf")
-                add_candidate("notosansjp-bold.ttf")
-            add_candidate("notosans-regular.ttf")
-            add_candidate("notosanscjkkr-regular.otf")
-            add_candidate("notosanscjk-regular.ttc")
-            # web_app/static/fonts/ 폴더의 폰트 추가
-            add_candidate("notosanskr-regular.ttf")
-            add_candidate("notosansjp-regular.ttf")
+            # 일본어 폰트 우선 처리 (JP 또는 Japanese가 명시된 경우)
+            if "jp" in normalized_family or "japanese" in normalized_family:
+                if prefer_bold:
+                    add_candidate("notosansjp-bold.ttf")
+                    add_candidate("notosanscjk-regular.ttc")  # CJK 통합 폰트
+                add_candidate("notosansjp-regular.ttf")
+                add_candidate("notosanscjk-regular.ttc")
+            # 한국어 폰트 처리
+            elif "kr" in normalized_family or "korean" in normalized_family:
+                if prefer_bold:
+                    add_candidate("notosanskr-bold.ttf")
+                    add_candidate("notosans-bold.ttf")
+                    add_candidate("notosanscjkkr-bold.otf")
+                add_candidate("notosanskr-regular.ttf")
+                add_candidate("notosans-regular.ttf")
+                add_candidate("notosanscjkkr-regular.otf")
+            # 일반 Noto 폰트 (한국어 기본)
+            else:
+                if prefer_bold:
+                    add_candidate("notosans-bold.ttf")
+                    add_candidate("notosanscjkk-bold.otf")
+                    add_candidate("notosanscjkkr-bold.otf")
+                    add_candidate("notosanskr-bold.ttf")
+                    add_candidate("notosansjp-bold.ttf")
+                add_candidate("notosans-regular.ttf")
+                add_candidate("notosanscjkkr-regular.otf")
+                add_candidate("notosanscjk-regular.ttc")
+                add_candidate("notosanskr-regular.ttf")
+                add_candidate("notosansjp-regular.ttf")
         if "arial" in normalized_family:
             if prefer_bold:
                 add_candidate("arialbd.ttf")
@@ -755,19 +772,30 @@ def _build_drawtext_filter(
     has_japanese = any(
         '\u3040' <= char <= '\u309f' or  # 히라가나
         '\u30a0' <= char <= '\u30ff' or  # 가타카나
+        '\u31f0' <= char <= '\u31ff' or  # 가타카나 확장
+        '\uff61' <= char <= '\uff9f' or  # 반각 가타카나 및 구두점
         '\u4e00' <= char <= '\u9faf'     # CJK 한자
         for char in text_raw
     )
     has_cjk = has_korean or has_japanese
 
     # CJK 문자에 맞는 폰트 선택
-    if has_cjk and not font_family:
+    normalized_font_family = (font_family or "").lower()
+
+    if has_cjk:
         if has_japanese:
-            # 일본어 우선: Noto Sans CJK 폰트 사용 (한자 + 가나 지원)
-            font_family = "NotoSans"
+            # 일본어 텍스트에는 일본어 지원 폰트를 강제로 지정 (KR 폰트 사용 시 □ 표시 방지)
+            if not normalized_font_family or ("jp" not in normalized_font_family and "cjk" not in normalized_font_family):
+                font_family = "NotoSansJP"
+                normalized_font_family = font_family.lower()
         else:
-            # 한글 전용: NanumGothic 사용
-            font_family = "NanumGothic"
+            if not normalized_font_family or (
+                "nanum" not in normalized_font_family
+                and "pretendard" not in normalized_font_family
+                and "noto" not in normalized_font_family
+            ):
+                font_family = "NanumGothic"
+                normalized_font_family = font_family.lower()
 
     font_path = _resolve_font_file(font_family, font_weight)
 
@@ -4739,7 +4767,16 @@ async def api_create_final_video(
                     sub_path_escaped = sub_path.replace("\\", "\\\\\\\\").replace(":", "\\:").replace("'", "\\'")
 
                     # CJK(한글, 일본어, 중국어) 지원 폰트 사용
-                    font_name = "Noto Sans CJK KR"
+                    # 자막 타입별로 적절한 폰트 선택
+                    if sub_type == "description":
+                        # description 자막은 일본어를 포함할 가능성이 높으므로 일본어 폰트 우선
+                        font_name = "Noto Sans CJK JP"
+                    elif sub_type == "japanese":
+                        # 일본어 자막은 명시적으로 일본어 폰트 사용
+                        font_name = "Noto Sans CJK JP"
+                    else:
+                        # 한국어 자막 (translation, main 등)
+                        font_name = "Noto Sans CJK KR"
 
                     # 자막 위치 및 스타일 설정
                     # Canvas 위치 정보 사용 (있으면 Canvas 위치, 없으면 기본값)
