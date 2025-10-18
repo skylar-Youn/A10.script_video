@@ -606,6 +606,49 @@
                 <button onclick="applySource()" class="btn-primary" style="margin-top: 10px; padding: 8px 16px; width: 100%; background: #10b981;">✅ 출처 적용</button>
             </div>
 
+            <!-- 메인 자막 컨트롤 (일본어) -->
+            <div style="margin-bottom: 15px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;">
+                <label style="display: block; color: white; margin-bottom: 8px; font-weight: bold;">🎌 메인 자막 (일본어)</label>
+                <textarea id="overlay-japanese-input" placeholder="メイン字幕を入力してください" rows="2"
+                       style="width: 100%; padding: 8px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; margin-bottom: 8px; font-family: 'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif; resize: vertical; color: #1a1a1a;"></textarea>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">크기: <span id="japanese-size-display">30px</span></label>
+                        <input type="range" id="overlay-japanese-size" min="18" max="96" value="30" step="2"
+                               style="width: 100%;"
+                               oninput="document.getElementById('japanese-size-display').textContent = this.value + 'px'">
+                    </div>
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">색상</label>
+                        <input type="color" id="overlay-japanese-color" value="#000000"
+                               style="width: 100%; height: 36px; border: none; border-radius: 4px;">
+                    </div>
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">X 위치 (%)</label>
+                        <input type="number" id="overlay-japanese-x" min="0" max="100" value="50"
+                               style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
+                    </div>
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">Y 위치 (%)</label>
+                        <input type="number" id="overlay-japanese-y" min="0" max="100" value="73"
+                               style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
+                    </div>
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">효과</label>
+                        <select id="overlay-japanese-effect"
+                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
+                            <option value="none">없음</option>
+                            <option value="outline" selected>외곽선</option>
+                            <option value="shadow">그림자</option>
+                            <option value="glow">글로우</option>
+                            <option value="fade">페이드</option>
+                            <option value="slide-up">슬라이드 업</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="applyJapaneseSubtitle()" class="btn-primary" style="margin-top: 10px; padding: 8px 16px; width: 100%; background: #10b981;">✅ 메인 자막 적용</button>
+            </div>
+
             <!-- 주 자막 컨트롤 -->
             <div style="margin-bottom: 15px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;">
                 <label style="display: block; color: white; margin-bottom: 8px; font-weight: bold;">📝 주 자막</label>
@@ -629,7 +672,7 @@
                     </div>
                     <div>
                         <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">Y 위치 (%)</label>
-                        <input type="number" id="overlay-korean-y" min="0" max="100" value="80"
+                        <input type="number" id="overlay-korean-y" min="0" max="100" value="65"
                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                     </div>
                     <div>
@@ -671,7 +714,7 @@
                     </div>
                     <div>
                         <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">Y 위치 (%)</label>
-                        <input type="number" id="overlay-english-y" min="0" max="100" value="90"
+                        <input type="number" id="overlay-english-y" min="0" max="100" value="95"
                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                     </div>
                     <div>
@@ -793,7 +836,7 @@
             <div class="video-subtitle-wrapper" style="position: relative; display: inline-block;">
                 <!-- Canvas 미리보기 (FFmpeg와 동일한 렌더링) -->
                 <canvas id="video-canvas-preview"
-                        style="width: 100%; max-width: 800px; border-radius: 8px; display: none; position: absolute; top: 0; left: 0; pointer-events: none; z-index: 100;">
+                        style="width: 100%; max-width: 800px; border-radius: 8px; display: none; position: absolute; top: 0; left: 0; z-index: 100; cursor: default;">
                 </canvas>
 
                 <!-- 기존 비디오 플레이어 (숨김 처리) -->
@@ -834,45 +877,45 @@
                     부제목을 입력하세요
                 </div>
 
-                <!-- 한글 자막 오버레이 -->
+                <!-- 한글 자막 오버레이 (주 자막) -->
                 <div class="custom-subtitle-overlay" id="korean-subtitle-overlay" data-lang="korean"
-                     style="position: absolute; top: 75%; left: 50%; transform: translateX(-50%);
+                     style="position: absolute; top: 65%; left: 50%; transform: translateX(-50%);
                             color: #000000; font-size: 32px; font-weight: bold;
                             text-shadow: -0.04em -0.04em 0 #fff, 0.04em -0.04em 0 #fff, -0.04em 0.04em 0 #fff, 0.04em 0.04em 0 #fff, -0.06em 0 0 #fff, 0.06em 0 0 #fff, 0 -0.06em 0 #fff, 0 0.06em 0 #fff;
                             cursor: move; user-select: none; z-index: 8;
                             pointer-events: auto; display: block; padding: 8px 16px;
-                            background: rgba(255, 255, 255, 0.1); border-radius: 4px; opacity: 0.5;
+                            background: rgba(255, 255, 255, 0.2); border-radius: 4px; opacity: 1;
                             white-space: nowrap;">
                     주 자막을 입력하세요
                 </div>
 
-                <!-- 일본어 자막 오버레이 -->
+                <!-- 일본어 자막 오버레이 (메인 자막) -->
                 <div class="custom-subtitle-overlay" id="japanese-subtitle-overlay" data-lang="japanese"
-                     style="position: absolute; top: 83%; left: 50%; transform: translateX(-50%);
+                     style="position: absolute; top: 73%; left: 50%; transform: translateX(-50%);
                             color: #000000; font-size: 30px; font-weight: bold;
                             text-shadow: -0.04em -0.04em 0 #fff, 0.04em -0.04em 0 #fff, -0.04em 0.04em 0 #fff, 0.04em 0.04em 0 #fff, -0.06em 0 0 #fff, 0.06em 0 0 #fff, 0 -0.06em 0 #fff, 0 0.06em 0 #fff;
                             cursor: move; user-select: none; z-index: 7;
                             pointer-events: auto; display: block; padding: 8px 16px;
-                            background: rgba(255, 255, 255, 0.1); border-radius: 4px; opacity: 0.5;
+                            background: rgba(255, 255, 255, 0.2); border-radius: 4px; opacity: 1;
                             white-space: nowrap;">
                     日本語字幕を入力してください
                 </div>
 
-                <!-- 영어 자막 오버레이 -->
+                <!-- 영어 자막 오버레이 (보조 자막) -->
                 <div class="custom-subtitle-overlay" id="english-subtitle-overlay" data-lang="english"
-                     style="position: absolute; top: 91%; left: 50%; transform: translateX(-50%);
+                     style="position: absolute; top: 95%; left: 50%; transform: translateX(-50%);
                             color: #000000; font-size: 28px; font-weight: bold;
                             text-shadow: -0.04em -0.04em 0 #fff, 0.04em -0.04em 0 #fff, -0.04em 0.04em 0 #fff, 0.04em 0.04em 0 #fff, -0.06em 0 0 #fff, 0.06em 0 0 #fff, 0 -0.06em 0 #fff, 0 0.06em 0 #fff;
                             cursor: move; user-select: none; z-index: 6;
                             pointer-events: auto; display: block; padding: 8px 16px;
-                            background: rgba(255, 255, 255, 0.1); border-radius: 4px; opacity: 0.5;
+                            background: rgba(255, 255, 255, 0.2); border-radius: 4px; opacity: 1;
                             white-space: nowrap;">
                     보조 자막을 입력하세요
                 </div>
 
                 <!-- 출처 표시 오버레이 -->
                 <div class="custom-subtitle-overlay" id="source-overlay" data-lang="source"
-                     style="position: absolute; top: 95%; left: 50%; transform: translateX(-50%);
+                     style="position: absolute; top: 98%; left: 50%; transform: translateX(-50%);
                             color: #cccccc; font-size: 18px; font-weight: normal;
                             text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
                             cursor: move; user-select: none; z-index: 6;
@@ -1205,7 +1248,12 @@
                     <button onclick="createFinalVideo()" class="btn-primary" style="background: #f59e0b;">🎬 영상제작하기</button>
                     <button onclick="closeVideoPreview()" class="btn-secondary" style="background: #666;">닫기</button>
                 </div>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                <div style="margin-bottom: 10px;">
+                    <button onclick="toggleFrameExtractionButtons()" class="btn-secondary" style="padding: 6px 16px; background: #6366f1; font-size: 0.9rem; width: 100%;">
+                        <span id="frame-extraction-toggle-icon">▼</span> 프레임 추출 버튼
+                    </button>
+                </div>
+                <div id="frame-extraction-buttons" style="display: none; gap: 10px; flex-wrap: wrap; align-items: center;">
                     <button onclick="extractFirstFrame()" class="btn-secondary" style="background: #10b981;">📸 맨 앞 프레임</button>
                     <button onclick="extractLastFrame()" class="btn-secondary" style="background: #10b981;">📸 맨 뒤 프레임</button>
                     <div style="display: flex; align-items: center; gap: 5px; background: rgba(0, 0, 0, 0.2); padding: 8px 12px; border-radius: 6px;">
@@ -1242,12 +1290,18 @@
                 <!-- AI 프레임 분석 -->
                 <div id="frame-analysis-section" style="margin-bottom: 15px; padding: 15px; background: rgba(102, 126, 234, 0.1); border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.3); scroll-margin-top: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <h4 style="margin: 0; color: #8ac5ff;">🤖 AI 프레임 분석</h4>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <h4 style="margin: 0; color: #8ac5ff;">🤖 AI 프레임 분석</h4>
+                            <button onclick="toggleFrameAnalysisSection()" class="btn-secondary" style="padding: 4px 10px; font-size: 0.85rem; background: #6366f1;">
+                                <span id="frame-analysis-toggle-icon">▼</span> 펼치기/접기
+                            </button>
+                        </div>
                         <div style="display: flex; gap: 10px;">
                             <button onclick="selectAllFrames()" class="btn-secondary" style="padding: 4px 10px; font-size: 0.85rem; background: #3b82f6;">✓ 전체 선택</button>
                             <button onclick="deselectAllFrames()" class="btn-secondary" style="padding: 4px 10px; font-size: 0.85rem; background: #6b7280;">✗ 선택 해제</button>
                         </div>
                     </div>
+                    <div id="frame-analysis-content-area" style="display: none;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; margin-bottom: 10px;">
                         <div>
                             <label style="display: block; color: #a0aec0; font-size: 0.85rem; margin-bottom: 5px;">AI 모델</label>
@@ -1347,6 +1401,7 @@
                             <button onclick="saveFrameAnalysisTemplate()" class="btn-secondary" style="padding: 4px 10px; font-size: 0.85rem; background: #10b981;">💾 템플릿으로 저장</button>
                         </div>
                     </div>
+                    </div>
                 </div>
 
                 <!-- AI 프레임 분석 결과 -->
@@ -1418,9 +1473,15 @@
             <!-- AI 분석 버튼 -->
             <div id="subtitle-analysis-section" style="margin-bottom: 20px; padding: 15px; background: rgba(102, 126, 234, 0.1); border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.3); scroll-margin-top: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 style="margin: 0; color: #8ac5ff;">🤖 AI 자막 분석</h3>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h3 style="margin: 0; color: #8ac5ff;">🤖 AI 자막 분석</h3>
+                        <button onclick="toggleSubtitleAnalysisSection()" class="btn-secondary" style="padding: 4px 10px; font-size: 0.85rem; background: #6366f1;">
+                            <span id="subtitle-analysis-toggle-icon">▼</span> 펼치기/접기
+                        </button>
+                    </div>
                 </div>
 
+                <div id="subtitle-analysis-content-area" style="display: none;">
                 <!-- 모델 및 분석 타입 선택 -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; margin-bottom: 10px;">
                     <div>
@@ -1452,6 +1513,7 @@
                 <p style="margin: 0; color: #a0aec0; font-size: 0.85rem;">
                     💡 자막을 AI로 분석하여 쇼츠 최적화, 영상 요약, 교육 콘텐츠 제작을 위한 편집 제안을 받으세요.
                 </p>
+                </div>
                 </div>
             </div>
 
@@ -2696,7 +2758,8 @@ async function createPreviewVideo() {
         // 텍스트 내용
         const text = element.textContent.trim();
         if (!text || text === '영상 제목을 입력하세요' || text === '부제목을 입력하세요' ||
-            text === '주 자막을 입력하세요' || text === '보조 자막을 입력하세요') {
+            text === '주 자막을 입력하세요' || text === '보조 자막을 입력하세요' ||
+            text === '日本語字幕を入力してください' || text === '출처를 입력하세요') {
             return null;
         }
 
@@ -2938,7 +3001,8 @@ async function createFinalVideo() {
         // 텍스트 내용
         const text = element.textContent.trim();
         if (!text || text === '영상 제목을 입력하세요' || text === '부제목을 입력하세요' ||
-            text === '주 자막을 입력하세요' || text === '보조 자막을 입력하세요') {
+            text === '주 자막을 입력하세요' || text === '보조 자막을 입력하세요' ||
+            text === '日本語字幕を入力してください' || text === '출처를 입력하세요') {
             return null;
         }
 
@@ -2997,14 +3061,62 @@ async function createFinalVideo() {
         };
     }
 
-    // 모든 오버레이 설정 수집
-    const overlays = {
-        title: getOverlaySettings('video-title-overlay', 'title', savedSettings?.title?.size),
-        subtitle: getOverlaySettings('video-subtitle-overlay', 'subtitle', savedSettings?.subtitle?.size),
-        korean: getOverlaySettings('korean-subtitle-overlay', 'korean', savedSettings?.korean?.size),
-        japanese: getOverlaySettings('japanese-subtitle-overlay', 'japanese', savedSettings?.japanese?.size),
-        english: getOverlaySettings('english-subtitle-overlay', 'english', savedSettings?.english?.size)
-    };
+    const canvasElement = document.getElementById('video-canvas-preview');
+    const isCanvasActive = canvasElement && canvasElement.style.display !== 'none';
+
+    const overlays = {};
+
+    // Canvas가 활성화되어 있으면 Canvas 오버레이만 사용
+    if (canvasPreview && isCanvasActive && Array.isArray(canvasPreview.overlays) && canvasPreview.overlays.length > 0) {
+        console.log('🎨 Canvas 오버레이 사용 (CSS 오버레이 무시):', canvasPreview.overlays);
+
+        // Canvas 오버레이 데이터를 직접 사용
+        canvasPreview.overlays.forEach((overlay, index) => {
+            const overlayType = overlay.type || `overlay_${index}`;
+
+            const canvasData = {
+                text: overlay.text,
+                x: Math.round(overlay.x ?? videoWidth / 2),
+                y: Math.round(overlay.y ?? videoHeight / 2),
+                fontSize: overlay.fontSize || 48,
+                color: overlay.color || '#ffffff',
+                fontWeight: overlay.fontWeight || 'bold',
+                type: overlayType,
+                outlineColor: overlay.borderColor || '#000000',
+                fontFamily: overlay.fontFamily || 'Noto Sans KR',
+                opacity: overlay.opacity !== undefined ? overlay.opacity : 1
+            };
+
+            overlays[overlayType] = canvasData;
+            console.log(`  ✅ ${overlayType}: text="${overlay.text}", pos=(${canvasData.x}, ${canvasData.y})`);
+        });
+    } else {
+        // Canvas가 비활성화되어 있으면 CSS 오버레이 사용
+        console.log('📄 CSS 오버레이 사용 (Canvas 비활성화)');
+
+        const appendOverlayFromDom = (elementId, overlayType, savedSize) => {
+            const overlayData = getOverlaySettings(elementId, overlayType, savedSize);
+            if (overlayData) {
+                overlays[overlayType] = overlayData;
+            }
+        };
+
+        appendOverlayFromDom('video-title-overlay', 'title', savedSettings?.title?.size);
+        appendOverlayFromDom('video-subtitle-overlay', 'subtitle', savedSettings?.subtitle?.size);
+        appendOverlayFromDom('korean-subtitle-overlay', 'korean', savedSettings?.korean?.size);
+        appendOverlayFromDom('japanese-subtitle-overlay', 'japanese', savedSettings?.japanese?.size);
+        appendOverlayFromDom('english-subtitle-overlay', 'english', savedSettings?.english?.size);
+        appendOverlayFromDom('source-overlay', 'source', savedSettings?.source?.size);
+    }
+
+    const filteredOverlays = Object.fromEntries(
+        Object.entries(overlays).filter(([, value]) => value && typeof value.text === 'string' && value.text.trim().length > 0)
+    );
+
+    console.log('📝 수집된 오버레이 (필터링 전):', overlays);
+    console.log('📝 수집된 오버레이 (필터링 후):', filteredOverlays);
+    console.log('🎨 Canvas 활성화 상태:', isCanvasActive);
+    console.log('🎨 Canvas 오버레이 개수:', canvasPreview?.overlays?.length || 0);
 
     // 검정 배경 설정 수집
     const blackBars = {
@@ -3070,14 +3182,42 @@ async function createFinalVideo() {
 
     console.log('🎭 자막 템플릿 설정:', subtitleStyleSettings);
 
+    // Canvas 자막 위치 정보 수집
+    const canvasSubtitlePositions = canvasPreview ? {
+        main: {
+            yPosition: canvasPreview.subtitleStyles.main.yPosition,
+            fontSize: canvasPreview.subtitleStyles.main.fontSize,
+            color: canvasPreview.subtitleStyles.main.color,
+            borderWidth: canvasPreview.subtitleStyles.main.borderWidth,
+            borderColor: canvasPreview.subtitleStyles.main.borderColor
+        },
+        translation: {
+            yPosition: canvasPreview.subtitleStyles.translation.yPosition,
+            fontSize: canvasPreview.subtitleStyles.translation.fontSize,
+            color: canvasPreview.subtitleStyles.translation.color,
+            borderWidth: canvasPreview.subtitleStyles.translation.borderWidth,
+            borderColor: canvasPreview.subtitleStyles.translation.borderColor
+        },
+        description: {
+            yPosition: canvasPreview.subtitleStyles.description.yPosition,
+            fontSize: canvasPreview.subtitleStyles.description.fontSize,
+            color: canvasPreview.subtitleStyles.description.color,
+            borderWidth: canvasPreview.subtitleStyles.description.borderWidth,
+            borderColor: canvasPreview.subtitleStyles.description.borderColor
+        }
+    } : null;
+
+    console.log('📍 Canvas 자막 위치 정보:', canvasSubtitlePositions);
+
     // FormData 생성 (파일 업로드를 위해)
     const formData = new FormData();
     formData.append('video_path', currentVideoInfo.path);
     formData.append('video_width', videoWidth);
     formData.append('video_height', videoHeight);
-    formData.append('overlays', JSON.stringify(overlays));
+    formData.append('overlays', JSON.stringify(filteredOverlays));
     formData.append('black_bars', JSON.stringify(blackBars));
     formData.append('subtitle_style', JSON.stringify(subtitleStyleSettings));
+    formData.append('canvas_subtitle_positions', JSON.stringify(canvasSubtitlePositions));
     formData.append('tracks', JSON.stringify({
         video: tracks.video,
         mainSubtitle: tracks.mainSubtitle,
@@ -7301,6 +7441,50 @@ function clearSubtitleAnalysisContent() {
     }
 }
 
+// ==================== 펼치기/접기 기능 ====================
+
+// 프레임 추출 버튼 펼치기/접기
+function toggleFrameExtractionButtons() {
+    const buttonsArea = document.getElementById('frame-extraction-buttons');
+    const toggleIcon = document.getElementById('frame-extraction-toggle-icon');
+
+    if (buttonsArea.style.display === 'none' || buttonsArea.style.display === '') {
+        buttonsArea.style.display = 'flex';
+        toggleIcon.textContent = '▲';
+    } else {
+        buttonsArea.style.display = 'none';
+        toggleIcon.textContent = '▼';
+    }
+}
+
+// AI 프레임 분석 섹션 펼치기/접기
+function toggleFrameAnalysisSection() {
+    const contentArea = document.getElementById('frame-analysis-content-area');
+    const toggleIcon = document.getElementById('frame-analysis-toggle-icon');
+
+    if (contentArea.style.display === 'none' || contentArea.style.display === '') {
+        contentArea.style.display = 'block';
+        toggleIcon.textContent = '▲';
+    } else {
+        contentArea.style.display = 'none';
+        toggleIcon.textContent = '▼';
+    }
+}
+
+// AI 자막 분석 섹션 펼치기/접기
+function toggleSubtitleAnalysisSection() {
+    const contentArea = document.getElementById('subtitle-analysis-content-area');
+    const toggleIcon = document.getElementById('subtitle-analysis-toggle-icon');
+
+    if (contentArea.style.display === 'none' || contentArea.style.display === '') {
+        contentArea.style.display = 'block';
+        toggleIcon.textContent = '▲';
+    } else {
+        contentArea.style.display = 'none';
+        toggleIcon.textContent = '▼';
+    }
+}
+
 // ==================== 텍스트 오버레이 기능 ====================
 
 // 텍스트 오버레이를 드래그 가능하게 만드는 함수
@@ -7551,11 +7735,24 @@ function loadTextOverlaySettings() {
             document.getElementById('overlay-korean-size').value = settings.korean.size || '32';
             document.getElementById('overlay-korean-color').value = settings.korean.color || '#000000';
             document.getElementById('overlay-korean-x').value = settings.korean.x || '50';
-            document.getElementById('overlay-korean-y').value = settings.korean.y || '80';
+            document.getElementById('overlay-korean-y').value = settings.korean.y || '65';
             document.getElementById('overlay-korean-effect').value = settings.korean.effect || 'outline';
 
             // 크기 표시 업데이트
             document.getElementById('korean-size-display').textContent = settings.korean.size + 'px';
+        }
+
+        // 일본어 자막 설정 복원
+        if (settings.japanese) {
+            document.getElementById('overlay-japanese-input').value = settings.japanese.text || '';
+            document.getElementById('overlay-japanese-size').value = settings.japanese.size || '30';
+            document.getElementById('overlay-japanese-color').value = settings.japanese.color || '#000000';
+            document.getElementById('overlay-japanese-x').value = settings.japanese.x || '50';
+            document.getElementById('overlay-japanese-y').value = settings.japanese.y || '83';
+            document.getElementById('overlay-japanese-effect').value = settings.japanese.effect || 'outline';
+
+            // 크기 표시 업데이트
+            document.getElementById('japanese-size-display').textContent = settings.japanese.size + 'px';
         }
 
         // 영어 자막 설정 복원
@@ -7614,6 +7811,7 @@ function clearTextOverlay() {
         document.getElementById('overlay-title-input').value = '';
         document.getElementById('overlay-subtitle-input').value = '';
         document.getElementById('overlay-korean-input').value = '';
+        document.getElementById('overlay-japanese-input').value = '';
         document.getElementById('overlay-english-input').value = '';
         document.getElementById('overlay-source-input').value = '';
 
@@ -7632,6 +7830,11 @@ function clearTextOverlay() {
         koreanOverlay.textContent = '주 자막을 입력하세요';
         koreanOverlay.style.display = 'block';
         koreanOverlay.style.opacity = '0.5';
+
+        const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+        japaneseOverlay.textContent = '日本語字幕を入力してください';
+        japaneseOverlay.style.display = 'block';
+        japaneseOverlay.style.opacity = '0.5';
 
         const englishOverlay = document.getElementById('english-subtitle-overlay');
         englishOverlay.textContent = '보조 자막을 입력하세요';
@@ -7735,6 +7938,50 @@ function applyKoreanSubtitle() {
     }
 
     console.log(`✅ 주 자막 적용: ${text} (언어: ${detectedLang})`);
+}
+
+// 일본어 자막 적용 (메인 자막)
+function applyJapaneseSubtitle() {
+    const overlay = document.getElementById('japanese-subtitle-overlay');
+    const text = document.getElementById('overlay-japanese-input').value.trim();
+    const size = document.getElementById('overlay-japanese-size').value;
+    const color = document.getElementById('overlay-japanese-color').value;
+    const x = document.getElementById('overlay-japanese-x').value;
+    const y = document.getElementById('overlay-japanese-y').value;
+    const effect = document.getElementById('overlay-japanese-effect').value;
+
+    if (!text) {
+        overlay.textContent = '日本語字幕を入力してください';
+        overlay.style.display = 'block';
+        overlay.style.opacity = '0.5';
+        overlay.style.fontSize = '30px';
+        overlay.style.color = '#000000';
+        overlay.classList.add('empty');
+        return;
+    }
+
+    overlay.textContent = text;
+    overlay.style.display = 'block';
+    overlay.style.opacity = '1';
+    overlay.classList.remove('empty');
+    overlay.style.fontSize = size + 'px';
+    overlay.style.color = color;
+    overlay.style.left = x + '%';
+    overlay.style.top = y + '%';
+
+    // 일본어 폰트 최적화
+    const optimalFont = "'Noto Sans JP', 'Yu Gothic', Meiryo, 'Hiragino Kaku Gothic ProN', sans-serif";
+    overlay.style.fontFamily = optimalFont;
+
+    // 효과 적용
+    overlay.className = 'custom-subtitle-overlay';
+    overlay.setAttribute('data-lang', 'japanese');
+    overlay.setAttribute('lang', 'ja');
+    if (effect !== 'none') {
+        overlay.classList.add(`effect-${effect}`);
+    }
+
+    console.log(`✅ 메인 자막 (일본어) 적용: ${text}`);
 }
 
 // 영어 자막 적용
@@ -8027,6 +8274,9 @@ function applyTitle() {
         }
     }
     console.log(`✅ 제목 적용: ${text}`);
+
+    // Canvas 오버레이 동기화
+    syncOverlaysToCanvas();
 }
 
 // 부제목 적용
@@ -8073,6 +8323,9 @@ function applySubtitle() {
         }
     }
     console.log(`✅ 부제목 적용: ${text}`);
+
+    // Canvas 오버레이 동기화
+    syncOverlaysToCanvas();
 }
 
 // 출처 적용
@@ -8311,6 +8564,14 @@ function saveTextOverlaySettingsWithSubtitles() {
             y: document.getElementById('overlay-korean-y').value,
             effect: document.getElementById('overlay-korean-effect').value
         },
+        japanese: {
+            text: document.getElementById('overlay-japanese-input').value,
+            size: document.getElementById('overlay-japanese-size').value,
+            color: document.getElementById('overlay-japanese-color').value,
+            x: document.getElementById('overlay-japanese-x').value,
+            y: document.getElementById('overlay-japanese-y').value,
+            effect: document.getElementById('overlay-japanese-effect').value
+        },
         english: {
             text: document.getElementById('overlay-english-input').value,
             size: document.getElementById('overlay-english-size').value,
@@ -8390,6 +8651,14 @@ function saveTextOverlaySettingsAs() {
             y: document.getElementById('overlay-korean-y').value,
             effect: document.getElementById('overlay-korean-effect').value
         },
+        japanese: {
+            text: document.getElementById('overlay-japanese-input').value,
+            size: document.getElementById('overlay-japanese-size').value,
+            color: document.getElementById('overlay-japanese-color').value,
+            x: document.getElementById('overlay-japanese-x').value,
+            y: document.getElementById('overlay-japanese-y').value,
+            effect: document.getElementById('overlay-japanese-effect').value
+        },
         english: {
             text: document.getElementById('overlay-english-input').value,
             size: document.getElementById('overlay-english-size').value,
@@ -8402,14 +8671,32 @@ function saveTextOverlaySettingsAs() {
             top: {
                 enabled: document.getElementById('top-bar-enable').checked,
                 height: document.getElementById('top-bar-height').value,
-                opacity: document.getElementById('top-bar-opacity').value
+                opacity: document.getElementById('top-bar-opacity').value  // 0-100 범위로 저장
             },
             bottom: {
                 enabled: document.getElementById('bottom-bar-enable').checked,
                 height: document.getElementById('bottom-bar-height').value,
-                opacity: document.getElementById('bottom-bar-opacity').value
+                opacity: document.getElementById('bottom-bar-opacity').value  // 0-100 범위로 저장
             }
-        }
+        },
+        // Canvas 자막 위치 정보 저장
+        canvasSubtitlePositions: canvasPreview ? {
+            main: canvasPreview.subtitleStyles.main.yPosition,
+            translation: canvasPreview.subtitleStyles.translation.yPosition,
+            description: canvasPreview.subtitleStyles.description.yPosition
+        } : null,
+        // Canvas 오버레이 위치 정보 저장 (title, subtitle)
+        canvasOverlayPositions: canvasPreview && canvasPreview.overlays ?
+            canvasPreview.overlays.map(overlay => ({
+                type: overlay.type,
+                text: overlay.text,
+                x: overlay.x,
+                y: overlay.y,
+                fontSize: overlay.fontSize,
+                color: overlay.color,
+                borderWidth: overlay.borderWidth,
+                borderColor: overlay.borderColor
+            })) : null
     };
 
     try {
@@ -8585,6 +8872,16 @@ function applySettings(settings) {
         if (document.getElementById('overlay-korean-effect')) document.getElementById('overlay-korean-effect').value = settings.korean.effect || 'none';
     }
 
+    // 일본어 자막 설정 적용
+    if (settings.japanese) {
+        if (document.getElementById('overlay-japanese-input')) document.getElementById('overlay-japanese-input').value = settings.japanese.text || '';
+        if (document.getElementById('overlay-japanese-size')) document.getElementById('overlay-japanese-size').value = settings.japanese.size || 30;
+        if (document.getElementById('overlay-japanese-color')) document.getElementById('overlay-japanese-color').value = settings.japanese.color || '#000000';
+        if (document.getElementById('overlay-japanese-x')) document.getElementById('overlay-japanese-x').value = settings.japanese.x || 50;
+        if (document.getElementById('overlay-japanese-y')) document.getElementById('overlay-japanese-y').value = settings.japanese.y || 83;
+        if (document.getElementById('overlay-japanese-effect')) document.getElementById('overlay-japanese-effect').value = settings.japanese.effect || 'outline';
+    }
+
     // 영어 자막 설정 적용
     if (settings.english) {
         if (document.getElementById('overlay-english-input')) document.getElementById('overlay-english-input').value = settings.english.text || '';
@@ -8593,6 +8890,38 @@ function applySettings(settings) {
         if (document.getElementById('overlay-english-x')) document.getElementById('overlay-english-x').value = settings.english.x || 50;
         if (document.getElementById('overlay-english-y')) document.getElementById('overlay-english-y').value = settings.english.y || 90;
         if (document.getElementById('overlay-english-effect')) document.getElementById('overlay-english-effect').value = settings.english.effect || 'none';
+    }
+
+    // Canvas 자막 위치 복원
+    if (settings.canvasSubtitlePositions && canvasPreview) {
+        console.log('📍 Canvas 자막 위치 복원:', settings.canvasSubtitlePositions);
+        if (settings.canvasSubtitlePositions.main !== undefined) {
+            canvasPreview.updateSubtitlePosition('main', settings.canvasSubtitlePositions.main);
+        }
+        if (settings.canvasSubtitlePositions.translation !== undefined) {
+            canvasPreview.updateSubtitlePosition('translation', settings.canvasSubtitlePositions.translation);
+        }
+        if (settings.canvasSubtitlePositions.description !== undefined) {
+            canvasPreview.updateSubtitlePosition('description', settings.canvasSubtitlePositions.description);
+        }
+    }
+
+    // Canvas 오버레이 위치 복원 (title, subtitle)
+    if (settings.canvasOverlayPositions && canvasPreview) {
+        console.log('📍 Canvas 오버레이 위치 복원:', settings.canvasOverlayPositions);
+        canvasPreview.clearOverlays();
+        settings.canvasOverlayPositions.forEach(overlay => {
+            canvasPreview.addOverlay({
+                type: overlay.type,
+                text: overlay.text,
+                x: overlay.x,
+                y: overlay.y,
+                fontSize: overlay.fontSize,
+                color: overlay.color,
+                borderWidth: overlay.borderWidth,
+                borderColor: overlay.borderColor
+            });
+        });
     }
 
     // 검정 배경 설정 적용
@@ -8605,13 +8934,14 @@ function applySettings(settings) {
 
             if (topEnable) topEnable.checked = settings.blackBars.top.enabled || false;
             if (topHeight) topHeight.value = settings.blackBars.top.height || 15;
-            if (topOpacity) topOpacity.value = settings.blackBars.top.opacity || 0.7;
+            // opacity는 0-100 범위로 저장되므로 그대로 사용
+            if (topOpacity) topOpacity.value = settings.blackBars.top.opacity || 80;
 
             // 표시 업데이트
             const topHeightDisplay = document.getElementById('top-bar-height-display');
             const topOpacityDisplay = document.getElementById('top-bar-opacity-display');
             if (topHeightDisplay) topHeightDisplay.textContent = (settings.blackBars.top.height || 15) + '%';
-            if (topOpacityDisplay) topOpacityDisplay.textContent = (settings.blackBars.top.opacity || 70) + '%';
+            if (topOpacityDisplay) topOpacityDisplay.textContent = (settings.blackBars.top.opacity || 80) + '%';
         }
 
         // 하단 검정 바
@@ -8622,13 +8952,14 @@ function applySettings(settings) {
 
             if (bottomEnable) bottomEnable.checked = settings.blackBars.bottom.enabled || false;
             if (bottomHeight) bottomHeight.value = settings.blackBars.bottom.height || 15;
-            if (bottomOpacity) bottomOpacity.value = settings.blackBars.bottom.opacity || 0.7;
+            // opacity는 0-100 범위로 저장되므로 그대로 사용
+            if (bottomOpacity) bottomOpacity.value = settings.blackBars.bottom.opacity || 80;
 
             // 표시 업데이트
             const bottomHeightDisplay = document.getElementById('bottom-bar-height-display');
             const bottomOpacityDisplay = document.getElementById('bottom-bar-opacity-display');
             if (bottomHeightDisplay) bottomHeightDisplay.textContent = (settings.blackBars.bottom.height || 15) + '%';
-            if (bottomOpacityDisplay) bottomOpacityDisplay.textContent = (settings.blackBars.bottom.opacity || 70) + '%';
+            if (bottomOpacityDisplay) bottomOpacityDisplay.textContent = (settings.blackBars.bottom.opacity || 80) + '%';
         }
 
         // 검정 배경 실제 적용
@@ -10429,6 +10760,9 @@ function displaySubtitlesOnTimeline(subtitles, trackType) {
     });
 
     console.log(`${trackType} 트랙에 ${subtitles.length}개의 자막 블록이 표시되었습니다 (실제 시간 기반)`);
+
+    // Canvas 미리보기로 자막 데이터 전달
+    updateCanvasSubtitles(trackType, subtitles);
 }
 
 // 모든 클립 크기 업데이트 (줌 레벨 변경 시)
@@ -11719,6 +12053,35 @@ document.addEventListener('DOMContentLoaded', () => {
             );
         }
     });
+
+    // 타임라인 자막 체크박스 이벤트 리스너
+    const mainSubtitleCheckbox = document.getElementById('track-main-subtitle-enable');
+    const translationSubtitleCheckbox = document.getElementById('track-translation-subtitle-enable');
+    const descriptionSubtitleCheckbox = document.getElementById('track-description-subtitle-enable');
+
+    if (mainSubtitleCheckbox) {
+        mainSubtitleCheckbox.addEventListener('change', (e) => {
+            if (canvasPreview) {
+                canvasPreview.setSubtitleEnabled('main', e.target.checked);
+            }
+        });
+    }
+
+    if (translationSubtitleCheckbox) {
+        translationSubtitleCheckbox.addEventListener('change', (e) => {
+            if (canvasPreview) {
+                canvasPreview.setSubtitleEnabled('translation', e.target.checked);
+            }
+        });
+    }
+
+    if (descriptionSubtitleCheckbox) {
+        descriptionSubtitleCheckbox.addEventListener('change', (e) => {
+            if (canvasPreview) {
+                canvasPreview.setSubtitleEnabled('description', e.target.checked);
+            }
+        });
+    }
 });
 
 // 텍스트 오버레이를 Canvas에 동기화하는 함수
@@ -11731,33 +12094,64 @@ function syncOverlaysToCanvas() {
     canvasPreview.clearOverlays();
 
     // 제목 오버레이
-    if (titleOverlay && titleOverlay.style.display !== 'none') {
-        const rect = titleOverlay.getBoundingClientRect();
-        const videoRect = document.getElementById('video-preview-player').getBoundingClientRect();
+    if (titleOverlay && titleOverlay.style.display !== 'none' && titleOverlay.textContent.trim() !== '영상 제목을 입력하세요') {
+        const titleStyle = window.getComputedStyle(titleOverlay);
+        const fontSize = parseInt(titleStyle.fontSize) || 48;
 
         canvasPreview.addOverlay({
-            text: titleOverlay.textContent,
+            text: titleOverlay.textContent.trim(),
             x: canvasPreview.canvas.width / 2,
             y: canvasPreview.canvas.height * 0.8, // 80% 위치
-            fontSize: parseInt(window.getComputedStyle(titleOverlay).fontSize) || 48,
-            color: window.getComputedStyle(titleOverlay).color || '#ffffff',
+            fontSize: fontSize,
+            color: titleStyle.color || '#ffffff',
             borderWidth: 4,
-            borderColor: '#000000'
+            borderColor: '#000000',
+            type: 'title'  // ⭐ type 추가
         });
     }
 
     // 부제목 오버레이
-    if (subtitleOverlay && subtitleOverlay.style.display !== 'none') {
+    if (subtitleOverlay && subtitleOverlay.style.display !== 'none' && subtitleOverlay.textContent.trim() !== '부제목을 입력하세요') {
+        const subtitleStyle = window.getComputedStyle(subtitleOverlay);
+        const fontSize = parseInt(subtitleStyle.fontSize) || 32;
+
         canvasPreview.addOverlay({
-            text: subtitleOverlay.textContent,
+            text: subtitleOverlay.textContent.trim(),
             x: canvasPreview.canvas.width / 2,
             y: canvasPreview.canvas.height * 0.9, // 90% 위치
-            fontSize: parseInt(window.getComputedStyle(subtitleOverlay).fontSize) || 32,
-            color: window.getComputedStyle(subtitleOverlay).color || '#ffe14d',
+            fontSize: fontSize,
+            color: subtitleStyle.color || '#ffe14d',
             borderWidth: 3,
-            borderColor: '#000000'
+            borderColor: '#000000',
+            type: 'subtitle'  // ⭐ type 추가
         });
     }
+
+    console.log('🎨 Canvas 오버레이 동기화 완료:', canvasPreview.overlays);
+}
+
+// Canvas에 타임라인 자막 업데이트
+function updateCanvasSubtitles(trackType, subtitles) {
+    if (!canvasPreview) {
+        console.log('ℹ️ Canvas 미리보기가 아직 초기화되지 않았습니다.');
+        return;
+    }
+
+    // SRT 형식의 자막을 Canvas 형식으로 변환
+    const canvasSubtitles = subtitles.map(sub => ({
+        startTime: srtTimeToSeconds(sub.start),
+        endTime: srtTimeToSeconds(sub.end),
+        text: sub.text
+    }));
+
+    // Canvas에 자막 데이터 설정
+    canvasPreview.setTimelineSubtitles(trackType, canvasSubtitles);
+}
+
+// 모든 타임라인 자막을 Canvas에 업데이트
+function updateAllCanvasSubtitles() {
+    if (!canvasPreview) return;
+    canvasPreview.updateAllTimelineSubtitles(loadedSubtitles);
 }
 
 // 텍스트 변경 시 Canvas 업데이트
@@ -11771,19 +12165,25 @@ function updateCanvasText() {
 function updateCanvasBlackBars() {
     if (!canvasPreview) return;
 
+    // 슬라이더에서 직접 값 가져오기
+    const topHeight = parseFloat(document.getElementById('top-bar-height')?.value) || 15;
+    const topOpacity = parseFloat(document.getElementById('top-bar-opacity')?.value) || 80;
+    const bottomHeight = parseFloat(document.getElementById('bottom-bar-height')?.value) || 15;
+    const bottomOpacity = parseFloat(document.getElementById('bottom-bar-opacity')?.value) || 80;
+
     const topBar = document.getElementById('top-black-bar');
     const bottomBar = document.getElementById('bottom-black-bar');
 
     canvasPreview.setBlackBars(
         {
-            enabled: topBar.style.display !== 'none',
-            height: parseFloat(topBar.style.height) || 15,
-            opacity: parseFloat(window.getComputedStyle(topBar).opacity) || 0.8
+            enabled: topBar && topBar.style.display !== 'none',
+            height: topHeight,
+            opacity: topOpacity / 100  // 0~100을 0~1로 변환
         },
         {
-            enabled: bottomBar.style.display !== 'none',
-            height: parseFloat(bottomBar.style.height) || 15,
-            opacity: parseFloat(window.getComputedStyle(bottomBar).opacity) || 0.8
+            enabled: bottomBar && bottomBar.style.display !== 'none',
+            height: bottomHeight,
+            opacity: bottomOpacity / 100  // 0~100을 0~1로 변환
         }
     );
 }

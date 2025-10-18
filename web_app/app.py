@@ -723,6 +723,7 @@ def _build_drawtext_filter(
         "subtitle": {"x": video_width / 2, "y": video_height * 0.9},
         "korean": {"x": video_width * 0.898026, "y": video_height * 1.0},
         "english": {"x": video_width * 1.0, "y": video_height * 0.886635},
+        "source": {"x": video_width / 2, "y": video_height * 0.97},
     }
 
     fallback_position = default_positions.get(overlay_type, {"x": video_width / 2, "y": video_height / 2})
@@ -4441,6 +4442,7 @@ async def api_create_final_video(
     black_bars: str = Form(...),
     tracks: str = Form(...),
     subtitle_style: str = Form("{}"),
+    canvas_subtitle_positions: str = Form(None),
     audio_file: UploadFile = File(None),
     commentary_file: UploadFile = File(None),
     bgm_file: UploadFile = File(None)
@@ -4462,6 +4464,7 @@ async def api_create_final_video(
         black_bars_data = json.loads(black_bars)
         tracks_data = json.loads(tracks)
         subtitle_style_data = json.loads(subtitle_style) if subtitle_style else {}
+        canvas_positions_data = json.loads(canvas_subtitle_positions) if canvas_subtitle_positions else None
         perf_marks['json_parsing'] = time.time() - perf_start
 
         if not video_path or not Path(video_path).exists():
@@ -4484,6 +4487,7 @@ async def api_create_final_video(
         logging.info(f"📝 오버레이: {overlays_data}")
         logging.info(f"⬛ 검정 배경: {black_bars_data}")
         logging.info(f"🎭 자막 스타일: {subtitle_style_data}")
+        logging.info(f"📍 Canvas 자막 위치: {canvas_positions_data}")
         logging.info(f"🎵 트랙: {tracks_data}")
 
         # 임시 디렉토리 생성
@@ -4530,36 +4534,42 @@ async def api_create_final_video(
             # 1. 검정 배경 추가
             if black_bars_data.get("top", {}).get("enabled"):
                 top_height_percent = black_bars_data["top"].get("height", 15)
-                top_opacity = black_bars_data["top"].get("opacity", 0.8)
+                top_opacity = black_bars_data["top"].get("opacity", 0.8)  # 0-1 범위로 전송됨
                 top_height = int(video_height * top_height_percent / 100)
+                logging.info(f"⬛ 상단 검정바: 높이={top_height_percent}%, 투명도={top_opacity} ({top_opacity * 100:.0f}%)")
                 video_filters.append(
                     f"drawbox=x=0:y=0:w={video_width}:h={top_height}:color=black@{top_opacity}:t=fill"
                 )
 
             if black_bars_data.get("bottom", {}).get("enabled"):
                 bottom_height_percent = black_bars_data["bottom"].get("height", 15)
-                bottom_opacity = black_bars_data["bottom"].get("opacity", 0.8)
+                bottom_opacity = black_bars_data["bottom"].get("opacity", 0.8)  # 0-1 범위로 전송됨
                 bottom_height = int(video_height * bottom_height_percent / 100)
                 bottom_y = video_height - bottom_height
+                logging.info(f"⬛ 하단 검정바: 높이={bottom_height_percent}%, 투명도={bottom_opacity} ({bottom_opacity * 100:.0f}%)")
                 video_filters.append(
                     f"drawbox=x=0:y={bottom_y}:w={video_width}:h={bottom_height}:color=black@{bottom_opacity}:t=fill"
                 )
 
             # 2. 제목/부제목 오버레이 먼저 추가 (배너보다 아래 레이어)
             # ⚠️ korean, english, japanese는 SRT 자막으로 처리되므로 drawtext에서 제외
+            logging.info(f"📦 받은 overlays_data: {overlays_data}")
             for overlay_key, overlay_data in overlays_data.items():
                 # korean, english, japanese는 SRT subtitles 필터로 처리되므로 건너뜀
                 if overlay_key in {"korean", "english", "japanese"}:
                     logging.info(f"⏭️  텍스트 오버레이 건너뜀: {overlay_key} (SRT 자막으로 처리됨)")
                     continue
 
+                logging.info(f"🔍 처리 중인 오버레이: {overlay_key} = {overlay_data}")
                 result = _build_drawtext_filter(overlay_data, video_width, video_height)
                 if result:
                     drawtext_filter, meta = result
                     logging.info(
-                        "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
+                        "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 위치=(%s, %s), 폰트=%s",
                         overlay_key,
                         meta.get("font_size"),
+                        overlay_data.get("x"),
+                        overlay_data.get("y"),
                         meta.get("fontfile") or "default",
                     )
                     logging.info(f"   FFmpeg 필터: {drawtext_filter}")
@@ -4706,15 +4716,27 @@ async def api_create_final_video(
                     font_name = "Noto Sans CJK KR"
 
                     # 자막 위치 및 스타일 설정
-                    # 하단 검정 배경 영역에 자막 배치 (비디오 높이 기준)
-                    # 비디오 높이 1920이라고 가정하면, 하단 307px가 검정 배경
-                    # MarginV는 화면 하단에서부터의 거리
+                    # Canvas 위치 정보 사용 (있으면 Canvas 위치, 없으면 기본값)
                     if sub_type == "translation":
-                        # 주자막 (한글): 하단에서 200px 위 (하단 검정 배경 내부)
+                        # 주자막: Canvas 위치 정보 사용
                         font_size = korean_font_size
                         primary_color = korean_color
                         outline_width = max(2, int(font_size * 0.06))
-                        margin_v = 200
+
+                        # Canvas 위치 정보가 있으면 사용
+                        if canvas_positions_data and canvas_positions_data.get("translation"):
+                            canvas_style = canvas_positions_data["translation"]
+                            y_position = canvas_style.get("yPosition", 0.15)  # 0~1 비율
+                            margin_v = int(video_height * (1 - y_position))  # 하단에서부터의 거리
+                            font_size = canvas_style.get("fontSize", korean_font_size)
+                            # 색상 변환 필요시
+                            if canvas_style.get("color"):
+                                primary_color = css_to_ass_color(canvas_style["color"])
+                            if canvas_style.get("borderWidth"):
+                                outline_width = canvas_style["borderWidth"]
+                        else:
+                            margin_v = 200  # 기본값
+
                         style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
                     elif sub_type == "japanese":
                         # 일본어자막: 하단에서 130px 위 (한글과 영어 사이)
@@ -4726,18 +4748,44 @@ async def api_create_final_video(
                         jp_font_name = "Noto Sans CJK JP"
                         style = f"FontName={jp_font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
                     elif sub_type == "description":
-                        # 보조자막 (영어): 하단에서 60px 위 (하단 검정 배경 내부)
+                        # 보조자막: Canvas 위치 정보 사용
                         font_size = english_font_size
                         primary_color = english_color
                         outline_width = max(2, int(font_size * 0.06))
-                        margin_v = 60
+
+                        # Canvas 위치 정보가 있으면 사용
+                        if canvas_positions_data and canvas_positions_data.get("description"):
+                            canvas_style = canvas_positions_data["description"]
+                            y_position = canvas_style.get("yPosition", 0.70)  # 0~1 비율
+                            margin_v = int(video_height * (1 - y_position))
+                            font_size = canvas_style.get("fontSize", english_font_size)
+                            if canvas_style.get("color"):
+                                primary_color = css_to_ass_color(canvas_style["color"])
+                            if canvas_style.get("borderWidth"):
+                                outline_width = canvas_style["borderWidth"]
+                        else:
+                            margin_v = 60  # 기본값
+
                         style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
                     else:
-                        # 메인자막: 하단에서 220px 위 (하단 검정 배경 내부, 주자막 위)
+                        # 메인자막: Canvas 위치 정보 사용
                         font_size = title_font_size
                         primary_color = title_color
                         outline_width = max(2, int(font_size * 0.06))
-                        margin_v = 220
+
+                        # Canvas 위치 정보가 있으면 사용
+                        if canvas_positions_data and canvas_positions_data.get("main"):
+                            canvas_style = canvas_positions_data["main"]
+                            y_position = canvas_style.get("yPosition", 0.85)  # 0~1 비율
+                            margin_v = int(video_height * (1 - y_position))
+                            font_size = canvas_style.get("fontSize", title_font_size)
+                            if canvas_style.get("color"):
+                                primary_color = css_to_ass_color(canvas_style["color"])
+                            if canvas_style.get("borderWidth"):
+                                outline_width = canvas_style["borderWidth"]
+                        else:
+                            margin_v = 220  # 기본값
+
                         style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
 
                     logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px, MarginV={margin_v}")
