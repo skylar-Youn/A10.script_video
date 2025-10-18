@@ -773,14 +773,26 @@ def _build_drawtext_filter(
 
     # CJK 폰트를 찾지 못한 경우, 시스템 폰트 직접 지정
     if has_cjk and not font_path:
-        fallback_fonts = [
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
-        ]
+        if has_japanese:
+            # 일본어가 포함된 경우: CJK 통합 폰트 우선 사용
+            fallback_fonts = [
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # CJK 통합 (일본어 포함)
+                "/home/sk/ws/youtubeanalysis/web_app/static/fonts/NotoSansJP-Regular.ttf",  # 일본어 전용
+                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",     # 한국어 폰트 (fallback)
+                "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            ]
+        else:
+            # 한국어만 있는 경우: 한국어 폰트 우선
+            fallback_fonts = [
+                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+                "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # CJK 통합 (fallback)
+            ]
         for fallback in fallback_fonts:
             if Path(fallback).exists():
                 font_path = fallback
+                logging.info(f"✅ CJK 폰트 선택: {font_path} (일본어: {has_japanese}, 한국어: {has_korean})")
                 break
 
     # 오버레이 타입에 따라 색상 강제 설정
