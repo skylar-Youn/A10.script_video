@@ -3,6 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <title>영상 분석기</title>
+
+    <!-- Google Fonts: Noto Sans KR + JP (한국어/일본어 지원) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+
     <link rel="stylesheet" href="/static/style.css">
     <style>
         /* 타임라인 에디터 스타일 */
@@ -734,21 +740,23 @@
 
                 <!-- 텍스트 오버레이들 -->
                 <div class="video-title-overlay video-text-overlay" id="video-title-overlay"
-                     style="position: absolute; top: 10%; left: 50%; transform: translateX(-50%);
+                     style="position: absolute; top: 80%; left: 50%; transform: translateX(-50%);
                             color: white; font-size: 48px; font-weight: bold;
+                            font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans KR', 'Noto Sans JP', sans-serif;
                             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
                             cursor: move; user-select: none; z-index: 10;
-                            pointer-events: auto; display: block; opacity: 0.5;
+                            pointer-events: auto; display: block; opacity: 1;
                             white-space: nowrap;">
                     영상 제목을 입력하세요
                 </div>
 
                 <div class="video-subtitle-overlay video-text-overlay" id="video-subtitle-overlay"
-                     style="position: absolute; top: 25%; left: 50%; transform: translateX(-50%);
+                     style="position: absolute; top: 90%; left: 50%; transform: translateX(-50%);
                             color: #ffe14d; font-size: 32px; font-weight: bold;
+                            font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans KR', 'Noto Sans JP', sans-serif;
                             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
                             cursor: move; user-select: none; z-index: 9;
-                            pointer-events: auto; display: block; opacity: 0.5;
+                            pointer-events: auto; display: block; opacity: 1;
                             white-space: nowrap;">
                     부제목을 입력하세요
                 </div>
@@ -7614,14 +7622,20 @@ function applyKoreanSubtitle() {
     overlay.style.left = x + '%';
     overlay.style.top = y + '%';
 
+    // 🌏 언어 자동 감지 및 최적 폰트 적용
+    const detectedLang = detectLanguage(text);
+    const optimalFont = getFontFamilyForLanguage(detectedLang);
+    overlay.style.fontFamily = optimalFont;
+
     // 효과 적용
     overlay.className = 'custom-subtitle-overlay';
-    overlay.setAttribute('data-lang', 'korean');
+    overlay.setAttribute('data-lang', detectedLang);
+    overlay.setAttribute('lang', detectedLang);
     if (effect !== 'none') {
         overlay.classList.add(`effect-${effect}`);
     }
 
-    console.log(`✅ 주 자막 적용: ${text}`);
+    console.log(`✅ 주 자막 적용: ${text} (언어: ${detectedLang})`);
 }
 
 // 영어 자막 적용
@@ -7653,14 +7667,20 @@ function applyEnglishSubtitle() {
     overlay.style.left = x + '%';
     overlay.style.top = y + '%';
 
+    // 🌏 언어 자동 감지 및 최적 폰트 적용
+    const detectedLang = detectLanguage(text);
+    const optimalFont = getFontFamilyForLanguage(detectedLang);
+    overlay.style.fontFamily = optimalFont;
+
     // 효과 적용
     overlay.className = 'custom-subtitle-overlay';
-    overlay.setAttribute('data-lang', 'english');
+    overlay.setAttribute('data-lang', detectedLang);
+    overlay.setAttribute('lang', detectedLang);
     if (effect !== 'none') {
         overlay.classList.add(`effect-${effect}`);
     }
 
-    console.log(`✅ 보조 자막 적용: ${text}`);
+    console.log(`✅ 보조 자막 적용: ${text} (언어: ${detectedLang})`);
 }
 
 // 제목 적용
@@ -7816,6 +7836,55 @@ async function generateAITitleSubtitle() {
     }
 }
 
+/**
+ * 텍스트 언어 자동 감지 (한국어/일본어/영어)
+ */
+function detectLanguage(text) {
+    if (!text) return 'ko'; // 기본값: 한국어
+
+    // 일본어 감지: 히라가나, 가타카나
+    const hasHiragana = /[\u3040-\u309F]/.test(text);
+    const hasKatakana = /[\u30A0-\u30FF]/.test(text);
+    if (hasHiragana || hasKatakana) {
+        return 'ja';
+    }
+
+    // 한국어 감지: 한글
+    const hasHangul = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(text);
+    if (hasHangul) {
+        return 'ko';
+    }
+
+    // 한자(CJK Unified Ideographs) - 한중일 공통
+    const hasCJK = /[\u4E00-\u9FFF]/.test(text);
+    if (hasCJK) {
+        // 한자만 있는 경우, 전체 텍스트 분석으로 추가 판단
+        // 일본어는 한자+히라가나 혼용이 일반적이므로 한국어로 간주
+        return 'ko';
+    }
+
+    // 그 외는 영어
+    return 'en';
+}
+
+/**
+ * 언어에 맞는 최적의 font-family 반환
+ */
+function getFontFamilyForLanguage(lang) {
+    const fontStacks = {
+        // 일본어: 시스템 폰트 우선 + Google Fonts fallback
+        'ja': "'ヒラギノ角ゴ ProN', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic', 'メイリオ', Meiryo, 'MS PGothic', 'Noto Sans JP', 'Noto Sans CJK JP', sans-serif",
+
+        // 한국어: 시스템 폰트 우선 + Google Fonts fallback
+        'ko': "'맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Noto Sans CJK KR', sans-serif",
+
+        // 영어: 시스템 폰트
+        'en': "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+    };
+
+    return fontStacks[lang] || fontStacks['ko'];
+}
+
 function applyTitle() {
     const titleOverlay = document.getElementById('video-title-overlay') || document.querySelector('.video-title-overlay');
     const text = document.getElementById('overlay-title-input').value.trim();
@@ -7839,6 +7908,13 @@ function applyTitle() {
         titleOverlay.style.color = color;
         titleOverlay.style.opacity = '1';
         titleOverlay.style.display = 'block';
+
+        // 🌏 언어 자동 감지 및 최적 폰트 적용
+        const detectedLang = detectLanguage(text);
+        const optimalFont = getFontFamilyForLanguage(detectedLang);
+        titleOverlay.style.fontFamily = optimalFont;
+        titleOverlay.setAttribute('lang', detectedLang);
+        console.log(`🌏 제목 언어 감지: ${detectedLang}, 폰트: ${optimalFont}`);
 
         // 정적 효과 적용
         titleOverlay.className = 'video-title-overlay video-text-overlay';
@@ -7878,6 +7954,13 @@ function applySubtitle() {
         subtitleOverlay.style.color = color;
         subtitleOverlay.style.opacity = '1';
         subtitleOverlay.style.display = 'block';
+
+        // 🌏 언어 자동 감지 및 최적 폰트 적용
+        const detectedLang = detectLanguage(text);
+        const optimalFont = getFontFamilyForLanguage(detectedLang);
+        subtitleOverlay.style.fontFamily = optimalFont;
+        subtitleOverlay.setAttribute('lang', detectedLang);
+        console.log(`🌏 부제목 언어 감지: ${detectedLang}, 폰트: ${optimalFont}`);
 
         // 정적 효과 적용
         subtitleOverlay.className = 'video-subtitle-overlay video-text-overlay';
@@ -10160,7 +10243,8 @@ function parseSubtitle(content, trackType) {
     blocks.forEach(block => {
         const lines = block.split('\n');
         if (lines.length >= 3) {
-            const timeMatch = lines[1].match(/(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})/);
+            const timeRegex = /(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})/;
+            const timeMatch = lines[1].match(timeRegex);
             if (timeMatch) {
                 const text = lines.slice(2).join(' ');
                 subtitles.push({
