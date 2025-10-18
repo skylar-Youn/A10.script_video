@@ -16,7 +16,34 @@ class CanvasVideoPreview {
         this.subtitles = [];
         this.currentSubtitle = null;
 
+        // 폰트 로딩 완료 여부
+        this.fontsLoaded = false;
+        this.initializeFonts();
+
         this.setupEventListeners();
+    }
+
+    /**
+     * 폰트 로딩 대기
+     */
+    async initializeFonts() {
+        try {
+            // HTML에서 정의한 폰트들이 로드될 때까지 대기
+            await Promise.race([
+                document.fonts.ready,
+                new Promise(resolve => setTimeout(resolve, 3000)) // 3초 타임아웃
+            ]);
+            this.fontsLoaded = true;
+            console.log('✅ 폰트 로딩 완료');
+
+            // 폰트 로딩 후 재렌더링
+            if (this.video.readyState >= 2) {
+                this.render();
+            }
+        } catch (error) {
+            console.warn('⚠️ 폰트 로딩 중 오류:', error);
+            this.fontsLoaded = true; // 오류가 있어도 계속 진행
+        }
     }
 
     /**
@@ -134,20 +161,46 @@ class CanvasVideoPreview {
         const y = overlay.y || height / 2;
         const text = overlay.text || '';
         const fontSize = overlay.fontSize || 48;
-        const fontFamily = overlay.fontFamily || 'Noto Sans CJK KR, Arial, sans-serif';
+        // HTML에서 로드된 폰트와 동일한 이름 사용
+        const fontFamily = overlay.fontFamily || '"Noto Sans KR Local", "Noto Sans JP Local", "맑은 고딕", Arial, sans-serif';
         const color = overlay.color || '#ffffff';
-        const borderWidth = overlay.borderWidth || 2;
+        // 외곽선을 더 두껍게 (가독성 향상)
+        const borderWidth = overlay.borderWidth !== undefined ? overlay.borderWidth : Math.max(4, Math.floor(fontSize * 0.1));
         const borderColor = overlay.borderColor || '#000000';
+
+        // 배경 설정
+        const hasBackground = overlay.backgroundColor || overlay.showBackground;
+        const backgroundColor = overlay.backgroundColor || 'rgba(0, 0, 0, 0.5)';
+        const padding = overlay.padding || fontSize * 0.3;
 
         // 폰트 설정
         this.ctx.font = `bold ${fontSize}px ${fontFamily}`;
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
-        // 텍스트 외곽선 (FFmpeg의 borderw와 동일)
+        // 텍스트 크기 측정
+        const metrics = this.ctx.measureText(text);
+        const textWidth = metrics.width;
+        const textHeight = fontSize * 1.2; // 대략적인 높이
+
+        // 배경 박스 그리기 (필요한 경우)
+        if (hasBackground) {
+            const boxX = x - textWidth / 2 - padding;
+            const boxY = y - textHeight / 2 - padding;
+            const boxWidth = textWidth + padding * 2;
+            const boxHeight = textHeight + padding * 2;
+
+            this.ctx.fillStyle = backgroundColor;
+            this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        }
+
+        // 텍스트 외곽선 (FFmpeg의 borderw와 동기화)
         if (borderWidth > 0) {
             this.ctx.strokeStyle = borderColor;
-            this.ctx.lineWidth = borderWidth;
+            // ⚠️ FFmpeg와 동기화: 외곽선 두께를 FFmpeg와 동일하게 설정
+            this.ctx.lineWidth = borderWidth; // 2배 제거 → FFmpeg와 동일
+            this.ctx.lineJoin = 'round'; // 모서리를 둥글게
+            this.ctx.miterLimit = 2;
             this.ctx.strokeText(text, x, y);
         }
 
@@ -174,7 +227,8 @@ class CanvasVideoPreview {
                 y: this.canvas.height * 0.9, // 하단 90% 위치
                 text: activeSubtitle.text,
                 fontSize: activeSubtitle.fontSize || 32,
-                fontFamily: 'Noto Sans CJK KR, Arial, sans-serif',
+                // HTML에서 로드된 폰트와 동일한 이름 사용
+                fontFamily: '"Noto Sans KR Local", "Noto Sans JP Local", "맑은 고딕", Arial, sans-serif',
                 color: '#ffffff',
                 borderWidth: 2,
                 borderColor: '#000000'

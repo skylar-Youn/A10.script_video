@@ -4,10 +4,37 @@
     <meta charset="UTF-8">
     <title>영상 분석기</title>
 
-    <!-- Google Fonts: Noto Sans KR + JP (한국어/일본어 지원) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* 로컬 한국어 폰트 정의 */
+        @font-face {
+            font-family: 'Noto Sans KR Local';
+            src: url('/static/fonts/NotoSansKR-Regular.ttf') format('truetype');
+            font-weight: 400;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        /* 로컬 일본어 폰트 정의 */
+        @font-face {
+            font-family: 'Noto Sans JP Local';
+            src: url('/static/fonts/NotoSansJP-Regular.ttf') format('truetype');
+            font-weight: 400;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        /* 전체 페이지에 기본 폰트 적용 */
+        body, * {
+            font-family: 'Noto Sans KR Local', 'Noto Sans JP Local', '맑은 고딕', 'Malgun Gothic', Arial, sans-serif !important;
+        }
+
+        /* 비디오 오버레이 텍스트에 폰트 강제 적용 */
+        .video-title-overlay,
+        .video-subtitle-overlay,
+        .custom-subtitle-overlay {
+            font-family: 'Noto Sans KR Local', 'Noto Sans JP Local', '맑은 고딕', 'Malgun Gothic', Arial, sans-serif !important;
+        }
+    </style>
 
     <link rel="stylesheet" href="/static/style.css">
     <style>
@@ -712,6 +739,45 @@
                 </div>
             </div>
 
+            <!-- 해상도 선택 -->
+            <div style="margin-bottom: 15px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;">
+                <label style="display: block; color: white; margin-bottom: 8px; font-weight: bold;">📐 미리보기 해상도</label>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button onclick="setPreviewResolution('youtube')" id="btn-youtube-res" class="btn-primary" style="padding: 10px 20px; background: #3b82f6; font-size: 0.95rem;">
+                        📺 유튜브 (16:9)<br>
+                        <span style="font-size: 0.8rem; opacity: 0.8;">1920×1080</span>
+                    </button>
+                    <button onclick="setPreviewResolution('shorts')" id="btn-shorts-res" class="btn-primary" style="padding: 10px 20px; background: #8b5cf6; font-size: 0.95rem;">
+                        📱 쇼츠 (9:16)<br>
+                        <span style="font-size: 0.8rem; opacity: 0.8;">1080×1920</span>
+                    </button>
+                    <button onclick="setPreviewResolution('4k')" id="btn-4k-res" class="btn-primary" style="padding: 10px 20px; background: #10b981; font-size: 0.95rem;">
+                        🎬 4K (16:9)<br>
+                        <span style="font-size: 0.8rem; opacity: 0.8;">3840×2160</span>
+                    </button>
+                    <button onclick="setPreviewResolution('custom')" id="btn-custom-res" class="btn-secondary" style="padding: 10px 20px; font-size: 0.95rem;">
+                        ⚙️ 커스텀<br>
+                        <span style="font-size: 0.8rem; opacity: 0.8;">직접 입력</span>
+                    </button>
+                </div>
+                <div id="custom-resolution-input" style="display: none; margin-top: 10px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 4px;">
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <div>
+                            <label style="color: white; font-size: 0.9rem; display: block; margin-bottom: 4px;">너비</label>
+                            <input type="number" id="custom-width" value="1920" min="320" max="7680" style="width: 100px; padding: 6px; border-radius: 4px; border: 1px solid #4a5568; background: #2d3748; color: white;">
+                        </div>
+                        <div>
+                            <label style="color: white; font-size: 0.9rem; display: block; margin-bottom: 4px;">높이</label>
+                            <input type="number" id="custom-height" value="1080" min="240" max="4320" style="width: 100px; padding: 6px; border-radius: 4px; border: 1px solid #4a5568; background: #2d3748; color: white;">
+                        </div>
+                        <button onclick="applyCustomResolution()" class="btn-primary" style="padding: 8px 16px; margin-top: 20px; background: #10b981;">✅ 적용</button>
+                    </div>
+                </div>
+                <div id="current-resolution-display" style="margin-top: 8px; color: #a0aec0; font-size: 0.85rem;">
+                    현재: <span id="current-res-text">1920×1080 (16:9)</span>
+                </div>
+            </div>
+
             <!-- 저장/불러오기 버튼 -->
             <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
                 <button onclick="saveTextOverlaySettings()" class="btn-primary" style="padding: 8px 16px; background: #10b981;">💾 설정 저장</button>
@@ -725,7 +791,14 @@
         <div class="video-preview-container" style="position: relative; display: inline-block;">
             <!-- 비디오 플레이어 Wrapper -->
             <div class="video-subtitle-wrapper" style="position: relative; display: inline-block;">
-                <video id="video-preview-player" controls crossorigin="anonymous" style="width: 100%; max-width: 800px; border-radius: 8px; display: block;">
+                <!-- Canvas 미리보기 (FFmpeg와 동일한 렌더링) -->
+                <canvas id="video-canvas-preview"
+                        style="width: 100%; max-width: 800px; border-radius: 8px; display: none; position: absolute; top: 0; left: 0; pointer-events: none; z-index: 100;">
+                </canvas>
+
+                <!-- 기존 비디오 플레이어 (숨김 처리) -->
+                <video id="video-preview-player" controls crossorigin="anonymous"
+                       style="width: 100%; max-width: 800px; border-radius: 8px; display: block;">
                     <source id="video-preview-source" src="" type="video/mp4">
                     <track id="video-subtitle-track" kind="subtitles" src="" srclang="ko" label="한국어 (원본)">
                     <track id="video-translation-track" kind="subtitles" src="" srclang="en" label="주자막">
@@ -763,7 +836,7 @@
 
                 <!-- 한글 자막 오버레이 -->
                 <div class="custom-subtitle-overlay" id="korean-subtitle-overlay" data-lang="korean"
-                     style="position: absolute; top: 80%; left: 50%; transform: translateX(-50%);
+                     style="position: absolute; top: 75%; left: 50%; transform: translateX(-50%);
                             color: #000000; font-size: 32px; font-weight: bold;
                             text-shadow: -0.04em -0.04em 0 #fff, 0.04em -0.04em 0 #fff, -0.04em 0.04em 0 #fff, 0.04em 0.04em 0 #fff, -0.06em 0 0 #fff, 0.06em 0 0 #fff, 0 -0.06em 0 #fff, 0 0.06em 0 #fff;
                             cursor: move; user-select: none; z-index: 8;
@@ -773,12 +846,24 @@
                     주 자막을 입력하세요
                 </div>
 
-                <!-- 보조 자막 오버레이 -->
-                <div class="custom-subtitle-overlay" id="english-subtitle-overlay" data-lang="english"
-                     style="position: absolute; top: 90%; left: 50%; transform: translateX(-50%);
-                            color: #000000; font-size: 28px; font-weight: bold;
+                <!-- 일본어 자막 오버레이 -->
+                <div class="custom-subtitle-overlay" id="japanese-subtitle-overlay" data-lang="japanese"
+                     style="position: absolute; top: 83%; left: 50%; transform: translateX(-50%);
+                            color: #000000; font-size: 30px; font-weight: bold;
                             text-shadow: -0.04em -0.04em 0 #fff, 0.04em -0.04em 0 #fff, -0.04em 0.04em 0 #fff, 0.04em 0.04em 0 #fff, -0.06em 0 0 #fff, 0.06em 0 0 #fff, 0 -0.06em 0 #fff, 0 0.06em 0 #fff;
                             cursor: move; user-select: none; z-index: 7;
+                            pointer-events: auto; display: block; padding: 8px 16px;
+                            background: rgba(255, 255, 255, 0.1); border-radius: 4px; opacity: 0.5;
+                            white-space: nowrap;">
+                    日本語字幕を入力してください
+                </div>
+
+                <!-- 영어 자막 오버레이 -->
+                <div class="custom-subtitle-overlay" id="english-subtitle-overlay" data-lang="english"
+                     style="position: absolute; top: 91%; left: 50%; transform: translateX(-50%);
+                            color: #000000; font-size: 28px; font-weight: bold;
+                            text-shadow: -0.04em -0.04em 0 #fff, 0.04em -0.04em 0 #fff, -0.04em 0.04em 0 #fff, 0.04em 0.04em 0 #fff, -0.06em 0 0 #fff, 0.06em 0 0 #fff, 0 -0.06em 0 #fff, 0 0.06em 0 #fff;
+                            cursor: move; user-select: none; z-index: 6;
                             pointer-events: auto; display: block; padding: 8px 16px;
                             background: rgba(255, 255, 255, 0.1); border-radius: 4px; opacity: 0.5;
                             white-space: nowrap;">
@@ -2664,6 +2749,7 @@ async function createPreviewVideo() {
         title: getOverlaySettings('video-title-overlay', 'title'),
         subtitle: getOverlaySettings('video-subtitle-overlay', 'subtitle'),
         korean: getOverlaySettings('korean-subtitle-overlay', 'korean'),
+        japanese: getOverlaySettings('japanese-subtitle-overlay', 'japanese'),
         english: getOverlaySettings('english-subtitle-overlay', 'english')
     };
 
@@ -2916,6 +3002,7 @@ async function createFinalVideo() {
         title: getOverlaySettings('video-title-overlay', 'title', savedSettings?.title?.size),
         subtitle: getOverlaySettings('video-subtitle-overlay', 'subtitle', savedSettings?.subtitle?.size),
         korean: getOverlaySettings('korean-subtitle-overlay', 'korean', savedSettings?.korean?.size),
+        japanese: getOverlaySettings('japanese-subtitle-overlay', 'japanese', savedSettings?.japanese?.size),
         english: getOverlaySettings('english-subtitle-overlay', 'english', savedSettings?.english?.size)
     };
 
@@ -6093,24 +6180,27 @@ async function analyzeSubtitlesWithAI() {
         analyzeBtn.textContent = '🔄 분석 중...';
         analyzeBtn.style.opacity = '0.6';
 
-        // TODO: 실제 API 호출 (백엔드 구현 필요)
-        // const response = await fetch('/api/video-analyzer/ai-analyze', {
-        //     method: 'POST',
-        //     headers: { 'Content-Type': 'application/json' },
-        //     body: JSON.stringify({
-        //         subtitle_content: srtContent,
-        //         model: selectedModel,
-        //         analysis_type: selectedType
-        //     })
-        // });
-        // const result = await response.json();
+        // API 호출
+        const response = await fetch('/api/video-analyzer/analyze-subtitles-with-ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                subtitle_content: srtContent,
+                model: selectedModel,
+                analysis_type: selectedType
+            })
+        });
 
-        // 임시: 테스트를 위한 목업 데이터 생성 (1초 지연)
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        const mockResult = generateMockAnalysisResult(subtitleItems, selectedType);
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'AI 분석 실패');
+        }
+
+        const data = await response.json();
+        const result = data.result;
 
         // 분석 결과 표시
-        displayAnalysisResult(mockResult);
+        displayAnalysisResult(result);
 
         // 버튼 복원
         analyzeBtn.disabled = false;
@@ -7374,6 +7464,9 @@ function updateTextOverlays() {
             );
         }
     }
+
+    // Canvas 텍스트 오버레이 동기화
+    updateCanvasText();
 }
 
 // 텍스트 오버레이 설정 저장
@@ -7571,6 +7664,9 @@ function toggleBlackBar(position) {
         bar.style.display = 'none';
         console.log(`❌ ${position === 'top' ? '상단' : '하단'} 검정 배경 비활성화`);
     }
+
+    // Canvas 업데이트
+    updateCanvasBlackBars();
 }
 
 // 검정 배경 업데이트
@@ -7587,6 +7683,9 @@ function updateBlackBar(position) {
     const opacityValue = opacity / 100;
     bar.style.background = `rgba(0, 0, 0, ${opacityValue})`;
     document.getElementById(`${position}-bar-opacity-display`).textContent = opacity + '%';
+
+    // Canvas 업데이트
+    updateCanvasBlackBars();
 }
 
 // ========================================
@@ -11452,6 +11551,245 @@ async function runBrowserDiagnostics() {
 
 <!-- Canvas 미리보기 스크립트 로드 -->
 <script src="/static/canvas-preview.js"></script>
+
+<!-- 해상도 선택 기능 -->
+<script>
+// 현재 해상도 설정
+let currentResolution = {
+    width: 1920,
+    height: 1080,
+    aspectRatio: '16:9',
+    name: 'youtube'
+};
+
+// 해상도 프리셋
+const resolutionPresets = {
+    youtube: { width: 1920, height: 1080, aspectRatio: '16:9', name: '유튜브' },
+    shorts: { width: 1080, height: 1920, aspectRatio: '9:16', name: '쇼츠' },
+    '4k': { width: 3840, height: 2160, aspectRatio: '16:9', name: '4K' }
+};
+
+// 해상도 설정 함수
+function setPreviewResolution(preset) {
+    // 버튼 활성화 상태 업데이트
+    document.querySelectorAll('[id^="btn-"][id$="-res"]').forEach(btn => {
+        btn.style.opacity = '0.6';
+        btn.style.transform = 'scale(1)';
+    });
+
+    if (preset === 'custom') {
+        // 커스텀 해상도 입력 표시
+        document.getElementById('custom-resolution-input').style.display = 'block';
+        document.getElementById('btn-custom-res').style.opacity = '1';
+        document.getElementById('btn-custom-res').style.transform = 'scale(1.05)';
+        return;
+    } else {
+        // 커스텀 입력 숨김
+        document.getElementById('custom-resolution-input').style.display = 'none';
+    }
+
+    // 선택된 버튼 강조
+    const selectedBtn = document.getElementById(`btn-${preset}-res`);
+    if (selectedBtn) {
+        selectedBtn.style.opacity = '1';
+        selectedBtn.style.transform = 'scale(1.05)';
+    }
+
+    // 해상도 적용
+    const resolution = resolutionPresets[preset];
+    if (resolution) {
+        currentResolution = { ...resolution, name: preset };
+        applyResolutionToPreview(resolution.width, resolution.height);
+        updateResolutionDisplay(`${resolution.width}×${resolution.height} (${resolution.aspectRatio})`);
+        console.log(`📐 해상도 변경: ${resolution.name} ${resolution.width}×${resolution.height}`);
+    }
+}
+
+// 커스텀 해상도 적용
+function applyCustomResolution() {
+    const width = parseInt(document.getElementById('custom-width').value);
+    const height = parseInt(document.getElementById('custom-height').value);
+
+    if (!width || !height || width < 320 || height < 240) {
+        alert('⚠️ 올바른 해상도를 입력하세요. (최소 320×240)');
+        return;
+    }
+
+    const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+    const divisor = gcd(width, height);
+    const aspectRatio = `${width / divisor}:${height / divisor}`;
+
+    currentResolution = { width, height, aspectRatio, name: 'custom' };
+    applyResolutionToPreview(width, height);
+    updateResolutionDisplay(`${width}×${height} (${aspectRatio})`);
+    console.log(`📐 커스텀 해상도 적용: ${width}×${height} (${aspectRatio})`);
+}
+
+// 미리보기에 해상도 적용
+function applyResolutionToPreview(width, height) {
+    const canvas = document.getElementById('video-canvas-preview');
+    const video = document.getElementById('video-preview-player');
+    const wrapper = document.querySelector('.video-subtitle-wrapper');
+
+    if (canvas && video) {
+        // Canvas 크기 설정
+        canvas.width = width;
+        canvas.height = height;
+
+        // 비디오 컨테이너 최대 크기 설정 (화면 크기에 맞게 스케일링)
+        const maxWidth = 800;
+        const scale = Math.min(1, maxWidth / width);
+        const displayWidth = width * scale;
+        const displayHeight = height * scale;
+
+        if (wrapper) {
+            wrapper.style.width = displayWidth + 'px';
+            wrapper.style.height = displayHeight + 'px';
+        }
+
+        // Canvas 렌더링
+        if (canvasPreview) {
+            canvasPreview.render();
+            syncOverlaysToCanvas();
+        }
+    }
+}
+
+// 해상도 표시 업데이트
+function updateResolutionDisplay(text) {
+    const display = document.getElementById('current-res-text');
+    if (display) {
+        display.textContent = text;
+    }
+}
+</script>
+
+<!-- Canvas 미리보기 초기화 -->
+<script>
+// 전역 Canvas 미리보기 인스턴스
+let canvasPreview = null;
+
+// Canvas 미리보기 활성화/비활성화
+function toggleCanvasPreview(enabled) {
+    const canvas = document.getElementById('video-canvas-preview');
+    const videoPlayer = document.getElementById('video-preview-player');
+    const cssOverlays = document.querySelectorAll('.video-text-overlay, #top-black-bar, #bottom-black-bar');
+
+    if (enabled) {
+        // Canvas 표시, CSS 오버레이 숨김
+        canvas.style.display = 'block';
+        cssOverlays.forEach(el => el.style.opacity = '0.3'); // 참고용으로 반투명하게 유지
+
+        // Canvas 미리보기 초기화
+        if (!canvasPreview) {
+            canvasPreview = new CanvasVideoPreview('video-canvas-preview', 'video-preview-player');
+            console.log('✅ Canvas 미리보기 활성화됨');
+        }
+    } else {
+        // Canvas 숨김, CSS 오버레이 표시
+        canvas.style.display = 'none';
+        cssOverlays.forEach(el => el.style.opacity = '1');
+        console.log('📺 CSS 오버레이 모드');
+    }
+}
+
+// 비디오 로드 시 Canvas 자동 초기화
+document.addEventListener('DOMContentLoaded', () => {
+    const videoPlayer = document.getElementById('video-preview-player');
+
+    // 기본 해상도 버튼 활성화 (유튜브)
+    const youtubeBtn = document.getElementById('btn-youtube-res');
+    if (youtubeBtn) {
+        youtubeBtn.style.opacity = '1';
+        youtubeBtn.style.transform = 'scale(1.05)';
+    }
+
+    videoPlayer.addEventListener('loadedmetadata', () => {
+        // 기본적으로 Canvas 미리보기 활성화
+        toggleCanvasPreview(true);
+
+        // 현재 설정된 해상도로 Canvas 크기 설정
+        applyResolutionToPreview(currentResolution.width, currentResolution.height);
+
+        // 검정 배경 초기값 설정 (예시)
+        if (canvasPreview) {
+            canvasPreview.setBlackBars(
+                { enabled: false, height: 15, opacity: 0.8 }, // 상단
+                { enabled: false, height: 15, opacity: 0.8 }  // 하단
+            );
+        }
+    });
+});
+
+// 텍스트 오버레이를 Canvas에 동기화하는 함수
+function syncOverlaysToCanvas() {
+    if (!canvasPreview) return;
+
+    const titleOverlay = document.getElementById('video-title-overlay');
+    const subtitleOverlay = document.getElementById('video-subtitle-overlay');
+
+    canvasPreview.clearOverlays();
+
+    // 제목 오버레이
+    if (titleOverlay && titleOverlay.style.display !== 'none') {
+        const rect = titleOverlay.getBoundingClientRect();
+        const videoRect = document.getElementById('video-preview-player').getBoundingClientRect();
+
+        canvasPreview.addOverlay({
+            text: titleOverlay.textContent,
+            x: canvasPreview.canvas.width / 2,
+            y: canvasPreview.canvas.height * 0.8, // 80% 위치
+            fontSize: parseInt(window.getComputedStyle(titleOverlay).fontSize) || 48,
+            color: window.getComputedStyle(titleOverlay).color || '#ffffff',
+            borderWidth: 4,
+            borderColor: '#000000'
+        });
+    }
+
+    // 부제목 오버레이
+    if (subtitleOverlay && subtitleOverlay.style.display !== 'none') {
+        canvasPreview.addOverlay({
+            text: subtitleOverlay.textContent,
+            x: canvasPreview.canvas.width / 2,
+            y: canvasPreview.canvas.height * 0.9, // 90% 위치
+            fontSize: parseInt(window.getComputedStyle(subtitleOverlay).fontSize) || 32,
+            color: window.getComputedStyle(subtitleOverlay).color || '#ffe14d',
+            borderWidth: 3,
+            borderColor: '#000000'
+        });
+    }
+}
+
+// 텍스트 변경 시 Canvas 업데이트
+function updateCanvasText() {
+    if (canvasPreview) {
+        syncOverlaysToCanvas();
+    }
+}
+
+// 검정 배경 토글을 Canvas에 반영
+function updateCanvasBlackBars() {
+    if (!canvasPreview) return;
+
+    const topBar = document.getElementById('top-black-bar');
+    const bottomBar = document.getElementById('bottom-black-bar');
+
+    canvasPreview.setBlackBars(
+        {
+            enabled: topBar.style.display !== 'none',
+            height: parseFloat(topBar.style.height) || 15,
+            opacity: parseFloat(window.getComputedStyle(topBar).opacity) || 0.8
+        },
+        {
+            enabled: bottomBar.style.display !== 'none',
+            height: parseFloat(bottomBar.style.height) || 15,
+            opacity: parseFloat(window.getComputedStyle(bottomBar).opacity) || 0.8
+        }
+    );
+}
+
+console.log('🎨 Canvas 미리보기 시스템 준비 완료');
+</script>
 
 </body>
 </html>

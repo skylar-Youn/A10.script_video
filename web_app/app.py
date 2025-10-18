@@ -540,9 +540,14 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
                 add_candidate("notosans-bold.ttf")
                 add_candidate("notosanscjkk-bold.otf")
                 add_candidate("notosanscjkkr-bold.otf")
+                add_candidate("notosanskr-bold.ttf")
+                add_candidate("notosansjp-bold.ttf")
             add_candidate("notosans-regular.ttf")
             add_candidate("notosanscjkkr-regular.otf")
             add_candidate("notosanscjk-regular.ttc")
+            # web_app/static/fonts/ 폴더의 폰트 추가
+            add_candidate("notosanskr-regular.ttf")
+            add_candidate("notosansjp-regular.ttf")
         if "arial" in normalized_family:
             if prefer_bold:
                 add_candidate("arialbd.ttf")
@@ -701,8 +706,9 @@ def _build_drawtext_filter(
     except (TypeError, ValueError):
         font_size = 48
 
-    if overlay_type in {"korean", "english"}:
-        font_size = max(12, int(round(font_size / 5.0)))
+    # ⚠️ 주의: 웹 미리보기와 동기화를 위해 폰트 크기 축소를 제거함
+    # if overlay_type in {"korean", "english"}:
+    #     font_size = max(12, int(round(font_size / 5.0)))
 
     def _coerce_position(value: Any, fallback: float) -> float:
         try:
@@ -733,12 +739,10 @@ def _build_drawtext_filter(
     # drawtext 좌표는 텍스트 상단/좌측 기준으로 다루며, CSS의 translateX(-50%) 효과를 모사한다.
     x_expr = f"clip({x_value}-text_w/2,0,{video_width}-text_w)"
 
-    if overlay_type in {"korean", "english"}:
-        # 주/보조 자막은 top 좌표 기준을 유지
-        y_expr_base = f"{y_value}"
-    else:
-        # 제목/부제목 등은 중앙 정렬
-        y_expr_base = f"{y_value}-text_h/2"
+    # ⚠️ Canvas textBaseline='middle'과 동기화: 모든 텍스트를 중앙 정렬
+    # Canvas는 모든 텍스트를 textBaseline='middle'로 렌더링하므로,
+    # FFmpeg도 동일하게 y 좌표를 텍스트 중앙으로 처리
+    y_expr_base = f"{y_value}-text_h/2"
 
     y_expr = f"clip({y_expr_base},0,{video_height}-text_h)"
 
@@ -4542,7 +4546,13 @@ async def api_create_final_video(
                 )
 
             # 2. 제목/부제목 오버레이 먼저 추가 (배너보다 아래 레이어)
+            # ⚠️ korean, english, japanese는 SRT 자막으로 처리되므로 drawtext에서 제외
             for overlay_key, overlay_data in overlays_data.items():
+                # korean, english, japanese는 SRT subtitles 필터로 처리되므로 건너뜀
+                if overlay_key in {"korean", "english", "japanese"}:
+                    logging.info(f"⏭️  텍스트 오버레이 건너뜀: {overlay_key} (SRT 자막으로 처리됨)")
+                    continue
+
                 result = _build_drawtext_filter(overlay_data, video_width, video_height)
                 if result:
                     drawtext_filter, meta = result
@@ -4606,6 +4616,17 @@ async def api_create_final_video(
                 subtitle_files.append(("translation", str(translation_srt)))
                 logging.info(f"📝 주자막 파일 생성: {translation_srt}")
 
+            # 일본어 자막 (japaneseSubtitle)
+            if tracks_data.get("japaneseSubtitle", {}).get("enabled") and tracks_data.get("japaneseSubtitle", {}).get("data"):
+                japanese_srt = temp_dir / "japanese.srt"
+                with open(japanese_srt, "w", encoding="utf-8") as f:
+                    for idx, sub in enumerate(tracks_data["japaneseSubtitle"]["data"], 1):
+                        f.write(f"{idx}\n")
+                        f.write(f"{sub['start']} --> {sub['end']}\n")
+                        f.write(f"{sub['text']}\n\n")
+                subtitle_files.append(("japanese", str(japanese_srt)))
+                logging.info(f"📝 일본어자막 파일 생성: {japanese_srt}")
+
             # 보조자막 (descriptionSubtitle)
             if tracks_data.get("descriptionSubtitle", {}).get("enabled") and tracks_data.get("descriptionSubtitle", {}).get("data"):
                 description_srt = temp_dir / "description.srt"
@@ -4632,8 +4653,10 @@ async def api_create_final_video(
             if subtitle_files:
                 # overlays 폰트 크기를 그대로 사용하되 안전한 범위 내로 제한
                 def adjust_subtitle_size(overlay_size):
-                    adjusted = int(round(overlay_size / 5.0))
-                    return max(18, min(adjusted, 52))
+                    # ⚠️ 웹 미리보기와 동기화: 폰트 크기 그대로 사용
+                    # 사용자가 웹 UI에서 조정한 크기를 그대로 출력에 반영
+                    adjusted = int(round(overlay_size))  # 크기 그대로 사용
+                    return max(18, min(adjusted, 120))  # 최소 18px, 최대 120px
 
                 # CSS 색상을 ASS/SSA 형식(&HBBGGRR)으로 변환
                 def css_to_ass_color(css_color):
@@ -4652,24 +4675,28 @@ async def api_create_final_video(
 
                 # overlays에서 폰트 크기 및 색상 추출 (None 안전 처리)
                 korean_overlay = overlays_data.get("korean") or {}
+                japanese_overlay = overlays_data.get("japanese") or {}
                 english_overlay = overlays_data.get("english") or {}
                 title_overlay = overlays_data.get("title") or {}
 
                 korean_overlay_size = korean_overlay.get("fontSize", 64)
+                japanese_overlay_size = japanese_overlay.get("fontSize", 60)
                 english_overlay_size = english_overlay.get("fontSize", 56)
                 title_overlay_size = title_overlay.get("fontSize", 96)
 
                 korean_font_size = adjust_subtitle_size(korean_overlay_size)
+                japanese_font_size = adjust_subtitle_size(japanese_overlay_size)
                 english_font_size = adjust_subtitle_size(english_overlay_size)
                 title_font_size = adjust_subtitle_size(title_overlay_size)
 
                 # SRT 자막은 모두 흰색으로 고정
                 korean_color = "&H00FFFFFF"  # 흰색
+                japanese_color = "&H00FFFFFF"  # 흰색
                 english_color = "&H00FFFFFF"  # 흰색
                 title_color = "&H00FFFFFF"  # 흰색
 
-                logging.info(f"📏 자막 크기 조정: korean {korean_overlay_size}→{korean_font_size}, english {english_overlay_size}→{english_font_size}, title {title_overlay_size}→{title_font_size}")
-                logging.info(f"🎨 SRT 자막 색상: 모두 흰색 (korean={korean_color}, english={english_color}, title={title_color})")
+                logging.info(f"📏 자막 크기 조정: korean {korean_overlay_size}→{korean_font_size}, japanese {japanese_overlay_size}→{japanese_font_size}, english {english_overlay_size}→{english_font_size}, title {title_overlay_size}→{title_font_size}")
+                logging.info(f"🎨 SRT 자막 색상: 모두 흰색 (korean={korean_color}, japanese={japanese_color}, english={english_color}, title={title_color})")
 
                 for sub_type, sub_path in subtitle_files:
                     # 자막 파일 경로 이스케이프
@@ -4683,18 +4710,27 @@ async def api_create_final_video(
                     # 비디오 높이 1920이라고 가정하면, 하단 307px가 검정 배경
                     # MarginV는 화면 하단에서부터의 거리
                     if sub_type == "translation":
-                        # 주자막: 하단에서 150px 위 (하단 검정 배경 내부)
+                        # 주자막 (한글): 하단에서 200px 위 (하단 검정 배경 내부)
                         font_size = korean_font_size
                         primary_color = korean_color
                         outline_width = max(2, int(font_size * 0.06))
-                        margin_v = 150
+                        margin_v = 200
                         style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
+                    elif sub_type == "japanese":
+                        # 일본어자막: 하단에서 130px 위 (한글과 영어 사이)
+                        font_size = japanese_font_size
+                        primary_color = japanese_color
+                        outline_width = max(2, int(font_size * 0.06))
+                        margin_v = 130
+                        # 일본어 폰트 사용
+                        jp_font_name = "Noto Sans CJK JP"
+                        style = f"FontName={jp_font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
                     elif sub_type == "description":
-                        # 보조자막: 하단에서 80px 위 (하단 검정 배경 내부)
+                        # 보조자막 (영어): 하단에서 60px 위 (하단 검정 배경 내부)
                         font_size = english_font_size
                         primary_color = english_color
                         outline_width = max(2, int(font_size * 0.06))
-                        margin_v = 80
+                        margin_v = 60
                         style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
                     else:
                         # 메인자막: 하단에서 220px 위 (하단 검정 배경 내부, 주자막 위)
@@ -5408,6 +5444,162 @@ Original subtitles:
     except Exception as e:
         logging.exception("자막 번역 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"자막 번역 실패: {str(e)}")
+
+
+@app.post("/api/video-analyzer/analyze-subtitles-with-ai")
+async def api_analyze_subtitles_with_ai(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """AI를 사용한 자막 분석 - 쇼츠 최적화, 영상 요약, 교육 콘텐츠 제작"""
+    import anthropic
+    import openai
+    import os
+
+    try:
+        subtitle_content = payload.get("subtitle_content", "")
+        model = payload.get("model", "sonnet")
+        analysis_type = payload.get("analysis_type", "enhanced-shorts")
+
+        if not subtitle_content:
+            raise HTTPException(status_code=400, detail="분석할 자막이 없습니다.")
+
+        logging.info(f"AI 자막 분석 시작: 모델={model}, 타입={analysis_type}")
+
+        # 분석 타입별 프롬프트
+        type_prompts = {
+            "enhanced-shorts": """이 자막을 60초 이내 YouTube 쇼츠로 편집하기 위해 분석해주세요.
+- 핵심 하이라이트 구간만 남기고 나머지는 삭제
+- 60-70% 정도의 자막을 삭제하여 빠른 템포 유지
+- 임팩트 있는 텍스트 오버레이 추가 (예: "💥 주목!", "🔥 핵심")
+- 시청자 후킹을 위한 짧은 나레이션 추가""",
+
+            "enhanced-summary": """이 자막을 3-5분 요약 영상으로 편집하기 위해 분석해주세요.
+- 핵심 내용만 남기고 반복/부연설명 삭제
+- 40-50% 정도의 자막 삭제
+- 챕터 구분을 위한 텍스트 추가 (예: "[챕터 1]", "[핵심 요약]")
+- 요약 설명을 위한 나레이션 추가""",
+
+            "enhanced-education": """이 자막을 교육 콘텐츠로 편집하기 위해 분석해주세요.
+- 핵심 교육 내용은 최대한 유지
+- 20-30% 정도만 삭제 (불필요한 부분만)
+- 개념 강조를 위한 텍스트 추가 (예: "📌 개념", "💡 복습 포인트")
+- 설명을 보완하는 나레이션 추가"""
+        }
+
+        prompt = f"""{type_prompts.get(analysis_type, type_prompts["enhanced-shorts"])}
+
+자막 내용:
+{subtitle_content}
+
+다음 JSON 형식으로 분석 결과를 반환해주세요:
+{{
+    "video_type": "{analysis_type}",
+    "kept_originals": [
+        {{
+            "index": 번호,
+            "time": "시작 --> 끝",
+            "text": "자막 텍스트",
+            "reason": "유지 이유",
+            "importance": "high/medium/low"
+        }}
+    ],
+    "deletions": [
+        {{
+            "index": 번호,
+            "time": "시작 --> 끝",
+            "text": "자막 텍스트",
+            "reason": "삭제 이유",
+            "category": "반복/부연/불필요"
+        }}
+    ],
+    "text_additions": [
+        {{
+            "insert_after": 번호,
+            "estimated_time": "00:00:10",
+            "text": "추가할 텍스트",
+            "type": "후킹/챕터제목/개념정의",
+            "position": "top/center/bottom"
+        }}
+    ],
+    "narration_additions": [
+        {{
+            "insert_after": 번호,
+            "estimated_time": "00:00:10",
+            "narration": "나레이션 텍스트",
+            "type": "도입/전환/요약",
+            "tone": "흥미진진한/차분한/진지한"
+        }}
+    ],
+    "statistics": {{
+        "original_count": 전체 자막 수,
+        "kept_count": 유지 자막 수,
+        "delete_count": 삭제 자막 수,
+        "text_add_count": 텍스트 추가 수,
+        "narration_add_count": 나레이션 추가 수
+    }}
+}}"""
+
+        # API 호출
+        if model in ["sonnet", "haiku"]:
+            # Anthropic API 사용
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise HTTPException(status_code=400, detail="ANTHROPIC_API_KEY가 설정되지 않았습니다.")
+
+            client = anthropic.Anthropic(api_key=api_key)
+
+            model_name = "claude-3-5-sonnet-20241022" if model == "sonnet" else "claude-3-5-haiku-20241022"
+
+            message = client.messages.create(
+                model=model_name,
+                max_tokens=8000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = message.content[0].text.strip()
+
+        else:
+            # OpenAI API 사용
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise HTTPException(status_code=400, detail="OPENAI_API_KEY가 설정되지 않았습니다.")
+
+            client = openai.OpenAI(api_key=api_key)
+
+            model_name = "gpt-4o" if model == "gpt-4o" else "gpt-4o-mini"
+
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=8000
+            )
+
+            response_text = completion.choices[0].message.content.strip()
+
+        # JSON 파싱
+        import json
+        import re
+
+        # JSON 추출 (코드 블록 제거)
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+        if json_match:
+            response_text = json_match.group(1)
+
+        result = json.loads(response_text)
+
+        logging.info(f"AI 자막 분석 완료: {result.get('statistics', {})}")
+
+        return {
+            "success": True,
+            "result": result
+        }
+
+    except json.JSONDecodeError as e:
+        logging.error(f"JSON 파싱 오류: {e}\n응답: {response_text}")
+        raise HTTPException(status_code=500, detail=f"AI 응답 파싱 실패: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("AI 자막 분석 중 오류 발생")
+        raise HTTPException(status_code=500, detail=f"AI 자막 분석 실패: {str(e)}")
 
 
 @app.post("/api/video-analyzer/generate-title-subtitle")
