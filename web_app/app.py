@@ -948,6 +948,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 개발 환경: 정적 파일 캐시 비활성화 미들웨어
+@app.middleware("http")
+async def disable_cache_middleware(request: Request, call_next):
+    """개발 환경에서 정적 파일 캐시를 비활성화합니다."""
+    response = await call_next(request)
+
+    # 정적 파일에 대해서만 캐시 비활성화
+    if request.url.path.startswith("/static/") or request.url.path.startswith("/outputs/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+
+    return response
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/outputs", StaticFiles(directory=OUTPUT_DIR), name="outputs")
 app.mount("/youtube/download", StaticFiles(directory=DEFAULT_YTDL_OUTPUT_DIR), name="youtube_download")
