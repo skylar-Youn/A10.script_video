@@ -4807,6 +4807,15 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
                 logging.warning(f"임시 디렉토리 삭제 실패: {temp_dir}, {e}")
 
 
+def srt_time_to_seconds(srt_time: str) -> float:
+    """SRT 시간 형식 (00:00:05,000)을 초 단위로 변환"""
+    # 00:00:05,000 → 5.0
+    hours, minutes, seconds_ms = srt_time.split(':')
+    seconds, milliseconds = seconds_ms.replace(',', '.').split('.')
+    total_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(milliseconds) / 1000
+    return total_seconds
+
+
 @app.post("/api/video-analyzer/create-final-video")
 async def api_create_final_video(
     video_path: str = Form(...),
@@ -4929,6 +4938,7 @@ async def api_create_final_video(
             # ⚠️ korean, english, japanese는 SRT 자막으로 처리되므로 drawtext에서 제외
             logging.info(f"📦 받은 overlays_data: {overlays_data}")
             png_overlays = []  # PNG 오버레이 메타데이터 수집
+            overlay_drawtext = {}  # title/subtitle drawtext 필터 저장 (수직 스택 적용용)
             for overlay_key, overlay_data in overlays_data.items():
                 # korean, english, japanese는 SRT subtitles 필터로 처리되므로 건너뜀
                 if overlay_key in {"korean", "english", "japanese"}:
@@ -4946,6 +4956,8 @@ async def api_create_final_video(
                     if result:
                         _, meta = result
                         if meta and meta.get("png_path"):
+                            # 수직 스택을 위해 overlay_type 추가
+                            meta["overlay_type"] = overlay_key
                             png_overlays.append(meta)
                             logging.info(
                                 "📝 PNG 오버레이 추가: %s - 폰트크기=%spx, PNG=%s",
@@ -4967,7 +4979,14 @@ async def api_create_final_video(
                             meta.get("fontfile") or "default",
                         )
                         logging.info(f"   FFmpeg 필터: {drawtext_filter}")
-                        video_filters.append(drawtext_filter)
+                        # title/subtitle은 나중에 수직 스택 위치로 교체하기 위해 별도 저장
+                        overlay_drawtext[overlay_key] = {
+                            "filter": drawtext_filter,
+                            "meta": meta,
+                            "data": overlay_data
+                        }
+                        # ⚠️ video_filters에는 추가하지 않음 (PNG 이후에 별도로 처리)
+                        logging.info(f"📦 overlay_drawtext에만 저장 (video_filters 제외): {overlay_key}")
 
             # 3. 배너 템플릿 처리 (제목/부제목 위에 배치)
             template_type = subtitle_style_data.get("template", "classic")
@@ -5053,7 +5072,268 @@ async def api_create_final_video(
                 subtitle_files.append(("main", str(main_srt)))
                 logging.info(f"📝 메인자막 파일 생성: {main_srt}")
 
+            # 🎯 자막을 drawtext로 렌더링 (SRT 대신 제목처럼 표시)
+            # SRT 파일은 다운로드용으로만 유지
+            logging.info("🚀 [DEBUG] drawtext 자막 렌더링 시작 (수직 스택 모드)")
+            subtitle_drawtext_filters = []
+
+            # 검정바 높이 계산 (자막 위치 조정에 사용)
+            top_bar_height = 0
+            bottom_bar_height = 0
+            if black_bars_data.get("top", {}).get("enabled"):
+                top_bar_height = int(video_height * black_bars_data["top"].get("height", 15) / 100)
+            if black_bars_data.get("bottom", {}).get("enabled"):
+                bottom_bar_height = int(video_height * black_bars_data["bottom"].get("height", 15) / 100)
+
+            logging.info(f"⬛ 검정바 높이: 상단={top_bar_height}px, 하단={bottom_bar_height}px")
+
+            # FFmpeg drawtext용 텍스트 이스케이프
+            def escape_drawtext(text: str) -> str:
+                """FFmpeg drawtext 필터용 텍스트 이스케이프"""
+                # 특수 문자 이스케이프
+                text = text.replace("\\", "\\\\")  # 백슬래시
+                text = text.replace(":", "\\:")     # 콜론
+                text = text.replace("'", "\\'")     # 작은따옴표
+                text = text.replace("%", "\\%")     # 퍼센트
+                return text
+
+            # 🎯 수직 스택을 위한 모든 텍스트 정보 수집 (제목, 부제목, 자막 포함)
+            all_text_tracks = []
+            subtitle_spacing = 20  # 텍스트 사이 간격 (px)
+
+            # 1. 자막 트랙 수집 (tracks_data) - 역순으로 수집 (reversed 후 정순이 됨)
+            for track_key in ["description", "translation", "main"]:
+                track_field = f"{track_key}Subtitle"
+                if tracks_data.get(track_field, {}).get("enabled") and \
+                   tracks_data.get(track_field, {}).get("data"):
+
+                    # Canvas 스타일 정보 가져오기
+                    canvas_style = canvas_positions_data.get(track_key, {}) if canvas_positions_data else {}
+                    font_size = canvas_style.get("fontSize", 40)
+
+                    # 색상 변환 (CSS → FFmpeg)
+                    font_color = "white"
+                    color = canvas_style.get("color", "rgb(255, 255, 255)")
+                    if "rgb" in color:
+                        import re
+                        match = re.search(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', color)
+                        if match:
+                            r, g, b = match.group(1), match.group(2), match.group(3)
+                            font_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+
+                    all_text_tracks.append({
+                        "type": track_key,
+                        "layer": "subtitle",
+                        "data": tracks_data[track_field]["data"],
+                        "font_size": font_size,
+                        "font_color": font_color,
+                        "border_width": canvas_style.get("borderWidth", 3)
+                    })
+                    logging.info(f"📋 {track_key} 자막 수집: {font_size}px")
+
+            # 2. 제목/부제목 수집 (overlays_data) - 역순으로 수집 (reversed 후 title → subtitle이 됨)
+            # PNG 메타데이터도 함께 저장하여 실제 높이 사용
+            for overlay_key in ["subtitle", "title"]:
+                if overlay_key in overlays_data:
+                    overlay = overlays_data[overlay_key]
+                    if overlay and overlay.get("text"):
+                        font_size = overlay.get("fontSize", 56)
+
+                        # PNG 메타데이터에서 실제 높이 찾기
+                        png_height = None
+                        for png_meta in png_overlays:
+                            if png_meta.get("overlay_type") == overlay_key:
+                                png_height = png_meta.get("png_height")
+                                logging.info(f"📏 {overlay_key} PNG 높이 발견: {png_height}px")
+                                break
+
+                        all_text_tracks.append({
+                            "type": overlay_key,
+                            "layer": "overlay",  # PNG 또는 drawtext
+                            "font_size": font_size,
+                            "png_height": png_height,  # PNG 높이 저장
+                            "data": overlay
+                        })
+                        logging.info(f"📋 {overlay_key} 수집: {font_size}px (PNG높이={png_height}px)")
+
+            # 수직 스택 위치 계산 (상단 검정바 아래에서 시작하여 아래로 배치)
+            # 수집 순서: description, translation, main, subtitle, title
+            # reversed 후 순서: title (맨 위) → subtitle → main → translation → description (맨 아래)
+            top_bar_bottom = top_bar_height
+            current_y = top_bar_bottom + subtitle_spacing
+
+            subtitle_positions = {}
+            # 역순으로 배치 (title이 맨 위에 오도록)
+            for track_info in reversed(all_text_tracks):
+                track_type = track_info["type"]
+                font_size = track_info["font_size"]
+                png_height = track_info.get("png_height")  # PNG 높이 (있으면)
+
+                # PNG가 있으면 PNG 높이를 사용, 없으면 font_size 사용
+                if png_height:
+                    # PNG의 경우: 상단 위치에 PNG를 배치
+                    y_center = current_y + png_height // 2
+                    subtitle_positions[track_type] = y_center
+                    # 다음 텍스트는 PNG 하단 이후로 배치
+                    current_y = current_y + png_height + subtitle_spacing
+                    logging.info(f"📐 {track_type} PNG 중심 위치: {y_center}px (PNG높이: {png_height}px)")
+                else:
+                    # drawtext의 경우: 텍스트 중심 위치 계산
+                    y_center = current_y + font_size // 2
+                    subtitle_positions[track_type] = y_center
+                    # 다음 텍스트를 위해 위치 업데이트 (아래로 이동)
+                    current_y = current_y + font_size + subtitle_spacing
+                    layer_name = "제목/부제목" if track_info["layer"] == "overlay" else "자막"
+                    logging.info(f"📐 {track_type} {layer_name} 중심 위치: {y_center}px (폰트크기: {font_size}px)")
+
+            # Canvas 위치 정보에서 drawtext 파라미터 생성
+            def get_drawtext_params(sub_type: str, text: str, start_sec: float, end_sec: float):
+                """자막 타입에 맞는 drawtext 파라미터 생성"""
+
+                # 기본값 설정
+                font_size = 60
+                font_color = "white"
+                border_width = 3
+                font_file = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+
+                # Canvas 위치 정보 가져오기
+                canvas_style = canvas_positions_data.get(sub_type, {}) if canvas_positions_data else {}
+
+                if canvas_style:
+                    font_size = canvas_style.get("fontSize", font_size)
+
+                    # 색상 변환 (CSS → FFmpeg)
+                    color = canvas_style.get("color", "rgb(255, 255, 255)")
+                    if "rgb" in color:
+                        import re
+                        match = re.search(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', color)
+                        if match:
+                            r, g, b = match.group(1), match.group(2), match.group(3)
+                            font_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+
+                    border_width = canvas_style.get("borderWidth", border_width)
+
+                # Canvas yPosition이 있으면 우선 사용, 없으면 수직 스택 위치 사용
+                if canvas_style and "yPosition" in canvas_style:
+                    y_position = canvas_style["yPosition"]  # 0~1 비율
+                    y_pixel = int(video_height * y_position)
+                    logging.info(f"✅ {sub_type} Canvas yPosition 사용: {y_position:.4f} → {y_pixel}px")
+                else:
+                    # 수직 스택에서 계산된 y 위치 사용
+                    y_pixel = subtitle_positions.get(sub_type, video_height - bottom_bar_height - font_size - 20)
+                    logging.info(f"📐 {sub_type} 수직 스택 위치 사용: {y_pixel}px")
+
+                # 텍스트 이스케이프
+                escaped_text = escape_drawtext(text)
+
+                # drawtext 필터 생성
+                # y 좌표: 텍스트 중심이 y_pixel에 오도록 (text_h/2를 빼서 조정)
+                # 외부 검색 결과: text_h는 텍스트의 실제 높이 (ascent - descent)
+                return {
+                    "text": escaped_text,
+                    "fontfile": font_file,
+                    "fontsize": font_size,
+                    "fontcolor": font_color,
+                    "borderw": border_width,
+                    "bordercolor": "black",
+                    "x": "(w-text_w)/2",  # 중앙 정렬
+                    "y": f"({y_pixel}-text_h/2)",  # 텍스트 중심 기준 정렬
+                    "enable": f"between(t,{start_sec},{end_sec})"
+                }
+
+            # 각 자막 트랙의 데이터를 drawtext 필터로 변환
+            if tracks_data.get("translationSubtitle", {}).get("enabled") and \
+               tracks_data.get("translationSubtitle", {}).get("data"):
+                logging.info("🎬 주자막(translation)을 drawtext로 렌더링")
+                for sub in tracks_data["translationSubtitle"]["data"]:
+                    start_sec = srt_time_to_seconds(sub["start"])
+                    end_sec = srt_time_to_seconds(sub["end"])
+                    params = get_drawtext_params("translation", sub["text"], start_sec, end_sec)
+
+                    drawtext_filter = (
+                        f"drawtext=fontfile='{params['fontfile']}'"
+                        f":text='{params['text']}'"
+                        f":fontsize={params['fontsize']}"
+                        f":fontcolor={params['fontcolor']}"
+                        f":borderw={params['borderw']}"
+                        f":bordercolor={params['bordercolor']}"
+                        f":x={params['x']}"
+                        f":y={params['y']}"
+                        f":enable='{params['enable']}'"
+                    )
+                    subtitle_drawtext_filters.append(drawtext_filter)
+                    logging.info(f"   ✅ 주자막: {sub['text'][:30]}... ({start_sec:.1f}s-{end_sec:.1f}s)")
+
+            if tracks_data.get("descriptionSubtitle", {}).get("enabled") and \
+               tracks_data.get("descriptionSubtitle", {}).get("data"):
+                logging.info("🎬 보조자막(description)을 drawtext로 렌더링")
+                for sub in tracks_data["descriptionSubtitle"]["data"]:
+                    start_sec = srt_time_to_seconds(sub["start"])
+                    end_sec = srt_time_to_seconds(sub["end"])
+                    params = get_drawtext_params("description", sub["text"], start_sec, end_sec)
+
+                    drawtext_filter = (
+                        f"drawtext=fontfile='{params['fontfile']}'"
+                        f":text='{params['text']}'"
+                        f":fontsize={params['fontsize']}"
+                        f":fontcolor={params['fontcolor']}"
+                        f":borderw={params['borderw']}"
+                        f":bordercolor={params['bordercolor']}"
+                        f":x={params['x']}"
+                        f":y={params['y']}"
+                        f":enable='{params['enable']}'"
+                    )
+                    subtitle_drawtext_filters.append(drawtext_filter)
+                    logging.info(f"   ✅ 보조자막: {sub['text'][:30]}... ({start_sec:.1f}s-{end_sec:.1f}s)")
+
+            if tracks_data.get("mainSubtitle", {}).get("enabled") and \
+               tracks_data.get("mainSubtitle", {}).get("data"):
+                logging.info("🎬 메인자막(main)을 drawtext로 렌더링")
+                for sub in tracks_data["mainSubtitle"]["data"]:
+                    start_sec = srt_time_to_seconds(sub["start"])
+                    end_sec = srt_time_to_seconds(sub["end"])
+                    params = get_drawtext_params("main", sub["text"], start_sec, end_sec)
+
+                    drawtext_filter = (
+                        f"drawtext=fontfile='{params['fontfile']}'"
+                        f":text='{params['text']}'"
+                        f":fontsize={params['fontsize']}"
+                        f":fontcolor={params['fontcolor']}"
+                        f":borderw={params['borderw']}"
+                        f":bordercolor={params['bordercolor']}"
+                        f":x={params['x']}"
+                        f":y={params['y']}"
+                        f":enable='{params['enable']}'"
+                    )
+                    subtitle_drawtext_filters.append(drawtext_filter)
+                    logging.info(f"   ✅ 메인자막: {sub['text'][:30]}... ({start_sec:.1f}s-{end_sec:.1f}s)")
+
+            if tracks_data.get("japaneseSubtitle", {}).get("enabled") and \
+               tracks_data.get("japaneseSubtitle", {}).get("data"):
+                logging.info("🎬 일본어자막(japanese)을 drawtext로 렌더링")
+                for sub in tracks_data["japaneseSubtitle"]["data"]:
+                    start_sec = srt_time_to_seconds(sub["start"])
+                    end_sec = srt_time_to_seconds(sub["end"])
+                    params = get_drawtext_params("japanese", sub["text"], start_sec, end_sec)
+
+                    drawtext_filter = (
+                        f"drawtext=fontfile='{params['fontfile']}'"
+                        f":text='{params['text']}'"
+                        f":fontsize={params['fontsize']}"
+                        f":fontcolor={params['fontcolor']}"
+                        f":borderw={params['borderw']}"
+                        f":bordercolor={params['bordercolor']}"
+                        f":x={params['x']}"
+                        f":y={params['y']}"
+                        f":enable='{params['enable']}'"
+                    )
+                    subtitle_drawtext_filters.append(drawtext_filter)
+                    logging.info(f"   ✅ 일본어자막: {sub['text'][:30]}... ({start_sec:.1f}s-{end_sec:.1f}s)")
+
+            logging.info(f"📊 총 {len(subtitle_drawtext_filters)}개 drawtext 자막 필터 생성됨")
+
             # 자막 필터 추가 (비디오 해상도 기준으로 적절한 크기 사용)
+            # ⚠️ 아래 SRT 기반 코드는 다운로드용 파일 생성만을 위해 유지
             if subtitle_files:
                 # overlays 폰트 크기를 그대로 사용하되 안전한 범위 내로 제한
                 def adjust_subtitle_size(overlay_size):
@@ -5099,8 +5379,17 @@ async def api_create_final_video(
                 english_color = "&H00FFFFFF"  # 흰색
                 title_color = "&H00FFFFFF"  # 흰색
 
+                # 검정바 높이 계산 (자막 위치 조정에 사용)
+                top_bar_height = 0
+                bottom_bar_height = 0
+                if black_bars_data.get("top", {}).get("enabled"):
+                    top_bar_height = int(video_height * black_bars_data["top"].get("height", 15) / 100)
+                if black_bars_data.get("bottom", {}).get("enabled"):
+                    bottom_bar_height = int(video_height * black_bars_data["bottom"].get("height", 15) / 100)
+
                 logging.info(f"📏 자막 크기 조정: korean {korean_overlay_size}→{korean_font_size}, japanese {japanese_overlay_size}→{japanese_font_size}, english {english_overlay_size}→{english_font_size}, title {title_overlay_size}→{title_font_size}")
                 logging.info(f"🎨 SRT 자막 색상: 모두 흰색 (korean={korean_color}, japanese={japanese_color}, english={english_color}, title={title_color})")
+                logging.info(f"⬛ 검정바 높이: 상단={top_bar_height}px, 하단={bottom_bar_height}px")
 
                 for sub_type, sub_path in subtitle_files:
                     # 자막 파일 경로 이스케이프
@@ -5131,8 +5420,19 @@ async def api_create_final_video(
                         if canvas_positions_data and canvas_positions_data.get("translation"):
                             canvas_style = canvas_positions_data["translation"]
                             y_position = canvas_style.get("yPosition", 0.15)  # 0~1 비율
-                            margin_v = int(video_height * (1 - y_position))  # 하단에서부터의 거리
                             font_size = canvas_style.get("fontSize", korean_font_size)
+
+                            # y_position을 실제 픽셀로 변환
+                            y_pixel = int(video_height * y_position)
+
+                            # 상단 검정바 영역 안쪽이면 검정바 바로 아래로 이동
+                            if y_pixel < top_bar_height:
+                                y_pixel = top_bar_height + font_size + 20  # 검정바 + 폰트 크기 + 여유 20px
+                                logging.info(f"   📍 주자막 위치 조정: 검정바 영역({top_bar_height}px) 피해서 {y_pixel}px로 이동")
+
+                            # MarginV 계산 (하단에서부터의 거리)
+                            margin_v = video_height - y_pixel
+
                             # 색상 변환 필요시
                             if canvas_style.get("color"):
                                 primary_color = css_to_ass_color(canvas_style["color"])
@@ -5161,8 +5461,19 @@ async def api_create_final_video(
                         if canvas_positions_data and canvas_positions_data.get("description"):
                             canvas_style = canvas_positions_data["description"]
                             y_position = canvas_style.get("yPosition", 0.70)  # 0~1 비율
-                            margin_v = int(video_height * (1 - y_position))
                             font_size = canvas_style.get("fontSize", english_font_size)
+
+                            # y_position을 실제 픽셀로 변환
+                            y_pixel = int(video_height * y_position)
+
+                            # 하단 검정바 영역 안쪽이면 검정바 바로 위로 이동
+                            if y_pixel > (video_height - bottom_bar_height):
+                                y_pixel = video_height - bottom_bar_height - font_size - 20  # 검정바 위 + 여유 20px
+                                logging.info(f"   📍 보조자막 위치 조정: 검정바 영역 피해서 {y_pixel}px로 이동")
+
+                            # MarginV 계산 (하단에서부터의 거리)
+                            margin_v = video_height - y_pixel
+
                             if canvas_style.get("color"):
                                 primary_color = css_to_ass_color(canvas_style["color"])
                             if canvas_style.get("borderWidth"):
@@ -5181,8 +5492,19 @@ async def api_create_final_video(
                         if canvas_positions_data and canvas_positions_data.get("main"):
                             canvas_style = canvas_positions_data["main"]
                             y_position = canvas_style.get("yPosition", 0.85)  # 0~1 비율
-                            margin_v = int(video_height * (1 - y_position))
                             font_size = canvas_style.get("fontSize", title_font_size)
+
+                            # y_position을 실제 픽셀로 변환
+                            y_pixel = int(video_height * y_position)
+
+                            # 하단 검정바 영역 안쪽이면 검정바 바로 위로 이동
+                            if y_pixel > (video_height - bottom_bar_height):
+                                y_pixel = video_height - bottom_bar_height - font_size - 20  # 검정바 위 + 여유 20px
+                                logging.info(f"   📍 메인자막 위치 조정: 검정바 영역 피해서 {y_pixel}px로 이동")
+
+                            # MarginV 계산 (하단에서부터의 거리)
+                            margin_v = video_height - y_pixel
+
                             if canvas_style.get("color"):
                                 primary_color = css_to_ass_color(canvas_style["color"])
                             if canvas_style.get("borderWidth"):
@@ -5192,8 +5514,9 @@ async def api_create_final_video(
 
                         style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
 
-                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px, MarginV={margin_v}")
-                    video_filters.append(f"subtitles={sub_path_escaped}:force_style='{style}'")
+                    logging.info(f"📝 SRT 자막 스타일 (다운로드용만): {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px, MarginV={margin_v}")
+                    # ⚠️ SRT 자막 필터는 더 이상 사용하지 않음 (drawtext로 대체)
+                    # video_filters.append(f"subtitles={sub_path_escaped}:force_style='{style}'")
 
             # FFmpeg 명령어 구성
             cmd = ["/usr/bin/ffmpeg", "-i", str(video_file.absolute())]
@@ -5212,32 +5535,91 @@ async def api_create_final_video(
 
             # 비디오 필터 적용
             video_filter_output_label = None  # PNG 오버레이 적용 시 사용할 출력 레이블
-            if png_overlays:
-                # PNG 오버레이가 있으면 filter_complex 사용 (비디오 필터만)
+
+            # 🎯 SRT 자막 필터는 더 이상 사용하지 않음 (drawtext로 대체)
+            # subtitle_filters = [f for f in video_filters if f.startswith("subtitles=")]
+            other_filters = [f for f in video_filters if not f.startswith("subtitles=")]
+            logging.info(f"🔍 other_filters 개수: {len(other_filters)}, overlay_drawtext 개수: {len(overlay_drawtext)}")
+            logging.info(f"🔍 overlay_drawtext keys: {list(overlay_drawtext.keys())}")
+
+            if png_overlays or subtitle_drawtext_filters:
+                # PNG 오버레이 또는 drawtext 자막이 있으면 filter_complex 사용
                 filter_parts = []
 
-                # 기본 비디오 필터 적용
-                if video_filters:
-                    base_filter = ",".join(video_filters)
+                # 🎯 overlay_drawtext에서 title/subtitle 필터를 가져와서 수직 스택 위치로 업데이트
+                import re
+                overlay_drawtext_filters = []  # title/subtitle drawtext 필터 저장
+
+                for overlay_key, overlay_info in overlay_drawtext.items():
+                    if overlay_key in subtitle_positions:
+                        # 수직 스택 위치로 y 값 업데이트
+                        y_pos = subtitle_positions[overlay_key]
+                        original_filter = overlay_info["filter"]
+                        updated_filter = re.sub(r":y='clip\([^']+\)'", f":y='clip({y_pos}-text_h/2,0,{video_height}-text_h)'", original_filter)
+                        overlay_drawtext_filters.append(updated_filter)
+                        logging.info(f"🔄 {overlay_key} drawtext 수직 스택 위치로 업데이트: {y_pos}px")
+                    else:
+                        logging.info(f"⚠️ {overlay_key}가 subtitle_positions에 없어서 스킵")
+
+                logging.info(f"📋 overlay_drawtext_filters 준비 완료: {len(overlay_drawtext_filters)}개")
+
+                # 1. 다른 비디오 필터 먼저 적용 (black bar 등, title/subtitle drawtext 제외)
+                if other_filters:
+                    base_filter = ",".join(other_filters)
                     filter_parts.append(f"[0:v]{base_filter}[v0]")
                     current_input = "[v0]"
                 else:
                     current_input = "[0:v]"
 
-                # PNG 오버레이 추가
-                for idx, png_meta in enumerate(png_overlays, start=1):
-                    y_pixel = png_meta.get("y_pixel", video_height // 2)
-                    # overlay 필터: PNG를 비디오 중앙에 배치
-                    overlay_expr = f"{current_input}[{idx}:v]overlay=(W-w)/2:{y_pixel}"
-                    if idx < len(png_overlays):
+                # 2. PNG 오버레이 적용 (수직 스택 위치 사용)
+                if png_overlays:
+                    for idx, png_meta in enumerate(png_overlays, start=1):
+                        # 수직 스택에서 계산된 위치 사용 (title/subtitle)
+                        overlay_type = png_meta.get("overlay_type", "title")
+                        png_height = png_meta.get("png_height", 140)
+
+                        if overlay_type in subtitle_positions:
+                            # subtitle_positions는 PNG "중심" 위치
+                            # overlay 필터는 "상단" 위치가 필요하므로 PNG 높이의 절반을 빼줌
+                            y_center = subtitle_positions[overlay_type]
+                            y_pixel = y_center - png_height // 2
+                            logging.info(f"✨ PNG 오버레이 '{overlay_type}' 위치: 중심={y_center}px, 상단={y_pixel}px, 높이={png_height}px")
+                        else:
+                            y_pixel = png_meta.get("y_pixel", video_height // 2)
+                            logging.info(f"⚠️ PNG 오버레이 '{overlay_type}' 기본 위치 사용: {y_pixel}px")
+
+                        # overlay 필터: PNG를 비디오 중앙에 배치 (y는 PNG 상단 위치)
+                        overlay_expr = f"{current_input}[{idx}:v]overlay=(W-w)/2:{y_pixel}"
                         filter_parts.append(f"{overlay_expr}[v{idx}]")
                         current_input = f"[v{idx}]"
+
+                # 2.5. title/subtitle drawtext를 PNG 이후에 적용 (PNG 위에 표시)
+                if overlay_drawtext_filters:
+                    overlay_drawtext_chain = ",".join(overlay_drawtext_filters)
+                    # 현재 입력에 overlay drawtext 추가 (출력은 임시 레이블)
+                    filter_parts.append(f"{current_input}{overlay_drawtext_chain}[v_after_overlay]")
+                    current_input = "[v_after_overlay]"
+                    logging.info(f"🎨 title/subtitle drawtext {len(overlay_drawtext_filters)}개를 PNG 이후에 적용")
+
+                # 3. drawtext 자막 필터를 마지막에 적용 (모든 overlay 위에 표시)
+                if subtitle_drawtext_filters:
+                    # drawtext 필터들을 콤마로 연결하여 순차 적용
+                    subtitle_chain = ",".join(subtitle_drawtext_filters)
+                    filter_parts.append(f"{current_input}{subtitle_chain}[vout]")
+                    video_filter_output_label = "[vout]"
+                    logging.info(f"🎬 drawtext 자막 필터 {len(subtitle_drawtext_filters)}개 적용됨")
+                else:
+                    # 자막이 없으면 마지막 PNG 오버레이 출력을 vout으로 변경
+                    if png_overlays:
+                        last_overlay_idx = len(png_overlays)
+                        filter_parts[-1] = filter_parts[-1].replace(f"[v{last_overlay_idx}]", "[vout]")
                     else:
-                        # 마지막 오버레이
-                        filter_parts.append(f"{overlay_expr}[vout]")
-                        video_filter_output_label = "[vout]"
+                        # PNG도 없고 자막도 없으면 현재 입력을 vout으로
+                        filter_parts.append(f"{current_input}[vout]")
+                    video_filter_output_label = "[vout]"
 
                 video_filter_complex = ";".join(filter_parts)
+                logging.info(f"🎬 Filter Complex 구성: {video_filter_complex}")
                 # 오디오 필터와 결합할 수 있으므로 일단 저장만
             elif video_filters:
                 # PNG 오버레이가 없으면 기존대로 -vf 사용
