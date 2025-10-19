@@ -630,6 +630,23 @@ def _format_color_for_ffmpeg(color_hex: str, alpha: Optional[float]) -> str:
     return f"{color_hex}@{alpha_str}"
 
 
+def _srt_time_to_seconds(srt_time: str) -> float:
+    """Convert SRT time format to seconds (00:00:15,461 -> 15.461)"""
+    try:
+        # Split by colon and comma
+        parts = srt_time.replace(',', ':').split(':')
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = int(parts[2])
+        milliseconds = int(parts[3])
+
+        total_seconds = hours * 3600 + minutes * 60 + seconds + milliseconds / 1000.0
+        return total_seconds
+    except (IndexError, ValueError) as e:
+        logging.warning(f"⚠️ SRT 시간 변환 실패: {srt_time}, 에러: {e}")
+        return 0.0
+
+
 def _parse_css_length(value: Optional[str], font_size: float) -> Optional[float]:
     """Parse CSS length values (px, em, rem, %) into pixel units."""
     if not value:
@@ -4814,193 +4831,117 @@ async def api_create_final_video(
                 else:
                     logging.info("💡 배너 보조 텍스트가 비어있음 - 하단에 실시간 자막 표시")
 
-            # 4. 자막 파일 생성 (SRT 형식)
-            subtitle_files = []
+            # 4. 자막을 drawtext 필터로 추가 (제목과 동일한 렌더링 방식)
+            subtitle_drawtext_filters = []
+
+            # Canvas 위치 정보에서 폰트 크기 및 색상 추출
+            def get_subtitle_style(canvas_key, default_y_position, default_font_size, default_color="#ffffff"):
+                """Canvas 위치 정보에서 자막 스타일 추출"""
+                if canvas_positions_data and canvas_positions_data.get(canvas_key):
+                    canvas_style = canvas_positions_data[canvas_key]
+                    y_position = canvas_style.get("yPosition", default_y_position)
+                    font_size = canvas_style.get("fontSize", default_font_size)
+                    color = canvas_style.get("color", default_color)
+                    border_width = canvas_style.get("borderWidth", 3)
+                    border_color = canvas_style.get("borderColor", "#000000")
+                else:
+                    y_position = default_y_position
+                    font_size = default_font_size
+                    color = default_color
+                    border_width = 3
+                    border_color = "#000000"
+
+                return {
+                    "y_position": y_position,
+                    "font_size": font_size,
+                    "color": color,
+                    "border_width": border_width,
+                    "border_color": border_color
+                }
 
             # 주자막 (translationSubtitle)
             if tracks_data.get("translationSubtitle", {}).get("enabled") and tracks_data.get("translationSubtitle", {}).get("data"):
-                translation_srt = temp_dir / "translation.srt"
-                with open(translation_srt, "w", encoding="utf-8") as f:
-                    for idx, sub in enumerate(tracks_data["translationSubtitle"]["data"], 1):
-                        f.write(f"{idx}\n")
-                        f.write(f"{sub['start']} --> {sub['end']}\n")
-                        f.write(f"{sub['text']}\n\n")
-                subtitle_files.append(("translation", str(translation_srt)))
-                logging.info(f"📝 주자막 파일 생성: {translation_srt}")
+                style = get_subtitle_style("translation", 0.15, 36, "#ffe14d")
+                y_coord = int(video_height * style["y_position"])
 
-            # 일본어 자막 (japaneseSubtitle)
-            if tracks_data.get("japaneseSubtitle", {}).get("enabled") and tracks_data.get("japaneseSubtitle", {}).get("data"):
-                japanese_srt = temp_dir / "japanese.srt"
-                with open(japanese_srt, "w", encoding="utf-8") as f:
-                    for idx, sub in enumerate(tracks_data["japaneseSubtitle"]["data"], 1):
-                        f.write(f"{idx}\n")
-                        f.write(f"{sub['start']} --> {sub['end']}\n")
-                        f.write(f"{sub['text']}\n\n")
-                subtitle_files.append(("japanese", str(japanese_srt)))
-                logging.info(f"📝 일본어자막 파일 생성: {japanese_srt}")
+                for sub in tracks_data["translationSubtitle"]["data"]:
+                    start_time = _srt_time_to_seconds(sub['start'])
+                    end_time = _srt_time_to_seconds(sub['end'])
+                    text_escaped = escape_ffmpeg_text(sub['text'])
+
+                    # drawtext 필터 생성
+                    filter_parts = [
+                        f"text='{text_escaped}'",
+                        f"enable='between(t,{start_time},{end_time})'",
+                        f"x='(w-text_w)/2'",  # 중앙 정렬
+                        f"y='{y_coord}'",
+                        f"fontsize={style['font_size']}",
+                        "text_shaping=1",
+                        f"fontcolor={style['color']}",
+                        f"font='Noto Sans CJK KR'",
+                        f"borderw={style['border_width']}",
+                        f"bordercolor={style['border_color']}"
+                    ]
+                    subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
+
+                logging.info(f"📝 주자막 drawtext 필터 생성: {len(tracks_data['translationSubtitle']['data'])}개")
 
             # 보조자막 (descriptionSubtitle)
             if tracks_data.get("descriptionSubtitle", {}).get("enabled") and tracks_data.get("descriptionSubtitle", {}).get("data"):
-                description_srt = temp_dir / "description.srt"
-                with open(description_srt, "w", encoding="utf-8") as f:
-                    for idx, sub in enumerate(tracks_data["descriptionSubtitle"]["data"], 1):
-                        f.write(f"{idx}\n")
-                        f.write(f"{sub['start']} --> {sub['end']}\n")
-                        f.write(f"{sub['text']}\n\n")
-                subtitle_files.append(("description", str(description_srt)))
-                logging.info(f"📝 보조자막 파일 생성: {description_srt}")
+                style = get_subtitle_style("description", 0.70, 32, "#ffffff")
+                y_coord = int(video_height * style["y_position"])
+
+                for sub in tracks_data["descriptionSubtitle"]["data"]:
+                    start_time = _srt_time_to_seconds(sub['start'])
+                    end_time = _srt_time_to_seconds(sub['end'])
+                    text_escaped = escape_ffmpeg_text(sub['text'])
+
+                    filter_parts = [
+                        f"text='{text_escaped}'",
+                        f"enable='between(t,{start_time},{end_time})'",
+                        f"x='(w-text_w)/2'",
+                        f"y='{y_coord}'",
+                        f"fontsize={style['font_size']}",
+                        "text_shaping=1",
+                        f"fontcolor={style['color']}",
+                        f"font='Noto Sans CJK JP'",  # 일본어 폰트
+                        f"borderw={style['border_width']}",
+                        f"bordercolor={style['border_color']}"
+                    ]
+                    subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
+
+                logging.info(f"📝 보조자막 drawtext 필터 생성: {len(tracks_data['descriptionSubtitle']['data'])}개")
 
             # 메인자막 (mainSubtitle)
             if tracks_data.get("mainSubtitle", {}).get("enabled") and tracks_data.get("mainSubtitle", {}).get("data"):
-                main_srt = temp_dir / "main.srt"
-                with open(main_srt, "w", encoding="utf-8") as f:
-                    for idx, sub in enumerate(tracks_data["mainSubtitle"]["data"], 1):
-                        f.write(f"{idx}\n")
-                        f.write(f"{sub['start']} --> {sub['end']}\n")
-                        f.write(f"{sub['text']}\n\n")
-                subtitle_files.append(("main", str(main_srt)))
-                logging.info(f"📝 메인자막 파일 생성: {main_srt}")
+                style = get_subtitle_style("main", 0.85, 40, "#ffffff")
+                y_coord = int(video_height * style["y_position"])
 
-            # 자막 필터 추가 (비디오 해상도 기준으로 적절한 크기 사용)
-            if subtitle_files:
-                # overlays 폰트 크기를 그대로 사용하되 안전한 범위 내로 제한
-                def adjust_subtitle_size(overlay_size):
-                    # ⚠️ 웹 미리보기와 동기화: 폰트 크기 그대로 사용
-                    # 사용자가 웹 UI에서 조정한 크기를 그대로 출력에 반영
-                    adjusted = int(round(overlay_size))  # 크기 그대로 사용
-                    return max(18, min(adjusted, 120))  # 최소 18px, 최대 120px
+                for sub in tracks_data["mainSubtitle"]["data"]:
+                    start_time = _srt_time_to_seconds(sub['start'])
+                    end_time = _srt_time_to_seconds(sub['end'])
+                    text_escaped = escape_ffmpeg_text(sub['text'])
 
-                # CSS 색상을 ASS/SSA 형식(&HBBGGRR)으로 변환
-                def css_to_ass_color(css_color):
-                    """CSS color를 ASS/SSA 형식으로 변환 (BGR 순서)"""
-                    if not css_color:
-                        return "&H00FFFFFF"  # 기본: 흰색
+                    filter_parts = [
+                        f"text='{text_escaped}'",
+                        f"enable='between(t,{start_time},{end_time})'",
+                        f"x='(w-text_w)/2'",
+                        f"y='{y_coord}'",
+                        f"fontsize={style['font_size']}",
+                        "text_shaping=1",
+                        f"fontcolor={style['color']}",
+                        f"font='Noto Sans CJK KR'",
+                        f"borderw={style['border_width']}",
+                        f"bordercolor={style['border_color']}"
+                    ]
+                    subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
 
-                    # rgb(r, g, b) 형식 파싱
-                    import re
-                    match = re.search(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', css_color)
-                    if match:
-                        r, g, b = int(match.group(1)), int(match.group(2)), int(match.group(3))
-                        # ASS는 BGR 순서
-                        return f"&H00{b:02X}{g:02X}{r:02X}"
-                    return "&H00FFFFFF"
+                logging.info(f"📝 메인자막 drawtext 필터 생성: {len(tracks_data['mainSubtitle']['data'])}개")
 
-                # overlays에서 폰트 크기 및 색상 추출 (None 안전 처리)
-                korean_overlay = overlays_data.get("korean") or {}
-                japanese_overlay = overlays_data.get("japanese") or {}
-                english_overlay = overlays_data.get("english") or {}
-                title_overlay = overlays_data.get("title") or {}
-
-                korean_overlay_size = korean_overlay.get("fontSize", 64)
-                japanese_overlay_size = japanese_overlay.get("fontSize", 60)
-                english_overlay_size = english_overlay.get("fontSize", 56)
-                title_overlay_size = title_overlay.get("fontSize", 96)
-
-                korean_font_size = adjust_subtitle_size(korean_overlay_size)
-                japanese_font_size = adjust_subtitle_size(japanese_overlay_size)
-                english_font_size = adjust_subtitle_size(english_overlay_size)
-                title_font_size = adjust_subtitle_size(title_overlay_size)
-
-                # SRT 자막은 모두 흰색으로 고정
-                korean_color = "&H00FFFFFF"  # 흰색
-                japanese_color = "&H00FFFFFF"  # 흰색
-                english_color = "&H00FFFFFF"  # 흰색
-                title_color = "&H00FFFFFF"  # 흰색
-
-                logging.info(f"📏 자막 크기 조정: korean {korean_overlay_size}→{korean_font_size}, japanese {japanese_overlay_size}→{japanese_font_size}, english {english_overlay_size}→{english_font_size}, title {title_overlay_size}→{title_font_size}")
-                logging.info(f"🎨 SRT 자막 색상: 모두 흰색 (korean={korean_color}, japanese={japanese_color}, english={english_color}, title={title_color})")
-
-                for sub_type, sub_path in subtitle_files:
-                    # 자막 파일 경로 이스케이프
-                    sub_path_escaped = sub_path.replace("\\", "\\\\\\\\").replace(":", "\\:").replace("'", "\\'")
-
-                    # CJK(한글, 일본어, 중국어) 지원 폰트 사용
-                    # 자막 타입별로 적절한 폰트 선택
-                    if sub_type == "description":
-                        # description 자막은 일본어를 포함할 가능성이 높으므로 일본어 폰트 우선
-                        font_name = "Noto Sans CJK JP"
-                    elif sub_type == "japanese":
-                        # 일본어 자막은 명시적으로 일본어 폰트 사용
-                        font_name = "Noto Sans CJK JP"
-                    else:
-                        # 한국어 자막 (translation, main 등)
-                        font_name = "Noto Sans CJK KR"
-
-                    # 자막 위치 및 스타일 설정
-                    # Canvas 위치 정보 사용 (있으면 Canvas 위치, 없으면 기본값)
-                    if sub_type == "translation":
-                        # 주자막: Canvas 위치 정보 사용
-                        font_size = korean_font_size
-                        primary_color = korean_color
-                        outline_width = max(2, int(font_size * 0.06))
-
-                        # Canvas 위치 정보가 있으면 사용
-                        if canvas_positions_data and canvas_positions_data.get("translation"):
-                            canvas_style = canvas_positions_data["translation"]
-                            y_position = canvas_style.get("yPosition", 0.15)  # 0~1 비율
-                            margin_v = int(video_height * (1 - y_position))  # 하단에서부터의 거리
-                            font_size = canvas_style.get("fontSize", korean_font_size)
-                            # 색상 변환 필요시
-                            if canvas_style.get("color"):
-                                primary_color = css_to_ass_color(canvas_style["color"])
-                            if canvas_style.get("borderWidth"):
-                                outline_width = canvas_style["borderWidth"]
-                        else:
-                            margin_v = 200  # 기본값
-
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
-                    elif sub_type == "japanese":
-                        # 일본어자막: 하단에서 130px 위 (한글과 영어 사이)
-                        font_size = japanese_font_size
-                        primary_color = japanese_color
-                        outline_width = max(2, int(font_size * 0.06))
-                        margin_v = 130
-                        # 일본어 폰트 사용
-                        jp_font_name = "Noto Sans CJK JP"
-                        style = f"FontName={jp_font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
-                    elif sub_type == "description":
-                        # 보조자막: Canvas 위치 정보 사용
-                        font_size = english_font_size
-                        primary_color = english_color
-                        outline_width = max(2, int(font_size * 0.06))
-
-                        # Canvas 위치 정보가 있으면 사용
-                        if canvas_positions_data and canvas_positions_data.get("description"):
-                            canvas_style = canvas_positions_data["description"]
-                            y_position = canvas_style.get("yPosition", 0.70)  # 0~1 비율
-                            margin_v = int(video_height * (1 - y_position))
-                            font_size = canvas_style.get("fontSize", english_font_size)
-                            if canvas_style.get("color"):
-                                primary_color = css_to_ass_color(canvas_style["color"])
-                            if canvas_style.get("borderWidth"):
-                                outline_width = canvas_style["borderWidth"]
-                        else:
-                            margin_v = 60  # 기본값
-
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
-                    else:
-                        # 메인자막: Canvas 위치 정보 사용
-                        font_size = title_font_size
-                        primary_color = title_color
-                        outline_width = max(2, int(font_size * 0.06))
-
-                        # Canvas 위치 정보가 있으면 사용
-                        if canvas_positions_data and canvas_positions_data.get("main"):
-                            canvas_style = canvas_positions_data["main"]
-                            y_position = canvas_style.get("yPosition", 0.85)  # 0~1 비율
-                            margin_v = int(video_height * (1 - y_position))
-                            font_size = canvas_style.get("fontSize", title_font_size)
-                            if canvas_style.get("color"):
-                                primary_color = css_to_ass_color(canvas_style["color"])
-                            if canvas_style.get("borderWidth"):
-                                outline_width = canvas_style["borderWidth"]
-                        else:
-                            margin_v = 220  # 기본값
-
-                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
-
-                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px, MarginV={margin_v}")
-                    video_filters.append(f"subtitles={sub_path_escaped}:force_style='{style}'")
+            # 자막 필터를 video_filters에 추가
+            if subtitle_drawtext_filters:
+                video_filters.extend(subtitle_drawtext_filters)
+                logging.info(f"✅ 총 {len(subtitle_drawtext_filters)}개의 자막 drawtext 필터 추가됨")
 
             # FFmpeg 명령어 구성
             cmd = ["/usr/bin/ffmpeg", "-i", str(video_file.absolute())]
