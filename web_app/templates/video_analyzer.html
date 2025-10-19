@@ -3410,11 +3410,46 @@ async function createFinalVideo() {
             // 성공 메시지와 함께 다운로드 링크 제공
             const downloadPath = result.output_path;
             const fileName = result.file_name;
+            const subtitles = result.subtitles || {};
 
-            if (confirm(`최종 영상이 생성되었습니다!\n파일명: ${fileName}\n\n지금 다운로드하시겠습니까?`)) {
-                // 다운로드
+            // 자막 파일 정보 생성
+            let subtitleInfo = '';
+            const subtitleTypes = {
+                'translation': '주자막 (2-1)',
+                'description': '보조자막 (2-2)',
+                'japanese': '일본어자막',
+                'main': '메인자막'
+            };
+
+            if (Object.keys(subtitles).length > 0) {
+                subtitleInfo = '\n\n📝 생성된 자막 파일:\n';
+                Object.keys(subtitles).forEach(type => {
+                    const label = subtitleTypes[type] || type;
+                    subtitleInfo += `  - ${label}\n`;
+                });
+            }
+
+            if (confirm(`최종 영상이 생성되었습니다!\n파일명: ${fileName}${subtitleInfo}\n\n지금 비디오를 다운로드하시겠습니까?`)) {
+                // 비디오 다운로드
                 const encodedPath = encodeURIComponent(downloadPath);
                 window.location.href = `/api/video-analyzer/download?path=${encodedPath}`;
+
+                // 자막 파일도 다운로드
+                if (Object.keys(subtitles).length > 0) {
+                    setTimeout(() => {
+                        if (confirm('자막 파일도 다운로드하시겠습니까?')) {
+                            Object.entries(subtitles).forEach(([type, path], index) => {
+                                setTimeout(() => {
+                                    const encodedSubPath = encodeURIComponent(path);
+                                    const link = document.createElement('a');
+                                    link.href = `/api/video-analyzer/download?path=${encodedSubPath}`;
+                                    link.download = '';
+                                    link.click();
+                                }, index * 500); // 500ms 간격으로 다운로드
+                            });
+                        }
+                    }, 1000);
+                }
             }
 
             alert('최종 영상이 생성되었습니다.\n영상 목록을 새로고침하여 확인하세요.');

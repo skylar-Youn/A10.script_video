@@ -49,6 +49,9 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from PIL import ImageColor
 
+# 이모지 렌더링 모듈
+from web_app.emoji_renderer import render_emoji_text_to_png
+
 # AI Shorts Maker imports - optional module
 try:
     from ai_shorts_maker.generator import GenerationOptions, generate_short
@@ -700,6 +703,238 @@ def escape_ffmpeg_text(text: str) -> str:
     escaped = escaped.replace("[", "\\[")
     escaped = escaped.replace("]", "\\]")
     return escaped
+
+
+def _contains_emoji(text: str) -> bool:
+    """
+    텍스트에 이모지가 포함되어 있는지 확인
+
+    Args:
+        text: 확인할 텍스트
+
+    Returns:
+        bool: 이모지가 있으면 True
+    """
+    # 이모지 유니코드 범위
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # 이모티콘
+        "\U0001F300-\U0001F5FF"  # 심볼 & 픽토그램
+        "\U0001F680-\U0001F6FF"  # 교통 & 지도 심볼
+        "\U0001F1E0-\U0001F1FF"  # 국기
+        "\U00002702-\U000027B0"  # Dingbats
+        "\U000024C2-\U0001F251"  # 기타 심볼
+        "\U0001F900-\U0001F9FF"  # 추가 이모지
+        "\U0001FA70-\U0001FAFF"  # 확장 이모지
+        "\u2600-\u26FF"          # 기타 심볼
+        "\u2700-\u27BF"          # Dingbats
+        "]+",
+        flags=re.UNICODE
+    )
+    return bool(emoji_pattern.search(text))
+
+
+async def _render_subtitle_with_emoji(
+    text: str,
+    output_path: str,
+    video_width: int,
+    video_height: int,
+    font_size: int = 40,
+    font_color: str = "white",
+    outline_color: str = "black",
+    outline_width: int = 3,
+    y_position_percent: float = 0.85,
+    font_family: str = '"Noto Sans CJK JP", "Noto Color Emoji", sans-serif',
+) -> bool:
+    """
+    이모지가 포함된 자막을 PNG로 렌더링
+
+    Args:
+        text: 자막 텍스트
+        output_path: PNG 저장 경로
+        video_width: 비디오 너비
+        video_height: 비디오 높이
+        font_size: 폰트 크기
+        font_color: 텍스트 색상
+        outline_color: 외곽선 색상
+        outline_width: 외곽선 너비
+        y_position_percent: Y 위치 (0.0-1.0)
+        font_family: 폰트 패밀리
+
+    Returns:
+        bool: 성공 여부
+    """
+    try:
+        # PNG 높이는 폰트 크기의 2.5배 정도
+        png_height = int(font_size * 2.5)
+        y_pixel = int(video_height * y_position_percent)
+
+        success = await render_emoji_text_to_png(
+            text=text,
+            output_path=output_path,
+            width=video_width,
+            height=png_height,
+            font_size=font_size,
+            font_color=font_color,
+            outline_color=outline_color,
+            outline_width=outline_width,
+            x_position="center",
+            y_position="center",
+            font_family=font_family,
+        )
+
+        if success:
+            logging.info(f"✅ 이모지 자막 PNG 생성: {output_path}")
+            logging.info(f"   텍스트: {text}")
+            logging.info(f"   크기: {video_width}x{png_height}px")
+        else:
+            logging.error(f"❌ 이모지 자막 PNG 생성 실패: {output_path}")
+
+        return success
+
+    except Exception as e:
+        logging.error(f"❌ 이모지 자막 렌더링 오류: {e}", exc_info=True)
+        return False
+
+
+def _contains_emoji(text: str) -> bool:
+    """텍스트에 이모지가 포함되어 있는지 확인"""
+    if not text:
+        return False
+
+    return any(
+        '\U0001F300' <= char <= '\U0001F9FF' or  # 이모지 및 기호
+        '\U0001F600' <= char <= '\U0001F64F' or  # 감정 표현
+        '\U0001F680' <= char <= '\U0001F6FF' or  # 교통/지도
+        '\U00002600' <= char <= '\U000026FF' or  # Miscellaneous Symbols (⚔ 포함)
+        '\U00002700' <= char <= '\U000027BF' or  # Dingbats
+        '\U0001F900' <= char <= '\U0001F9FF' or  # 추가 이모지
+        '\U0001FA00' <= char <= '\U0001FAFF'     # Extended-A
+        for char in text
+    )
+
+
+async def _create_overlay_png_filter(
+    overlay: Dict[str, Any],
+    video_width: int,
+    video_height: int,
+    temp_dir: Path,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """이모지가 포함된 오버레이를 PNG로 렌더링하고 overlay 필터 생성"""
+    if not overlay or not overlay.get("text"):
+        return None
+
+    text = str(overlay.get("text", ""))
+    if not text:
+        return None
+
+    try:
+        font_size = max(12, int(round(float(overlay.get("fontSize", 48)))))
+    except (TypeError, ValueError):
+        font_size = 48
+
+    # 폰트 색상 파싱
+    font_color_raw = overlay.get("color", "#FFFFFF")
+    try:
+        if font_color_raw.startswith("#"):
+            # CSS hex color
+            font_color = font_color_raw
+        elif font_color_raw.startswith("rgb"):
+            # rgb(a) -> hex 변환
+            import re
+            rgb_match = re.match(r"rgba?\((\d+),\s*(\d+),\s*(\d+)", font_color_raw)
+            if rgb_match:
+                r, g, b = rgb_match.groups()
+                font_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+            else:
+                font_color = "#FFFFFF"
+        else:
+            font_color = "#FFFFFF"
+    except Exception:
+        font_color = "#FFFFFF"
+
+    # 외곽선 색상 (기본값: 검은색)
+    outline_color = "#000000"
+    outline_width = 3
+
+    # 위치 계산
+    def _coerce_position(value: Any, fallback: float) -> float:
+        try:
+            if value is None:
+                raise TypeError
+            return float(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    x_value = _coerce_position(overlay.get("x"), video_width / 2)
+    y_value = _coerce_position(overlay.get("y"), video_height / 2)
+
+    # y_position_percent 계산 (0.0 ~ 1.0)
+    y_position_percent = y_value / video_height if video_height > 0 else 0.5
+
+    # PNG 파일 경로
+    png_filename = f"emoji_overlay_{uuid4().hex[:8]}.png"
+    png_path = temp_dir / png_filename
+
+    # 폰트 패밀리 결정
+    overlay_type = (overlay.get("type") or "").lower()
+    if overlay_type == "japanese" or any('\u3040' <= c <= '\u309F' or '\u30A0' <= c <= '\u30FF' for c in text):
+        font_family = '"Noto Sans CJK JP", "Noto Color Emoji", sans-serif'
+    else:
+        font_family = '"Noto Sans CJK KR", "Noto Color Emoji", sans-serif'
+
+    # PNG 렌더링
+    success = await _render_subtitle_with_emoji(
+        text=text,
+        output_path=str(png_path),
+        video_width=video_width,
+        video_height=video_height,
+        font_size=font_size,
+        font_color=font_color,
+        outline_color=outline_color,
+        outline_width=outline_width,
+        y_position_percent=y_position_percent,
+        font_family=font_family,
+    )
+
+    if not success or not png_path.exists():
+        logging.error(f"❌ PNG 렌더링 실패: {png_path}")
+        return None
+
+    # overlay 필터 생성
+    # PNG를 비디오 중앙에 배치 (y 위치는 y_position_percent 기반)
+    y_pixel = int(video_height * y_position_percent)
+
+    # PNG 이미지 높이 계산 (폰트 크기의 2.5배)
+    png_height = int(font_size * 2.5)
+
+    # PNG를 이미지로 로드하고 overlay 필터 생성
+    # 형식: movie=filename:loop=0,setpts=N/FRAME_RATE/TB[png];[in][png]overlay=x:y[out]
+    # 더 간단한 방법: overlay 필터에 직접 경로 지정
+    # 참고: FFmpeg overlay 필터는 두 개의 입력 스트림이 필요하므로,
+    # PNG를 별도 입력으로 추가하는 방식을 사용합니다
+
+    # PNG 경로를 이스케이프 처리
+    escaped_png_path = str(png_path).replace("\\", "\\\\").replace(":", "\\:")
+
+    meta = {
+        "font_size": font_size,
+        "png_path": str(png_path),
+        "font_color": font_color,
+        "outline_color": outline_color,
+        "outline_width": outline_width,
+        "is_png_overlay": True,  # PNG 오버레이임을 표시
+        "y_pixel": y_pixel,
+        "png_height": png_height,
+    }
+
+    logging.info(f"✅ 이모지 PNG 오버레이 생성: {png_filename}")
+    logging.info(f"   텍스트: {text}")
+    logging.info(f"   크기: {font_size}px")
+    logging.info(f"   위치: ({x_value}, {y_value})")
+
+    # PNG 오버레이는 메타데이터만 반환 (필터는 나중에 구성)
+    return None, meta
 
 
 def _build_drawtext_filter(
@@ -4380,6 +4615,9 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
         output_name = f"{video_file.stem}_preview.mp4"
         output_path = output_dir / output_name
 
+        # 임시 디렉토리 생성 (이모지 PNG 오버레이 저장용)
+        temp_dir = Path(tempfile.mkdtemp())
+
         # 출력 파일이 이미 존재하면 고유한 이름 생성
         counter = 1
         while output_path.exists():
@@ -4414,18 +4652,37 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
             )
 
         # 2. 텍스트 오버레이 추가 (제목, 부제목, 한글 자막, 영어 자막)
+        png_overlays = []  # PNG 오버레이 메타데이터 수집
         for overlay_key, overlay_data in overlays.items():
-            result = _build_drawtext_filter(overlay_data, video_width, video_height)
-            if result:
-                drawtext_filter, meta = result
-                logging.info(
-                    "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
-                    overlay_key,
-                    meta.get("font_size"),
-                    meta.get("fontfile") or "default",
-                )
-                logging.info(f"   FFmpeg 필터: {drawtext_filter}")
-                filters.append(drawtext_filter)
+            # 이모지 감지
+            text = str(overlay_data.get("text", ""))
+            if _contains_emoji(text):
+                # 이모지가 있으면 PNG로 렌더링
+                logging.info(f"🎨 이모지 감지: PNG 렌더링 사용 - {overlay_key}")
+                result = await _create_overlay_png_filter(overlay_data, video_width, video_height, temp_dir)
+                if result:
+                    _, meta = result
+                    if meta and meta.get("png_path"):
+                        png_overlays.append(meta)
+                        logging.info(
+                            "📝 PNG 오버레이 추가: %s - 폰트크기=%spx, PNG=%s",
+                            overlay_key,
+                            meta.get("font_size"),
+                            meta.get("png_path"),
+                        )
+            else:
+                # 이모지가 없으면 기존 drawtext 사용
+                result = _build_drawtext_filter(overlay_data, video_width, video_height)
+                if result:
+                    drawtext_filter, meta = result
+                    logging.info(
+                        "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
+                        overlay_key,
+                        meta.get("font_size"),
+                        meta.get("fontfile") or "default",
+                    )
+                    logging.info(f"   FFmpeg 필터: {drawtext_filter}")
+                    filters.append(drawtext_filter)
 
         # 3. 자막 파일 추가 (있는 경우)
         if subtitle_path and Path(subtitle_path).exists():
@@ -4451,11 +4708,44 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
         cmd = [
             "/usr/bin/ffmpeg",
             "-i", str(video_file.absolute()),
-            "-y"  # 파일 덮어쓰기
         ]
 
-        # filter_complex 추가
-        if filters:
+        # PNG 오버레이가 있으면 별도 입력으로 추가
+        if png_overlays:
+            for png_meta in png_overlays:
+                cmd.extend(["-i", png_meta["png_path"]])
+
+        cmd.append("-y")  # 파일 덮어쓰기
+
+        # 필터 구성
+        if png_overlays:
+            # PNG 오버레이가 있으면 filter_complex 사용
+            filter_parts = []
+
+            # 기본 비디오 필터 적용
+            if filters:
+                base_filter = ",".join(filters)
+                filter_parts.append(f"[0:v]{base_filter}[v0]")
+                current_input = "[v0]"
+            else:
+                current_input = "[0:v]"
+
+            # PNG 오버레이 추가
+            for idx, png_meta in enumerate(png_overlays, start=1):
+                y_pixel = png_meta.get("y_pixel", video_height // 2)
+                # overlay 필터: PNG를 비디오 중앙에 배치
+                overlay_expr = f"{current_input}[{idx}:v]overlay=(W-w)/2:{y_pixel}"
+                if idx < len(png_overlays):
+                    filter_parts.append(f"{overlay_expr}[v{idx}]")
+                    current_input = f"[v{idx}]"
+                else:
+                    # 마지막 오버레이
+                    filter_parts.append(overlay_expr)
+
+            filter_complex = ";".join(filter_parts)
+            cmd.extend(["-filter_complex", filter_complex])
+        elif filters:
+            # PNG 오버레이가 없으면 기존대로 -vf 사용
             filter_string = ",".join(filters)
             cmd.extend(["-vf", filter_string])
 
@@ -4506,6 +4796,15 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
     except Exception as e:
         logging.exception("프리뷰 영상 생성 중 오류 발생")
         raise HTTPException(status_code=500, detail=f"프리뷰 영상 생성 실패: {str(e)}")
+    finally:
+        # 임시 디렉토리 정리
+        if 'temp_dir' in locals() and temp_dir and temp_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(temp_dir)
+                logging.info(f"🗑️  임시 디렉토리 삭제: {temp_dir}")
+            except Exception as e:
+                logging.warning(f"임시 디렉토리 삭제 실패: {temp_dir}, {e}")
 
 
 @app.post("/api/video-analyzer/create-final-video")
@@ -4629,6 +4928,7 @@ async def api_create_final_video(
             # 2. 제목/부제목 오버레이 먼저 추가 (배너보다 아래 레이어)
             # ⚠️ korean, english, japanese는 SRT 자막으로 처리되므로 drawtext에서 제외
             logging.info(f"📦 받은 overlays_data: {overlays_data}")
+            png_overlays = []  # PNG 오버레이 메타데이터 수집
             for overlay_key, overlay_data in overlays_data.items():
                 # korean, english, japanese는 SRT subtitles 필터로 처리되므로 건너뜀
                 if overlay_key in {"korean", "english", "japanese"}:
@@ -4636,19 +4936,38 @@ async def api_create_final_video(
                     continue
 
                 logging.info(f"🔍 처리 중인 오버레이: {overlay_key} = {overlay_data}")
-                result = _build_drawtext_filter(overlay_data, video_width, video_height)
-                if result:
-                    drawtext_filter, meta = result
-                    logging.info(
-                        "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 위치=(%s, %s), 폰트=%s",
-                        overlay_key,
-                        meta.get("font_size"),
-                        overlay_data.get("x"),
-                        overlay_data.get("y"),
-                        meta.get("fontfile") or "default",
-                    )
-                    logging.info(f"   FFmpeg 필터: {drawtext_filter}")
-                    video_filters.append(drawtext_filter)
+
+                # 이모지 감지
+                text = str(overlay_data.get("text", ""))
+                if _contains_emoji(text):
+                    # 이모지가 있으면 PNG로 렌더링
+                    logging.info(f"🎨 이모지 감지: PNG 렌더링 사용 - {overlay_key}")
+                    result = await _create_overlay_png_filter(overlay_data, video_width, video_height, temp_dir)
+                    if result:
+                        _, meta = result
+                        if meta and meta.get("png_path"):
+                            png_overlays.append(meta)
+                            logging.info(
+                                "📝 PNG 오버레이 추가: %s - 폰트크기=%spx, PNG=%s",
+                                overlay_key,
+                                meta.get("font_size"),
+                                meta.get("png_path"),
+                            )
+                else:
+                    # 이모지가 없으면 기존 drawtext 사용
+                    result = _build_drawtext_filter(overlay_data, video_width, video_height)
+                    if result:
+                        drawtext_filter, meta = result
+                        logging.info(
+                            "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 위치=(%s, %s), 폰트=%s",
+                            overlay_key,
+                            meta.get("font_size"),
+                            overlay_data.get("x"),
+                            overlay_data.get("y"),
+                            meta.get("fontfile") or "default",
+                        )
+                        logging.info(f"   FFmpeg 필터: {drawtext_filter}")
+                        video_filters.append(drawtext_filter)
 
             # 3. 배너 템플릿 처리 (제목/부제목 위에 배치)
             template_type = subtitle_style_data.get("template", "classic")
@@ -4789,15 +5108,16 @@ async def api_create_final_video(
 
                     # CJK(한글, 일본어, 중국어) 지원 폰트 사용
                     # 자막 타입별로 적절한 폰트 선택
+                    # ⚠️ 이모지 지원을 위해 Noto Color Emoji fallback 추가
                     if sub_type == "description":
                         # description 자막은 일본어를 포함할 가능성이 높으므로 일본어 폰트 우선
-                        font_name = "Noto Sans CJK JP"
+                        font_name = "Noto Sans CJK JP,Noto Color Emoji"
                     elif sub_type == "japanese":
                         # 일본어 자막은 명시적으로 일본어 폰트 사용
-                        font_name = "Noto Sans CJK JP"
+                        font_name = "Noto Sans CJK JP,Noto Color Emoji"
                     else:
                         # 한국어 자막 (translation, main 등)
-                        font_name = "Noto Sans CJK KR"
+                        font_name = "Noto Sans CJK KR,Noto Color Emoji"
 
                     # 자막 위치 및 스타일 설정
                     # Canvas 위치 정보 사용 (있으면 Canvas 위치, 없으면 기본값)
@@ -4878,14 +5198,49 @@ async def api_create_final_video(
             # FFmpeg 명령어 구성
             cmd = ["/usr/bin/ffmpeg", "-i", str(video_file.absolute())]
 
+            # PNG 오버레이가 있으면 별도 입력으로 추가
+            if png_overlays:
+                for png_meta in png_overlays:
+                    cmd.extend(["-i", png_meta["png_path"]])
+
             # 오디오 파일 입력 추가
+            audio_input_start_idx = 1 + len(png_overlays)  # PNG 오버레이 개수만큼 인덱스 조정
             for audio_input in audio_inputs:
                 cmd.extend(["-i", audio_input])
 
             cmd.append("-y")  # 파일 덮어쓰기
 
             # 비디오 필터 적용
-            if video_filters:
+            video_filter_output_label = None  # PNG 오버레이 적용 시 사용할 출력 레이블
+            if png_overlays:
+                # PNG 오버레이가 있으면 filter_complex 사용 (비디오 필터만)
+                filter_parts = []
+
+                # 기본 비디오 필터 적용
+                if video_filters:
+                    base_filter = ",".join(video_filters)
+                    filter_parts.append(f"[0:v]{base_filter}[v0]")
+                    current_input = "[v0]"
+                else:
+                    current_input = "[0:v]"
+
+                # PNG 오버레이 추가
+                for idx, png_meta in enumerate(png_overlays, start=1):
+                    y_pixel = png_meta.get("y_pixel", video_height // 2)
+                    # overlay 필터: PNG를 비디오 중앙에 배치
+                    overlay_expr = f"{current_input}[{idx}:v]overlay=(W-w)/2:{y_pixel}"
+                    if idx < len(png_overlays):
+                        filter_parts.append(f"{overlay_expr}[v{idx}]")
+                        current_input = f"[v{idx}]"
+                    else:
+                        # 마지막 오버레이
+                        filter_parts.append(f"{overlay_expr}[vout]")
+                        video_filter_output_label = "[vout]"
+
+                video_filter_complex = ";".join(filter_parts)
+                # 오디오 필터와 결합할 수 있으므로 일단 저장만
+            elif video_filters:
+                # PNG 오버레이가 없으면 기존대로 -vf 사용
                 filter_string = ",".join(video_filters)
                 cmd.extend(["-vf", filter_string])
 
@@ -4916,24 +5271,46 @@ async def api_create_final_video(
 
                 # 추가 오디오 트랙들
                 for i in range(len(audio_inputs)):
-                    audio_filter_inputs.append(f"[{i+1}:a]")
+                    input_idx = audio_input_start_idx + i
+                    audio_filter_inputs.append(f"[{input_idx}:a]")
 
                 if len(audio_filter_inputs) > 1:
                     # 여러 오디오 믹싱
                     audio_filter = f"{''.join(audio_filter_inputs)}amix=inputs={len(audio_filter_inputs)}:duration=first:dropout_transition=2[aout]"
-                    cmd.extend(["-filter_complex", audio_filter, "-map", "0:v", "-map", "[aout]"])
+
+                    # PNG 오버레이가 있으면 video_filter_complex와 결합
+                    if png_overlays:
+                        combined_filter = f"{video_filter_complex};{audio_filter}"
+                        cmd.extend(["-filter_complex", combined_filter, "-map", video_filter_output_label, "-map", "[aout]"])
+                    else:
+                        cmd.extend(["-filter_complex", audio_filter, "-map", "0:v", "-map", "[aout]"])
                 elif len(audio_filter_inputs) == 1:
                     # 단일 오디오
-                    cmd.extend(["-map", "0:v", "-map", audio_filter_inputs[0].strip("[]")])
+                    if png_overlays:
+                        cmd.extend(["-filter_complex", video_filter_complex, "-map", video_filter_output_label, "-map", audio_filter_inputs[0].strip("[]")])
+                    else:
+                        cmd.extend(["-map", "0:v", "-map", audio_filter_inputs[0].strip("[]")])
                 else:
                     # 오디오 없음
-                    cmd.extend(["-map", "0:v", "-an"])
+                    if png_overlays:
+                        cmd.extend(["-filter_complex", video_filter_complex, "-map", video_filter_output_label, "-an"])
+                    else:
+                        cmd.extend(["-map", "0:v", "-an"])
             else:
                 # 오디오 입력이 없는 경우
-                if video_track_enabled and not video_muted and video_has_audio:
-                    cmd.extend(["-map", "0:v", "-map", "0:a"])
+                if png_overlays:
+                    # PNG 오버레이가 있으면 filter_complex 사용
+                    cmd.extend(["-filter_complex", video_filter_complex, "-map", video_filter_output_label])
+                    if video_track_enabled and not video_muted and video_has_audio:
+                        cmd.extend(["-map", "0:a"])
+                    else:
+                        cmd.append("-an")
                 else:
-                    cmd.extend(["-map", "0:v", "-an"])
+                    # PNG 오버레이가 없으면 기존대로
+                    if video_track_enabled and not video_muted and video_has_audio:
+                        cmd.extend(["-map", "0:v", "-map", "0:a"])
+                    else:
+                        cmd.extend(["-map", "0:v", "-an"])
 
             # 출력 옵션
             cmd.extend([
@@ -4962,6 +5339,28 @@ async def api_create_final_video(
             if output_path.exists():
                 size_mb = output_path.stat().st_size / (1024 * 1024)
 
+                # 자막 파일들을 output_dir에 복사
+                saved_subtitles = {}
+                if subtitle_files:
+                    logging.info("📥 자막 파일들을 영구 디렉토리에 복사 중...")
+                    for sub_type, sub_path in subtitle_files:
+                        src_file = Path(sub_path)
+                        if src_file.exists():
+                            # 출력 파일명: {video_stem}_{sub_type}.srt
+                            dest_filename = f"{video_file.stem}_{sub_type}.srt"
+                            dest_path = output_dir / dest_filename
+
+                            # 파일이 이미 존재하면 고유한 이름 생성
+                            dest_counter = 1
+                            while dest_path.exists():
+                                dest_filename = f"{video_file.stem}_{sub_type}_{dest_counter}.srt"
+                                dest_path = output_dir / dest_filename
+                                dest_counter += 1
+
+                            shutil.copy2(src_file, dest_path)
+                            saved_subtitles[sub_type] = str(dest_path)
+                            logging.info(f"   ✓ {sub_type} 자막: {dest_path}")
+
                 # 총 시간 계산
                 perf_marks['total_time'] = time.time() - perf_start_total
 
@@ -4980,6 +5379,7 @@ async def api_create_final_video(
                     "output_path": str(output_path),
                     "file_name": output_name,
                     "size_mb": round(size_mb, 2),
+                    "subtitles": saved_subtitles,  # 자막 파일 경로 추가
                     "performance": {
                         "json_parsing": round(perf_marks.get('json_parsing', 0), 3),
                         "temp_dir_creation": round(perf_marks.get('temp_dir_creation', 0), 3),
