@@ -739,8 +739,8 @@ def _build_drawtext_filter(
             return fallback
 
     default_positions = {
-        "title": {"x": video_width / 2, "y": video_height * 0.82},
-        "subtitle": {"x": video_width / 2, "y": video_height * 0.9},
+        "title": {"x": video_width / 2, "y": video_height * 0.5},  # 중앙 (50%)으로 변경
+        "subtitle": {"x": video_width / 2, "y": video_height * 0.6},  # title 아래
         "korean": {"x": video_width * 0.898026, "y": video_height * 1.0},
         "english": {"x": video_width * 1.0, "y": video_height * 0.886635},
         "source": {"x": video_width / 2, "y": video_height * 0.97},
@@ -902,14 +902,17 @@ def _build_drawtext_filter(
         for char in text_raw
     )
 
-    # 이모지가 있으면 Canvas 렌더링 방식 사용 (메타데이터에 표시)
-    if has_emoji:
-        logging.info(f"🎨 이모지 감지: Canvas PNG 렌더링 방식 사용")
+    # 제목/부제목 또는 이모지가 있으면 Canvas 렌더링 방식 사용 (통일된 렌더링 품질)
+    use_canvas = has_emoji or overlay_type in {"title", "subtitle"}
+
+    if use_canvas:
+        reason = "이모지 감지" if has_emoji else f"{overlay_type} 타입"
+        logging.info(f"🎨 Canvas PNG 렌더링 방식 사용 (이유: {reason})")
         # drawtext 대신 overlay 필터를 사용할 것이므로 None 반환
         # 메타데이터에 Canvas 렌더링 정보 포함
         meta = {
             "use_canvas_rendering": True,
-            "has_emoji": True,
+            "has_emoji": has_emoji,
             "text": text_raw,
             "font_size": font_size,
             "font_color": overlay.get("color", "white"),
@@ -1023,14 +1026,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 개발 환경: 정적 파일 캐시 비활성화 미들웨어
+# 개발 환경: 정적 파일 및 HTML 캐시 비활성화 미들웨어
 @app.middleware("http")
 async def disable_cache_middleware(request: Request, call_next):
-    """개발 환경에서 정적 파일 캐시를 비활성화합니다."""
+    """개발 환경에서 정적 파일 및 HTML 페이지 캐시를 비활성화합니다."""
     response = await call_next(request)
 
-    # 정적 파일에 대해서만 캐시 비활성화
-    if request.url.path.startswith("/static/") or request.url.path.startswith("/outputs/"):
+    # 정적 파일, HTML 페이지, 출력 파일에 대해 캐시 비활성화
+    if (request.url.path.startswith("/static/") or
+        request.url.path.startswith("/outputs/") or
+        request.url.path.startswith("/video-analyzer") or
+        response.headers.get("content-type", "").startswith("text/html")):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"

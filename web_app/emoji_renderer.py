@@ -141,6 +141,7 @@ def _generate_canvas_html(
         // 텍스트 설정
         const text = `{text}`;
         ctx.font = '{font_size}px {font_family}';
+        ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         // 텍스트 크기 측정

@@ -2565,7 +2565,7 @@ let currentVideoInfo = {
     isLocal: false  // 로컬 파일인지 서버 파일인지 구분
 };
 
-function previewVideo(videoPath, videoName, directory, subtitlePath) {
+async function previewVideo(videoPath, videoName, directory, subtitlePath) {
     // 현재 영상 정보 저장
     currentVideoInfo = {
         path: videoPath,
@@ -2595,6 +2595,24 @@ function previewVideo(videoPath, videoName, directory, subtitlePath) {
         subtitleTrack.mode = 'showing';
 
         console.log('📌 제목자막 로드됨:', subtitlePath);
+
+        // 자막 파일을 loadedSubtitles에도 자동 로드
+        try {
+            const response = await fetch(`/api/video-analyzer/stream?path=${encodedSubtitlePath}`);
+            if (response.ok) {
+                const content = await response.text();
+                parseSubtitle(content, 'main');  // 제목 자막을 main 트랙에 로드
+                console.log('✅ 제목자막이 main 트랙에 자동 로드되었습니다');
+
+                // 자막 체크박스 자동 활성화
+                const mainSubtitleCheckbox = document.getElementById('track-main-subtitle-enable');
+                if (mainSubtitleCheckbox) {
+                    mainSubtitleCheckbox.checked = true;
+                }
+            }
+        } catch (error) {
+            console.error('❌ 제목자막 자동 로드 실패:', error);
+        }
     } else {
         subtitleTrack.src = '';
         subtitleTrack.default = false;
@@ -12101,7 +12119,7 @@ function syncOverlaysToCanvas() {
         canvasPreview.addOverlay({
             text: titleOverlay.textContent.trim(),
             x: canvasPreview.canvas.width / 2,
-            y: canvasPreview.canvas.height * 0.8, // 80% 위치
+            y: canvasPreview.canvas.height * 0.5, // 50% 위치 (중앙)
             fontSize: fontSize,
             color: titleStyle.color || '#ffffff',
             borderWidth: 4,
