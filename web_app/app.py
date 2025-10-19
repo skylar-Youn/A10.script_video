@@ -5571,21 +5571,25 @@ async def api_create_final_video(
                 else:
                     current_input = "[0:v]"
 
-                # 2. PNG 오버레이 적용 (수직 스택 위치 사용)
+                # 2. PNG 오버레이 적용 (Canvas 위치 우선, 없으면 수직 스택 위치 사용)
                 if png_overlays:
                     for idx, png_meta in enumerate(png_overlays, start=1):
-                        # 수직 스택에서 계산된 위치 사용 (title/subtitle)
                         overlay_type = png_meta.get("overlay_type", "title")
                         png_height = png_meta.get("png_height", 140)
 
-                        if overlay_type in subtitle_positions:
-                            # subtitle_positions는 PNG "중심" 위치
-                            # overlay 필터는 "상단" 위치가 필요하므로 PNG 높이의 절반을 빼줌
+                        # Canvas에서 설정된 y_pixel이 있으면 우선 사용
+                        if "y_pixel" in png_meta and png_meta["y_pixel"] is not None:
+                            # PNG 렌더링 시 계산된 원본 y 위치 사용 (Canvas 위치)
+                            y_center = png_meta["y_pixel"]
+                            y_pixel = y_center - png_height // 2
+                            logging.info(f"✅ PNG 오버레이 '{overlay_type}' Canvas 위치 사용: 중심={y_center}px, 상단={y_pixel}px, 높이={png_height}px")
+                        elif overlay_type in subtitle_positions:
+                            # 수직 스택에서 계산된 위치 사용
                             y_center = subtitle_positions[overlay_type]
                             y_pixel = y_center - png_height // 2
-                            logging.info(f"✨ PNG 오버레이 '{overlay_type}' 위치: 중심={y_center}px, 상단={y_pixel}px, 높이={png_height}px")
+                            logging.info(f"📐 PNG 오버레이 '{overlay_type}' 수직 스택 위치 사용: 중심={y_center}px, 상단={y_pixel}px, 높이={png_height}px")
                         else:
-                            y_pixel = png_meta.get("y_pixel", video_height // 2)
+                            y_pixel = video_height // 2
                             logging.info(f"⚠️ PNG 오버레이 '{overlay_type}' 기본 위치 사용: {y_pixel}px")
 
                         # overlay 필터: PNG를 비디오 중앙에 배치 (y는 PNG 상단 위치)
