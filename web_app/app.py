@@ -647,6 +647,76 @@ def _srt_time_to_seconds(srt_time: str) -> float:
         return 0.0
 
 
+def _get_subtitle_animation_params(effect: str, start_time: float, end_time: float,
+                                   y_coord: int, video_width: int, font_size: int):
+    """
+    자막 애니메이션 효과에 따른 파라미터 생성
+
+    Args:
+        effect: 효과 타입 ('fade', 'slide_in', 'bounce', 'scale', 'glow')
+        start_time: 자막 시작 시간 (초)
+        end_time: 자막 종료 시간 (초)
+        y_coord: Y 좌표
+        video_width: 비디오 너비
+        font_size: 기본 폰트 크기
+
+    Returns:
+        dict: x, y, alpha, fontsize 파라미터
+    """
+    params = {}
+    fade_duration = 0.3
+    anim_duration = 0.5  # 애니메이션 지속 시간
+
+    if effect == "fade":
+        # 페이드 인/아웃
+        params["x"] = "'(w-text_w)/2'"
+        params["y"] = f"'{y_coord}'"
+        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
+        params["fontsize"] = str(font_size)
+
+    elif effect == "slide_in":
+        # 왼쪽에서 슬라이드 인
+        params["x"] = f"'if(lt(t,{start_time}+{anim_duration}),-text_w+(t-{start_time})*(w+text_w)/{anim_duration},(w-text_w)/2)'"
+        params["y"] = f"'{y_coord}'"
+        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
+        params["fontsize"] = str(font_size)
+
+    elif effect == "bounce":
+        # 바운스 효과 (위에서 떨어지며 튕김)
+        bounce_height = 50
+        params["x"] = "'(w-text_w)/2'"
+        # 감쇠 바운스: abs(sin) * 감쇠 계수
+        params["y"] = f"'if(lt(t,{start_time}+{anim_duration}),{y_coord}+{bounce_height}*abs(sin((t-{start_time})*10))*(1-(t-{start_time})/{anim_duration}),{y_coord})'"
+        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
+        params["fontsize"] = str(font_size)
+
+    elif effect == "scale":
+        # 스케일 인 (작은 크기에서 확대)
+        params["x"] = "'(w-text_w)/2'"
+        params["y"] = f"'{y_coord}'"
+        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
+        params["fontsize"] = f"'if(lt(t,{start_time}+{anim_duration}),{font_size}*(t-{start_time})/{anim_duration},{font_size})'"
+
+    elif effect == "glow":
+        # 글로우는 기본 페이드 + 그림자 효과로 구현
+        params["x"] = "'(w-text_w)/2'"
+        params["y"] = f"'{y_coord}'"
+        # 맥동하는 alpha 효과
+        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},0.85+0.15*sin((t-{start_time})*5)))'"
+        params["fontsize"] = str(font_size)
+        params["shadowx"] = "2"
+        params["shadowy"] = "2"
+
+    else:
+        # 기본값 (페이드)
+        params["x"] = "'(w-text_w)/2'"
+        params["y"] = f"'{y_coord}'"
+        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
+        params["fontsize"] = str(font_size)
+
+    return params
+
+
 def _parse_css_length(value: Optional[str], font_size: float) -> Optional[float]:
     """Parse CSS length values (px, em, rem, %) into pixel units."""
     if not value:
@@ -4859,7 +4929,7 @@ async def api_create_final_video(
                     "border_color": border_color
                 }
 
-            # 주자막 (translationSubtitle)
+            # 주자막 (translationSubtitle) - 슬라이드 인 효과
             if tracks_data.get("translationSubtitle", {}).get("enabled") and tracks_data.get("translationSubtitle", {}).get("data"):
                 style = get_subtitle_style("translation", 0.15, 36, "#ffe14d")
                 y_coord = int(video_height * style["y_position"])
@@ -4869,24 +4939,36 @@ async def api_create_final_video(
                     end_time = _srt_time_to_seconds(sub['end'])
                     text_escaped = escape_ffmpeg_text(sub['text'])
 
+                    # 슬라이드 인 애니메이션 효과
+                    anim_params = _get_subtitle_animation_params(
+                        "slide_in", start_time, end_time, y_coord, video_width, style['font_size']
+                    )
+
                     # drawtext 필터 생성
                     filter_parts = [
                         f"text='{text_escaped}'",
                         f"enable='between(t,{start_time},{end_time})'",
-                        f"x='(w-text_w)/2'",  # 중앙 정렬
-                        f"y='{y_coord}'",
-                        f"fontsize={style['font_size']}",
+                        f"x={anim_params['x']}",
+                        f"y={anim_params['y']}",
+                        f"fontsize={anim_params['fontsize']}",
                         "text_shaping=1",
                         f"fontcolor={style['color']}",
+                        f"alpha={anim_params['alpha']}",
                         f"font='Noto Sans CJK KR'",
                         f"borderw={style['border_width']}",
                         f"bordercolor={style['border_color']}"
                     ]
+
+                    # 그림자 효과가 있으면 추가
+                    if "shadowx" in anim_params:
+                        filter_parts.append(f"shadowx={anim_params['shadowx']}")
+                        filter_parts.append(f"shadowy={anim_params['shadowy']}")
+
                     subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
 
-                logging.info(f"📝 주자막 drawtext 필터 생성: {len(tracks_data['translationSubtitle']['data'])}개")
+                logging.info(f"📝 주자막 drawtext 필터 생성 (슬라이드 인 효과): {len(tracks_data['translationSubtitle']['data'])}개")
 
-            # 보조자막 (descriptionSubtitle)
+            # 보조자막 (descriptionSubtitle) - 바운스 효과
             if tracks_data.get("descriptionSubtitle", {}).get("enabled") and tracks_data.get("descriptionSubtitle", {}).get("data"):
                 style = get_subtitle_style("description", 0.70, 32, "#ffffff")
                 y_coord = int(video_height * style["y_position"])
@@ -4896,23 +4978,35 @@ async def api_create_final_video(
                     end_time = _srt_time_to_seconds(sub['end'])
                     text_escaped = escape_ffmpeg_text(sub['text'])
 
+                    # 바운스 애니메이션 효과
+                    anim_params = _get_subtitle_animation_params(
+                        "bounce", start_time, end_time, y_coord, video_width, style['font_size']
+                    )
+
                     filter_parts = [
                         f"text='{text_escaped}'",
                         f"enable='between(t,{start_time},{end_time})'",
-                        f"x='(w-text_w)/2'",
-                        f"y='{y_coord}'",
-                        f"fontsize={style['font_size']}",
+                        f"x={anim_params['x']}",
+                        f"y={anim_params['y']}",
+                        f"fontsize={anim_params['fontsize']}",
                         "text_shaping=1",
                         f"fontcolor={style['color']}",
+                        f"alpha={anim_params['alpha']}",
                         f"font='Noto Sans CJK JP'",  # 일본어 폰트
                         f"borderw={style['border_width']}",
                         f"bordercolor={style['border_color']}"
                     ]
+
+                    # 그림자 효과가 있으면 추가
+                    if "shadowx" in anim_params:
+                        filter_parts.append(f"shadowx={anim_params['shadowx']}")
+                        filter_parts.append(f"shadowy={anim_params['shadowy']}")
+
                     subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
 
-                logging.info(f"📝 보조자막 drawtext 필터 생성: {len(tracks_data['descriptionSubtitle']['data'])}개")
+                logging.info(f"📝 보조자막 drawtext 필터 생성 (바운스 효과): {len(tracks_data['descriptionSubtitle']['data'])}개")
 
-            # 메인자막 (mainSubtitle)
+            # 메인자막 (mainSubtitle) - 스케일 인 효과
             if tracks_data.get("mainSubtitle", {}).get("enabled") and tracks_data.get("mainSubtitle", {}).get("data"):
                 style = get_subtitle_style("main", 0.85, 40, "#ffffff")
                 y_coord = int(video_height * style["y_position"])
@@ -4922,21 +5016,33 @@ async def api_create_final_video(
                     end_time = _srt_time_to_seconds(sub['end'])
                     text_escaped = escape_ffmpeg_text(sub['text'])
 
+                    # 스케일 인 애니메이션 효과
+                    anim_params = _get_subtitle_animation_params(
+                        "scale", start_time, end_time, y_coord, video_width, style['font_size']
+                    )
+
                     filter_parts = [
                         f"text='{text_escaped}'",
                         f"enable='between(t,{start_time},{end_time})'",
-                        f"x='(w-text_w)/2'",
-                        f"y='{y_coord}'",
-                        f"fontsize={style['font_size']}",
+                        f"x={anim_params['x']}",
+                        f"y={anim_params['y']}",
+                        f"fontsize={anim_params['fontsize']}",
                         "text_shaping=1",
                         f"fontcolor={style['color']}",
+                        f"alpha={anim_params['alpha']}",
                         f"font='Noto Sans CJK KR'",
                         f"borderw={style['border_width']}",
                         f"bordercolor={style['border_color']}"
                     ]
+
+                    # 그림자 효과가 있으면 추가
+                    if "shadowx" in anim_params:
+                        filter_parts.append(f"shadowx={anim_params['shadowx']}")
+                        filter_parts.append(f"shadowy={anim_params['shadowy']}")
+
                     subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
 
-                logging.info(f"📝 메인자막 drawtext 필터 생성: {len(tracks_data['mainSubtitle']['data'])}개")
+                logging.info(f"📝 메인자막 drawtext 필터 생성 (스케일 인 효과): {len(tracks_data['mainSubtitle']['data'])}개")
 
             # 자막 필터를 video_filters에 추가
             if subtitle_drawtext_filters:
