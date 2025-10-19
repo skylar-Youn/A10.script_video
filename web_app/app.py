@@ -5551,15 +5551,26 @@ async def api_create_final_video(
                 overlay_drawtext_filters = []  # title/subtitle drawtext 필터 저장
 
                 for overlay_key, overlay_info in overlay_drawtext.items():
-                    if overlay_key in subtitle_positions:
+                    original_filter = overlay_info["filter"]
+                    overlay_data = overlay_info.get("data", {})
+
+                    # Canvas y 위치가 있으면 우선 사용, 없으면 수직 스택 위치 사용
+                    if overlay_data and "y" in overlay_data and overlay_data["y"] is not None:
+                        # Canvas 원본 y 위치 사용
+                        canvas_y = overlay_data["y"]
+                        # 이미 원본 필터가 Canvas 위치를 사용하고 있으므로 그대로 사용
+                        overlay_drawtext_filters.append(original_filter)
+                        logging.info(f"✅ {overlay_key} drawtext Canvas 위치 사용: y={canvas_y}px (원본 필터 유지)")
+                    elif overlay_key in subtitle_positions:
                         # 수직 스택 위치로 y 값 업데이트
                         y_pos = subtitle_positions[overlay_key]
-                        original_filter = overlay_info["filter"]
                         updated_filter = re.sub(r":y='clip\([^']+\)'", f":y='clip({y_pos}-text_h/2,0,{video_height}-text_h)'", original_filter)
                         overlay_drawtext_filters.append(updated_filter)
-                        logging.info(f"🔄 {overlay_key} drawtext 수직 스택 위치로 업데이트: {y_pos}px")
+                        logging.info(f"📐 {overlay_key} drawtext 수직 스택 위치 사용: {y_pos}px")
                     else:
-                        logging.info(f"⚠️ {overlay_key}가 subtitle_positions에 없어서 스킵")
+                        # 기본값으로 원본 필터 사용
+                        overlay_drawtext_filters.append(original_filter)
+                        logging.info(f"⚠️ {overlay_key} drawtext 원본 위치 사용 (Canvas/수직스택 정보 없음)")
 
                 logging.info(f"📋 overlay_drawtext_filters 준비 완료: {len(overlay_drawtext_filters)}개")
 
