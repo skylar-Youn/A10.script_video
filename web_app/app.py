@@ -49,6 +49,9 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from PIL import ImageColor
 
+# 이모지 렌더링 모듈
+from web_app.emoji_renderer import render_emoji_text_sync
+
 # AI Shorts Maker imports - optional module
 try:
     from ai_shorts_maker.generator import GenerationOptions, generate_short
@@ -889,6 +892,38 @@ def _build_drawtext_filter(
         f"fontcolor={font_color}",
     ]
 
+    # 이모지 감지 (일반적인 이모지 유니코드 범위)
+    has_emoji = any(
+        '\U0001F300' <= char <= '\U0001F9FF' or  # 이모지 및 기호
+        '\U0001F600' <= char <= '\U0001F64F' or  # 감정 표현
+        '\U0001F680' <= char <= '\U0001F6FF' or  # 교통/지도
+        '\U00002702' <= char <= '\U000027B0' or  # 기타 기호
+        '\U0001F900' <= char <= '\U0001F9FF'     # 추가 이모지
+        for char in text_raw
+    )
+
+    # 이모지가 있으면 Canvas 렌더링 방식 사용 (메타데이터에 표시)
+    if has_emoji:
+        logging.info(f"🎨 이모지 감지: Canvas PNG 렌더링 방식 사용")
+        # drawtext 대신 overlay 필터를 사용할 것이므로 None 반환
+        # 메타데이터에 Canvas 렌더링 정보 포함
+        meta = {
+            "use_canvas_rendering": True,
+            "has_emoji": True,
+            "text": text_raw,
+            "font_size": font_size,
+            "font_color": overlay.get("color", "white"),
+            "outline_color": f"#{outline_hex[2:]}",  # 0xRRGGBB -> #RRGGBB
+            "border_width": border_width,
+            "x": x_value,
+            "y": y_value,
+            "width": video_width,
+            "height": video_height,
+            "overlay_type": overlay_type,
+        }
+        return None, meta
+
+    # 이모지 없음: 기존 drawtext 방식 사용
     if font_path:
         sanitized_font = font_path.replace("\\", "\\\\").replace(":", "\\:")
         drawtext_params.append(f"fontfile={sanitized_font}")
@@ -4393,18 +4428,47 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
             )
 
         # 2. 텍스트 오버레이 추가 (제목, 부제목, 한글 자막, 영어 자막)
+        emoji_overlay_pngs = []  # Canvas로 렌더링한 이모지 PNG 파일 목록
         for overlay_key, overlay_data in overlays.items():
             result = _build_drawtext_filter(overlay_data, video_width, video_height)
             if result:
                 drawtext_filter, meta = result
-                logging.info(
-                    "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
-                    overlay_key,
-                    meta.get("font_size"),
-                    meta.get("fontfile") or "default",
-                )
-                logging.info(f"   FFmpeg 필터: {drawtext_filter}")
-                filters.append(drawtext_filter)
+
+                # 이모지가 있는 경우 Canvas 렌더링 사용
+                if meta.get("use_canvas_rendering"):
+                    logging.info(f"🎨 Canvas 렌더링 사용: {overlay_key}")
+
+                    # PNG 파일 경로
+                    emoji_png_path = temp_dir / f"emoji_overlay_{overlay_key}_{uuid4().hex[:8]}.png"
+
+                    # Canvas로 렌더링
+                    success = render_emoji_text_sync(
+                        text=meta["text"],
+                        output_path=str(emoji_png_path),
+                        width=meta["width"],
+                        height=200,  # 텍스트 높이 (자동 조절)
+                        font_size=meta["font_size"],
+                        font_color=meta["font_color"],
+                        outline_color=meta["outline_color"],
+                        outline_width=meta["border_width"],
+                    )
+
+                    if success:
+                        emoji_overlay_pngs.append((emoji_png_path, meta))
+                        logging.info(f"✅ 이모지 PNG 생성 완료: {emoji_png_path}")
+                    else:
+                        logging.error(f"❌ 이모지 PNG 생성 실패: {overlay_key}")
+
+                # 일반 텍스트는 기존 drawtext 필터 사용
+                else:
+                    logging.info(
+                        "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
+                        overlay_key,
+                        meta.get("font_size"),
+                        meta.get("fontfile") or "default",
+                    )
+                    logging.info(f"   FFmpeg 필터: {drawtext_filter}")
+                    filters.append(drawtext_filter)
 
         # 3. 자막 파일 추가 (있는 경우)
         if subtitle_path and Path(subtitle_path).exists():
@@ -4433,8 +4497,47 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
             "-y"  # 파일 덮어쓰기
         ]
 
-        # filter_complex 추가
-        if filters:
+        # filter_complex 추가 (이모지 PNG overlay 포함)
+        if emoji_overlay_pngs:
+            # 이모지 PNG 입력 추가
+            for png_path, _ in emoji_overlay_pngs:
+                cmd.extend(["-i", str(png_path)])
+
+            # filter_complex 구성
+            # 1. drawtext 필터 적용 (있으면)
+            if filters:
+                filter_parts = [f"[0:v]{','.join(filters)}[vtxt]"]
+                current_input = "[vtxt]"
+            else:
+                current_input = "[0:v]"
+
+            # 2. 이모지 PNG overlay 적용
+            for idx, (png_path, meta) in enumerate(emoji_overlay_pngs):
+                png_input_idx = idx + 1  # 0은 비디오, 1부터 PNG
+                x = meta.get("x", meta["width"] // 2)
+                y = meta.get("y", meta["height"] - 100)
+
+                # overlay 필터: 위치 계산
+                overlay_x = f"({meta['width']}-w)/2" if x == meta["width"] // 2 else str(x)
+                overlay_y = f"{meta['height']}-h-50" if y == meta["height"] - 100 else str(y)
+
+                # 마지막 오버레이인지 확인
+                is_last = (idx == len(emoji_overlay_pngs) - 1)
+                output_label = "[vout]" if is_last else f"[v{idx+1}]"
+
+                filter_parts.append(f"{current_input}[{png_input_idx}:v]overlay=x={overlay_x}:y={overlay_y}{output_label}")
+                current_input = output_label
+
+            filter_complex = ";".join(filter_parts)
+            cmd.extend(["-filter_complex", filter_complex])
+            cmd.extend(["-map", "[vout]"])
+
+            # 오디오 매핑
+            if audio_enabled:
+                cmd.extend(["-map", "0:a"])
+
+        elif filters:
+            # 이모지 없고 일반 텍스트만 있는 경우
             filter_string = ",".join(filters)
             cmd.extend(["-vf", filter_string])
 
@@ -4443,9 +4546,15 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
             "-c:v", "libx264",
             "-preset", "medium",
             "-crf", "23",
-            "-c:a", "copy",  # 오디오는 복사
-            str(output_path)
         ])
+
+        # 오디오 옵션 (이모지가 있을 때는 위에서 이미 매핑됨)
+        if not emoji_overlay_pngs:
+            cmd.extend(["-c:a", "copy"])
+        else:
+            cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+
+        cmd.append(str(output_path))
 
         logging.info(f"🎬 FFmpeg 명령어: {' '.join(cmd)}")
 
@@ -4608,6 +4717,7 @@ async def api_create_final_video(
             # 2. 제목/부제목 오버레이 먼저 추가 (배너보다 아래 레이어)
             # ⚠️ korean, english, japanese는 SRT 자막으로 처리되므로 drawtext에서 제외
             logging.info(f"📦 받은 overlays_data: {overlays_data}")
+            emoji_overlay_data = []  # 이모지 Canvas 렌더링용 데이터 저장
             for overlay_key, overlay_data in overlays_data.items():
                 # korean, english, japanese는 SRT subtitles 필터로 처리되므로 건너뜀
                 if overlay_key in {"korean", "english", "japanese"}:
@@ -4618,6 +4728,13 @@ async def api_create_final_video(
                 result = _build_drawtext_filter(overlay_data, video_width, video_height)
                 if result:
                     drawtext_filter, meta = result
+
+                    # 이모지 Canvas 렌더링 사용 시 drawtext 필터를 추가하지 않음
+                    if meta.get("use_canvas_rendering"):
+                        logging.info(f"🎨 Canvas 렌더링 사용: {overlay_key} - 이모지 PNG로 처리")
+                        emoji_overlay_data.append((overlay_key, overlay_data, meta))
+                        continue
+
                     logging.info(
                         "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 위치=(%s, %s), 폰트=%s",
                         overlay_key,
@@ -4627,7 +4744,32 @@ async def api_create_final_video(
                         meta.get("fontfile") or "default",
                     )
                     logging.info(f"   FFmpeg 필터: {drawtext_filter}")
-                    video_filters.append(drawtext_filter)
+                    if drawtext_filter:  # None이 아닌 경우에만 추가
+                        video_filters.append(drawtext_filter)
+
+            # 2-1. 이모지 Canvas 렌더링 처리
+            emoji_png_files = []
+            if emoji_overlay_data:
+                from web_app.emoji_renderer import render_emoji_text_to_png
+                for overlay_key, overlay_data, meta in emoji_overlay_data:
+                    emoji_png_path = temp_dir / f"emoji_{overlay_key}_{uuid4().hex[:8]}.png"
+
+                    success = await render_emoji_text_to_png(
+                        text=meta["text"],
+                        output_path=str(emoji_png_path),
+                        width=meta["width"],
+                        height=200,
+                        font_size=meta["font_size"],
+                        font_color=meta["font_color"],
+                        outline_color=meta["outline_color"],
+                        outline_width=meta["border_width"],
+                    )
+
+                    if success:
+                        emoji_png_files.append((emoji_png_path, meta))
+                        logging.info(f"✅ 이모지 PNG 생성: {emoji_png_path}")
+                    else:
+                        logging.error(f"❌ 이모지 PNG 생성 실패: {overlay_key}")
 
             # 3. 배너 템플릿 처리 (제목/부제목 위에 배치)
             template_type = subtitle_style_data.get("template", "classic")
@@ -4857,14 +4999,61 @@ async def api_create_final_video(
             # FFmpeg 명령어 구성
             cmd = ["/usr/bin/ffmpeg", "-i", str(video_file.absolute())]
 
+            # 이모지 PNG 파일 입력 추가
+            if emoji_png_files:
+                for png_path, _ in emoji_png_files:
+                    cmd.extend(["-i", str(png_path)])
+
             # 오디오 파일 입력 추가
             for audio_input in audio_inputs:
                 cmd.extend(["-i", audio_input])
 
             cmd.append("-y")  # 파일 덮어쓰기
 
-            # 비디오 필터 적용
-            if video_filters:
+            # 비디오 필터 적용 (이모지 PNG overlay 포함)
+            if emoji_png_files:
+                # filter_complex 사용 (이모지 PNG overlay)
+                filter_parts = []
+
+                # 1. 기존 비디오 필터 적용 (있으면)
+                if video_filters:
+                    filter_parts.append(f"[0:v]{','.join(video_filters)}[vtxt]")
+                    current_input = "[vtxt]"
+                else:
+                    current_input = "[0:v]"
+
+                # 2. 이모지 PNG overlay 적용
+                for idx, (png_path, meta) in enumerate(emoji_png_files):
+                    png_input_idx = idx + 1  # 0은 비디오, 1부터 PNG
+                    x = meta.get("x", meta["width"] // 2)
+                    y = meta.get("y", meta["height"] - 100)
+
+                    # PNG 높이 (emoji_renderer에서 height=200으로 고정)
+                    png_height = 200
+
+                    # 오버레이 위치 계산
+                    # x: 가로 중앙 정렬
+                    overlay_x = f"({meta['width']}-w)/2"
+
+                    # y: 텍스트 중심이 지정한 y 좌표에 오도록 조정
+                    # PNG 내에서 텍스트는 중앙(textBaseline='middle')에 렌더링되므로
+                    # overlay y 좌표 = 원하는 y 좌표 - (PNG 높이 / 2)
+                    adjusted_y = y - (png_height // 2)
+                    overlay_y = str(adjusted_y)
+
+                    # 마지막 오버레이인지 확인
+                    is_last = (idx == len(emoji_png_files) - 1)
+                    output_label = "[vout]" if is_last else f"[v{idx+1}]"
+
+                    filter_parts.append(f"{current_input}[{png_input_idx}:v]overlay=x={overlay_x}:y={overlay_y}{output_label}")
+                    current_input = output_label
+
+                filter_complex = ";".join(filter_parts)
+                cmd.extend(["-filter_complex", filter_complex])
+                cmd.extend(["-map", "[vout]"])
+                logging.info(f"🎬 filter_complex: {filter_complex}")
+            elif video_filters:
+                # 이모지 없이 일반 필터만 있는 경우
                 filter_string = ",".join(video_filters)
                 cmd.extend(["-vf", filter_string])
 
@@ -4885,6 +5074,9 @@ async def api_create_final_video(
             video_track_enabled = tracks_data.get("video", {}).get("enabled", True)
             video_muted = tracks_data.get("video", {}).get("muted", False)
 
+            # 오디오 입력 인덱스 오프셋 계산 (이모지 PNG가 있으면 오프셋 추가)
+            audio_offset = len(emoji_png_files) if emoji_png_files else 0
+
             if len(audio_inputs) > 0:
                 # 오디오 입력이 있는 경우
                 audio_filter_inputs = []
@@ -4893,26 +5085,47 @@ async def api_create_final_video(
                 if video_track_enabled and not video_muted and video_has_audio:
                     audio_filter_inputs.append("[0:a]")
 
-                # 추가 오디오 트랙들
+                # 추가 오디오 트랙들 (이모지 PNG 오프셋 고려)
                 for i in range(len(audio_inputs)):
-                    audio_filter_inputs.append(f"[{i+1}:a]")
+                    audio_filter_inputs.append(f"[{i+1+audio_offset}:a]")
 
                 if len(audio_filter_inputs) > 1:
                     # 여러 오디오 믹싱
                     audio_filter = f"{''.join(audio_filter_inputs)}amix=inputs={len(audio_filter_inputs)}:duration=first:dropout_transition=2[aout]"
-                    cmd.extend(["-filter_complex", audio_filter, "-map", "0:v", "-map", "[aout]"])
+                    # 이모지 PNG가 있으면 filter_complex에 오디오 필터 추가
+                    if emoji_png_files:
+                        # 기존 filter_complex에 오디오 필터 추가
+                        existing_fc_idx = cmd.index("-filter_complex")
+                        cmd[existing_fc_idx + 1] = cmd[existing_fc_idx + 1] + ";" + audio_filter
+                        cmd.extend(["-map", "[aout]"])
+                    else:
+                        cmd.extend(["-filter_complex", audio_filter, "-map", "0:v", "-map", "[aout]"])
                 elif len(audio_filter_inputs) == 1:
                     # 단일 오디오
-                    cmd.extend(["-map", "0:v", "-map", audio_filter_inputs[0].strip("[]")])
+                    if emoji_png_files:
+                        # 비디오는 이미 [vout]으로 매핑됨
+                        cmd.extend(["-map", audio_filter_inputs[0].strip("[]")])
+                    else:
+                        cmd.extend(["-map", "0:v", "-map", audio_filter_inputs[0].strip("[]")])
                 else:
                     # 오디오 없음
-                    cmd.extend(["-map", "0:v", "-an"])
+                    if not emoji_png_files:
+                        cmd.extend(["-map", "0:v", "-an"])
+                    else:
+                        cmd.extend(["-an"])
             else:
                 # 오디오 입력이 없는 경우
-                if video_track_enabled and not video_muted and video_has_audio:
-                    cmd.extend(["-map", "0:v", "-map", "0:a"])
+                if not emoji_png_files:
+                    if video_track_enabled and not video_muted and video_has_audio:
+                        cmd.extend(["-map", "0:v", "-map", "0:a"])
+                    else:
+                        cmd.extend(["-map", "0:v", "-an"])
                 else:
-                    cmd.extend(["-map", "0:v", "-an"])
+                    # 이모지가 있으면 비디오는 이미 매핑됨
+                    if video_track_enabled and not video_muted and video_has_audio:
+                        cmd.extend(["-map", "0:a"])
+                    else:
+                        cmd.extend(["-an"])
 
             # 출력 옵션
             cmd.extend([
