@@ -49,9 +49,6 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from PIL import ImageColor
 
-# 이모지 렌더링 모듈
-from web_app.emoji_renderer import render_emoji_text_sync
-
 # AI Shorts Maker imports - optional module
 try:
     from ai_shorts_maker.generator import GenerationOptions, generate_short
@@ -630,93 +627,6 @@ def _format_color_for_ffmpeg(color_hex: str, alpha: Optional[float]) -> str:
     return f"{color_hex}@{alpha_str}"
 
 
-def _srt_time_to_seconds(srt_time: str) -> float:
-    """Convert SRT time format to seconds (00:00:15,461 -> 15.461)"""
-    try:
-        # Split by colon and comma
-        parts = srt_time.replace(',', ':').split(':')
-        hours = int(parts[0])
-        minutes = int(parts[1])
-        seconds = int(parts[2])
-        milliseconds = int(parts[3])
-
-        total_seconds = hours * 3600 + minutes * 60 + seconds + milliseconds / 1000.0
-        return total_seconds
-    except (IndexError, ValueError) as e:
-        logging.warning(f"⚠️ SRT 시간 변환 실패: {srt_time}, 에러: {e}")
-        return 0.0
-
-
-def _get_subtitle_animation_params(effect: str, start_time: float, end_time: float,
-                                   y_coord: int, video_width: int, font_size: int):
-    """
-    자막 애니메이션 효과에 따른 파라미터 생성
-
-    Args:
-        effect: 효과 타입 ('fade', 'slide_in', 'bounce', 'scale', 'glow')
-        start_time: 자막 시작 시간 (초)
-        end_time: 자막 종료 시간 (초)
-        y_coord: Y 좌표
-        video_width: 비디오 너비
-        font_size: 기본 폰트 크기
-
-    Returns:
-        dict: x, y, alpha, fontsize 파라미터
-    """
-    params = {}
-    fade_duration = 0.3
-    anim_duration = 0.5  # 애니메이션 지속 시간
-
-    if effect == "fade":
-        # 페이드 인/아웃
-        params["x"] = "'(w-text_w)/2'"
-        params["y"] = f"'{y_coord}'"
-        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
-        params["fontsize"] = str(font_size)
-
-    elif effect == "slide_in":
-        # 왼쪽에서 슬라이드 인
-        params["x"] = f"'if(lt(t,{start_time}+{anim_duration}),-text_w+(t-{start_time})*(w+text_w)/{anim_duration},(w-text_w)/2)'"
-        params["y"] = f"'{y_coord}'"
-        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
-        params["fontsize"] = str(font_size)
-
-    elif effect == "bounce":
-        # 바운스 효과 (위에서 떨어지며 튕김)
-        bounce_height = 50
-        params["x"] = "'(w-text_w)/2'"
-        # 감쇠 바운스: abs(sin) * 감쇠 계수
-        params["y"] = f"'if(lt(t,{start_time}+{anim_duration}),{y_coord}+{bounce_height}*abs(sin((t-{start_time})*10))*(1-(t-{start_time})/{anim_duration}),{y_coord})'"
-        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
-        params["fontsize"] = str(font_size)
-
-    elif effect == "scale":
-        # 스케일 인 (작은 크기에서 확대)
-        params["x"] = "'(w-text_w)/2'"
-        params["y"] = f"'{y_coord}'"
-        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
-        params["fontsize"] = f"'if(lt(t,{start_time}+{anim_duration}),{font_size}*(t-{start_time})/{anim_duration},{font_size})'"
-
-    elif effect == "glow":
-        # 글로우는 기본 페이드 + 그림자 효과로 구현
-        params["x"] = "'(w-text_w)/2'"
-        params["y"] = f"'{y_coord}'"
-        # 맥동하는 alpha 효과
-        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},0.85+0.15*sin((t-{start_time})*5)))'"
-        params["fontsize"] = str(font_size)
-        params["shadowx"] = "2"
-        params["shadowy"] = "2"
-
-    else:
-        # 기본값 (페이드)
-        params["x"] = "'(w-text_w)/2'"
-        params["y"] = f"'{y_coord}'"
-        params["alpha"] = f"'if(lt(t,{start_time}+{fade_duration}),(t-{start_time})/{fade_duration},if(gt(t,{end_time}-{fade_duration}),({end_time}-t)/{fade_duration},1))'"
-        params["fontsize"] = str(font_size)
-
-    return params
-
-
 def _parse_css_length(value: Optional[str], font_size: float) -> Optional[float]:
     """Parse CSS length values (px, em, rem, %) into pixel units."""
     if not value:
@@ -826,8 +736,8 @@ def _build_drawtext_filter(
             return fallback
 
     default_positions = {
-        "title": {"x": video_width / 2, "y": video_height * 0.5},  # 중앙 (50%)으로 변경
-        "subtitle": {"x": video_width / 2, "y": video_height * 0.6},  # title 아래
+        "title": {"x": video_width / 2, "y": video_height * 0.82},
+        "subtitle": {"x": video_width / 2, "y": video_height * 0.9},
         "korean": {"x": video_width * 0.898026, "y": video_height * 1.0},
         "english": {"x": video_width * 1.0, "y": video_height * 0.886635},
         "source": {"x": video_width / 2, "y": video_height * 0.97},
@@ -989,32 +899,18 @@ def _build_drawtext_filter(
         for char in text_raw
     )
 
-    # 제목/부제목 또는 이모지가 있으면 Canvas 렌더링 방식 사용 (통일된 렌더링 품질)
-    use_canvas = has_emoji or overlay_type in {"title", "subtitle"}
-
-    if use_canvas:
-        reason = "이모지 감지" if has_emoji else f"{overlay_type} 타입"
-        logging.info(f"🎨 Canvas PNG 렌더링 방식 사용 (이유: {reason})")
-        # drawtext 대신 overlay 필터를 사용할 것이므로 None 반환
-        # 메타데이터에 Canvas 렌더링 정보 포함
-        meta = {
-            "use_canvas_rendering": True,
-            "has_emoji": has_emoji,
-            "text": text_raw,
-            "font_size": font_size,
-            "font_color": overlay.get("color", "white"),
-            "outline_color": f"#{outline_hex[2:]}",  # 0xRRGGBB -> #RRGGBB
-            "border_width": border_width,
-            "x": x_value,
-            "y": y_value,
-            "width": video_width,
-            "height": video_height,
-            "overlay_type": overlay_type,
-        }
-        return None, meta
-
-    # 이모지 없음: 기존 drawtext 방식 사용
-    if font_path:
+    # 이모지가 있으면 fontconfig를 사용 (자동 fallback)
+    # 없으면 기존대로 fontfile 사용
+    if has_emoji and has_japanese:
+        # 일본어 + 이모지: fontconfig 사용하여 Noto Sans CJK JP + Color Emoji fallback
+        drawtext_params.append("font='Noto Sans CJK JP'")
+        logging.info(f"🎨 이모지 감지: fontconfig 사용 (Noto Sans CJK JP + emoji fallback)")
+    elif has_emoji:
+        # 이모지만: 기본 폰트 + emoji fallback
+        drawtext_params.append("font='Noto Sans'")
+        logging.info(f"🎨 이모지 감지: fontconfig 사용 (Noto Sans + emoji fallback)")
+    elif font_path:
+        # 이모지 없음: 기존대로 fontfile 사용
         sanitized_font = font_path.replace("\\", "\\\\").replace(":", "\\:")
         drawtext_params.append(f"fontfile={sanitized_font}")
 
@@ -1113,17 +1009,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 개발 환경: 정적 파일 및 HTML 캐시 비활성화 미들웨어
+# 개발 환경: 정적 파일 캐시 비활성화 미들웨어
 @app.middleware("http")
 async def disable_cache_middleware(request: Request, call_next):
-    """개발 환경에서 정적 파일 및 HTML 페이지 캐시를 비활성화합니다."""
+    """개발 환경에서 정적 파일 캐시를 비활성화합니다."""
     response = await call_next(request)
 
-    # 정적 파일, HTML 페이지, 출력 파일에 대해 캐시 비활성화
-    if (request.url.path.startswith("/static/") or
-        request.url.path.startswith("/outputs/") or
-        request.url.path.startswith("/video-analyzer") or
-        response.headers.get("content-type", "").startswith("text/html")):
+    # 정적 파일에 대해서만 캐시 비활성화
+    if request.url.path.startswith("/static/") or request.url.path.startswith("/outputs/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -4521,47 +4414,18 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
             )
 
         # 2. 텍스트 오버레이 추가 (제목, 부제목, 한글 자막, 영어 자막)
-        emoji_overlay_pngs = []  # Canvas로 렌더링한 이모지 PNG 파일 목록
         for overlay_key, overlay_data in overlays.items():
             result = _build_drawtext_filter(overlay_data, video_width, video_height)
             if result:
                 drawtext_filter, meta = result
-
-                # 이모지가 있는 경우 Canvas 렌더링 사용
-                if meta.get("use_canvas_rendering"):
-                    logging.info(f"🎨 Canvas 렌더링 사용: {overlay_key}")
-
-                    # PNG 파일 경로
-                    emoji_png_path = temp_dir / f"emoji_overlay_{overlay_key}_{uuid4().hex[:8]}.png"
-
-                    # Canvas로 렌더링
-                    success = render_emoji_text_sync(
-                        text=meta["text"],
-                        output_path=str(emoji_png_path),
-                        width=meta["width"],
-                        height=200,  # 텍스트 높이 (자동 조절)
-                        font_size=meta["font_size"],
-                        font_color=meta["font_color"],
-                        outline_color=meta["outline_color"],
-                        outline_width=meta["border_width"],
-                    )
-
-                    if success:
-                        emoji_overlay_pngs.append((emoji_png_path, meta))
-                        logging.info(f"✅ 이모지 PNG 생성 완료: {emoji_png_path}")
-                    else:
-                        logging.error(f"❌ 이모지 PNG 생성 실패: {overlay_key}")
-
-                # 일반 텍스트는 기존 drawtext 필터 사용
-                else:
-                    logging.info(
-                        "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
-                        overlay_key,
-                        meta.get("font_size"),
-                        meta.get("fontfile") or "default",
-                    )
-                    logging.info(f"   FFmpeg 필터: {drawtext_filter}")
-                    filters.append(drawtext_filter)
+                logging.info(
+                    "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 폰트=%s",
+                    overlay_key,
+                    meta.get("font_size"),
+                    meta.get("fontfile") or "default",
+                )
+                logging.info(f"   FFmpeg 필터: {drawtext_filter}")
+                filters.append(drawtext_filter)
 
         # 3. 자막 파일 추가 (있는 경우)
         if subtitle_path and Path(subtitle_path).exists():
@@ -4590,47 +4454,8 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
             "-y"  # 파일 덮어쓰기
         ]
 
-        # filter_complex 추가 (이모지 PNG overlay 포함)
-        if emoji_overlay_pngs:
-            # 이모지 PNG 입력 추가
-            for png_path, _ in emoji_overlay_pngs:
-                cmd.extend(["-i", str(png_path)])
-
-            # filter_complex 구성
-            # 1. drawtext 필터 적용 (있으면)
-            if filters:
-                filter_parts = [f"[0:v]{','.join(filters)}[vtxt]"]
-                current_input = "[vtxt]"
-            else:
-                current_input = "[0:v]"
-
-            # 2. 이모지 PNG overlay 적용
-            for idx, (png_path, meta) in enumerate(emoji_overlay_pngs):
-                png_input_idx = idx + 1  # 0은 비디오, 1부터 PNG
-                x = meta.get("x", meta["width"] // 2)
-                y = meta.get("y", meta["height"] - 100)
-
-                # overlay 필터: 위치 계산
-                overlay_x = f"({meta['width']}-w)/2" if x == meta["width"] // 2 else str(x)
-                overlay_y = f"{meta['height']}-h-50" if y == meta["height"] - 100 else str(y)
-
-                # 마지막 오버레이인지 확인
-                is_last = (idx == len(emoji_overlay_pngs) - 1)
-                output_label = "[vout]" if is_last else f"[v{idx+1}]"
-
-                filter_parts.append(f"{current_input}[{png_input_idx}:v]overlay=x={overlay_x}:y={overlay_y}{output_label}")
-                current_input = output_label
-
-            filter_complex = ";".join(filter_parts)
-            cmd.extend(["-filter_complex", filter_complex])
-            cmd.extend(["-map", "[vout]"])
-
-            # 오디오 매핑
-            if audio_enabled:
-                cmd.extend(["-map", "0:a"])
-
-        elif filters:
-            # 이모지 없고 일반 텍스트만 있는 경우
+        # filter_complex 추가
+        if filters:
             filter_string = ",".join(filters)
             cmd.extend(["-vf", filter_string])
 
@@ -4639,15 +4464,9 @@ async def api_create_preview_video(payload: Dict[str, Any] = Body(...)) -> Dict[
             "-c:v", "libx264",
             "-preset", "medium",
             "-crf", "23",
+            "-c:a", "copy",  # 오디오는 복사
+            str(output_path)
         ])
-
-        # 오디오 옵션 (이모지가 있을 때는 위에서 이미 매핑됨)
-        if not emoji_overlay_pngs:
-            cmd.extend(["-c:a", "copy"])
-        else:
-            cmd.extend(["-c:a", "aac", "-b:a", "192k"])
-
-        cmd.append(str(output_path))
 
         logging.info(f"🎬 FFmpeg 명령어: {' '.join(cmd)}")
 
@@ -4810,7 +4629,6 @@ async def api_create_final_video(
             # 2. 제목/부제목 오버레이 먼저 추가 (배너보다 아래 레이어)
             # ⚠️ korean, english, japanese는 SRT 자막으로 처리되므로 drawtext에서 제외
             logging.info(f"📦 받은 overlays_data: {overlays_data}")
-            emoji_overlay_data = []  # 이모지 Canvas 렌더링용 데이터 저장
             for overlay_key, overlay_data in overlays_data.items():
                 # korean, english, japanese는 SRT subtitles 필터로 처리되므로 건너뜀
                 if overlay_key in {"korean", "english", "japanese"}:
@@ -4821,13 +4639,6 @@ async def api_create_final_video(
                 result = _build_drawtext_filter(overlay_data, video_width, video_height)
                 if result:
                     drawtext_filter, meta = result
-
-                    # 이모지 Canvas 렌더링 사용 시 drawtext 필터를 추가하지 않음
-                    if meta.get("use_canvas_rendering"):
-                        logging.info(f"🎨 Canvas 렌더링 사용: {overlay_key} - 이모지 PNG로 처리")
-                        emoji_overlay_data.append((overlay_key, overlay_data, meta))
-                        continue
-
                     logging.info(
                         "📝 텍스트 오버레이 추가: %s - 폰트크기=%spx, 위치=(%s, %s), 폰트=%s",
                         overlay_key,
@@ -4837,32 +4648,7 @@ async def api_create_final_video(
                         meta.get("fontfile") or "default",
                     )
                     logging.info(f"   FFmpeg 필터: {drawtext_filter}")
-                    if drawtext_filter:  # None이 아닌 경우에만 추가
-                        video_filters.append(drawtext_filter)
-
-            # 2-1. 이모지 Canvas 렌더링 처리
-            emoji_png_files = []
-            if emoji_overlay_data:
-                from web_app.emoji_renderer import render_emoji_text_to_png
-                for overlay_key, overlay_data, meta in emoji_overlay_data:
-                    emoji_png_path = temp_dir / f"emoji_{overlay_key}_{uuid4().hex[:8]}.png"
-
-                    success = await render_emoji_text_to_png(
-                        text=meta["text"],
-                        output_path=str(emoji_png_path),
-                        width=meta["width"],
-                        height=200,
-                        font_size=meta["font_size"],
-                        font_color=meta["font_color"],
-                        outline_color=meta["outline_color"],
-                        outline_width=meta["border_width"],
-                    )
-
-                    if success:
-                        emoji_png_files.append((emoji_png_path, meta))
-                        logging.info(f"✅ 이모지 PNG 생성: {emoji_png_path}")
-                    else:
-                        logging.error(f"❌ 이모지 PNG 생성 실패: {overlay_key}")
+                    video_filters.append(drawtext_filter)
 
             # 3. 배너 템플릿 처리 (제목/부제목 위에 배치)
             template_type = subtitle_style_data.get("template", "classic")
@@ -4901,161 +4687,196 @@ async def api_create_final_video(
                 else:
                     logging.info("💡 배너 보조 텍스트가 비어있음 - 하단에 실시간 자막 표시")
 
-            # 4. 자막을 drawtext 필터로 추가 (제목과 동일한 렌더링 방식)
-            subtitle_drawtext_filters = []
+            # 4. 자막 파일 생성 (SRT 형식)
+            subtitle_files = []
 
-            # Canvas 위치 정보에서 폰트 크기 및 색상 추출
-            def get_subtitle_style(canvas_key, default_y_position, default_font_size, default_color="#ffffff"):
-                """Canvas 위치 정보에서 자막 스타일 추출"""
-                if canvas_positions_data and canvas_positions_data.get(canvas_key):
-                    canvas_style = canvas_positions_data[canvas_key]
-                    y_position = canvas_style.get("yPosition", default_y_position)
-                    font_size = canvas_style.get("fontSize", default_font_size)
-                    color = canvas_style.get("color", default_color)
-                    border_width = canvas_style.get("borderWidth", 3)
-                    border_color = canvas_style.get("borderColor", "#000000")
-                else:
-                    y_position = default_y_position
-                    font_size = default_font_size
-                    color = default_color
-                    border_width = 3
-                    border_color = "#000000"
-
-                return {
-                    "y_position": y_position,
-                    "font_size": font_size,
-                    "color": color,
-                    "border_width": border_width,
-                    "border_color": border_color
-                }
-
-            # 주자막 (translationSubtitle) - 슬라이드 인 효과
+            # 주자막 (translationSubtitle)
             if tracks_data.get("translationSubtitle", {}).get("enabled") and tracks_data.get("translationSubtitle", {}).get("data"):
-                style = get_subtitle_style("translation", 0.15, 36, "#ffe14d")
-                y_coord = int(video_height * style["y_position"])
+                translation_srt = temp_dir / "translation.srt"
+                with open(translation_srt, "w", encoding="utf-8") as f:
+                    for idx, sub in enumerate(tracks_data["translationSubtitle"]["data"], 1):
+                        f.write(f"{idx}\n")
+                        f.write(f"{sub['start']} --> {sub['end']}\n")
+                        f.write(f"{sub['text']}\n\n")
+                subtitle_files.append(("translation", str(translation_srt)))
+                logging.info(f"📝 주자막 파일 생성: {translation_srt}")
 
-                for sub in tracks_data["translationSubtitle"]["data"]:
-                    start_time = _srt_time_to_seconds(sub['start'])
-                    end_time = _srt_time_to_seconds(sub['end'])
-                    text_escaped = escape_ffmpeg_text(sub['text'])
+            # 일본어 자막 (japaneseSubtitle)
+            if tracks_data.get("japaneseSubtitle", {}).get("enabled") and tracks_data.get("japaneseSubtitle", {}).get("data"):
+                japanese_srt = temp_dir / "japanese.srt"
+                with open(japanese_srt, "w", encoding="utf-8") as f:
+                    for idx, sub in enumerate(tracks_data["japaneseSubtitle"]["data"], 1):
+                        f.write(f"{idx}\n")
+                        f.write(f"{sub['start']} --> {sub['end']}\n")
+                        f.write(f"{sub['text']}\n\n")
+                subtitle_files.append(("japanese", str(japanese_srt)))
+                logging.info(f"📝 일본어자막 파일 생성: {japanese_srt}")
 
-                    # 슬라이드 인 애니메이션 효과
-                    anim_params = _get_subtitle_animation_params(
-                        "slide_in", start_time, end_time, y_coord, video_width, style['font_size']
-                    )
-
-                    # drawtext 필터 생성
-                    filter_parts = [
-                        f"text='{text_escaped}'",
-                        f"enable='between(t,{start_time},{end_time})'",
-                        f"x={anim_params['x']}",
-                        f"y={anim_params['y']}",
-                        f"fontsize={anim_params['fontsize']}",
-                        "text_shaping=1",
-                        f"fontcolor={style['color']}",
-                        f"alpha={anim_params['alpha']}",
-                        f"font='Noto Sans CJK KR'",
-                        f"borderw={style['border_width']}",
-                        f"bordercolor={style['border_color']}"
-                    ]
-
-                    # 그림자 효과가 있으면 추가
-                    if "shadowx" in anim_params:
-                        filter_parts.append(f"shadowx={anim_params['shadowx']}")
-                        filter_parts.append(f"shadowy={anim_params['shadowy']}")
-
-                    subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
-
-                logging.info(f"📝 주자막 drawtext 필터 생성 (슬라이드 인 효과): {len(tracks_data['translationSubtitle']['data'])}개")
-
-            # 보조자막 (descriptionSubtitle) - 바운스 효과
+            # 보조자막 (descriptionSubtitle)
             if tracks_data.get("descriptionSubtitle", {}).get("enabled") and tracks_data.get("descriptionSubtitle", {}).get("data"):
-                style = get_subtitle_style("description", 0.70, 32, "#ffffff")
-                y_coord = int(video_height * style["y_position"])
+                description_srt = temp_dir / "description.srt"
+                with open(description_srt, "w", encoding="utf-8") as f:
+                    for idx, sub in enumerate(tracks_data["descriptionSubtitle"]["data"], 1):
+                        f.write(f"{idx}\n")
+                        f.write(f"{sub['start']} --> {sub['end']}\n")
+                        f.write(f"{sub['text']}\n\n")
+                subtitle_files.append(("description", str(description_srt)))
+                logging.info(f"📝 보조자막 파일 생성: {description_srt}")
 
-                for sub in tracks_data["descriptionSubtitle"]["data"]:
-                    start_time = _srt_time_to_seconds(sub['start'])
-                    end_time = _srt_time_to_seconds(sub['end'])
-                    text_escaped = escape_ffmpeg_text(sub['text'])
-
-                    # 바운스 애니메이션 효과
-                    anim_params = _get_subtitle_animation_params(
-                        "bounce", start_time, end_time, y_coord, video_width, style['font_size']
-                    )
-
-                    filter_parts = [
-                        f"text='{text_escaped}'",
-                        f"enable='between(t,{start_time},{end_time})'",
-                        f"x={anim_params['x']}",
-                        f"y={anim_params['y']}",
-                        f"fontsize={anim_params['fontsize']}",
-                        "text_shaping=1",
-                        f"fontcolor={style['color']}",
-                        f"alpha={anim_params['alpha']}",
-                        f"font='Noto Sans CJK JP'",  # 일본어 폰트
-                        f"borderw={style['border_width']}",
-                        f"bordercolor={style['border_color']}"
-                    ]
-
-                    # 그림자 효과가 있으면 추가
-                    if "shadowx" in anim_params:
-                        filter_parts.append(f"shadowx={anim_params['shadowx']}")
-                        filter_parts.append(f"shadowy={anim_params['shadowy']}")
-
-                    subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
-
-                logging.info(f"📝 보조자막 drawtext 필터 생성 (바운스 효과): {len(tracks_data['descriptionSubtitle']['data'])}개")
-
-            # 메인자막 (mainSubtitle) - 스케일 인 효과
+            # 메인자막 (mainSubtitle)
             if tracks_data.get("mainSubtitle", {}).get("enabled") and tracks_data.get("mainSubtitle", {}).get("data"):
-                style = get_subtitle_style("main", 0.85, 40, "#ffffff")
-                y_coord = int(video_height * style["y_position"])
+                main_srt = temp_dir / "main.srt"
+                with open(main_srt, "w", encoding="utf-8") as f:
+                    for idx, sub in enumerate(tracks_data["mainSubtitle"]["data"], 1):
+                        f.write(f"{idx}\n")
+                        f.write(f"{sub['start']} --> {sub['end']}\n")
+                        f.write(f"{sub['text']}\n\n")
+                subtitle_files.append(("main", str(main_srt)))
+                logging.info(f"📝 메인자막 파일 생성: {main_srt}")
 
-                for sub in tracks_data["mainSubtitle"]["data"]:
-                    start_time = _srt_time_to_seconds(sub['start'])
-                    end_time = _srt_time_to_seconds(sub['end'])
-                    text_escaped = escape_ffmpeg_text(sub['text'])
+            # 자막 필터 추가 (비디오 해상도 기준으로 적절한 크기 사용)
+            if subtitle_files:
+                # overlays 폰트 크기를 그대로 사용하되 안전한 범위 내로 제한
+                def adjust_subtitle_size(overlay_size):
+                    # ⚠️ 웹 미리보기와 동기화: 폰트 크기 그대로 사용
+                    # 사용자가 웹 UI에서 조정한 크기를 그대로 출력에 반영
+                    adjusted = int(round(overlay_size))  # 크기 그대로 사용
+                    return max(18, min(adjusted, 120))  # 최소 18px, 최대 120px
 
-                    # 스케일 인 애니메이션 효과
-                    anim_params = _get_subtitle_animation_params(
-                        "scale", start_time, end_time, y_coord, video_width, style['font_size']
-                    )
+                # CSS 색상을 ASS/SSA 형식(&HBBGGRR)으로 변환
+                def css_to_ass_color(css_color):
+                    """CSS color를 ASS/SSA 형식으로 변환 (BGR 순서)"""
+                    if not css_color:
+                        return "&H00FFFFFF"  # 기본: 흰색
 
-                    filter_parts = [
-                        f"text='{text_escaped}'",
-                        f"enable='between(t,{start_time},{end_time})'",
-                        f"x={anim_params['x']}",
-                        f"y={anim_params['y']}",
-                        f"fontsize={anim_params['fontsize']}",
-                        "text_shaping=1",
-                        f"fontcolor={style['color']}",
-                        f"alpha={anim_params['alpha']}",
-                        f"font='Noto Sans CJK KR'",
-                        f"borderw={style['border_width']}",
-                        f"bordercolor={style['border_color']}"
-                    ]
+                    # rgb(r, g, b) 형식 파싱
+                    import re
+                    match = re.search(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', css_color)
+                    if match:
+                        r, g, b = int(match.group(1)), int(match.group(2)), int(match.group(3))
+                        # ASS는 BGR 순서
+                        return f"&H00{b:02X}{g:02X}{r:02X}"
+                    return "&H00FFFFFF"
 
-                    # 그림자 효과가 있으면 추가
-                    if "shadowx" in anim_params:
-                        filter_parts.append(f"shadowx={anim_params['shadowx']}")
-                        filter_parts.append(f"shadowy={anim_params['shadowy']}")
+                # overlays에서 폰트 크기 및 색상 추출 (None 안전 처리)
+                korean_overlay = overlays_data.get("korean") or {}
+                japanese_overlay = overlays_data.get("japanese") or {}
+                english_overlay = overlays_data.get("english") or {}
+                title_overlay = overlays_data.get("title") or {}
 
-                    subtitle_drawtext_filters.append("drawtext=" + ":".join(filter_parts))
+                korean_overlay_size = korean_overlay.get("fontSize", 64)
+                japanese_overlay_size = japanese_overlay.get("fontSize", 60)
+                english_overlay_size = english_overlay.get("fontSize", 56)
+                title_overlay_size = title_overlay.get("fontSize", 96)
 
-                logging.info(f"📝 메인자막 drawtext 필터 생성 (스케일 인 효과): {len(tracks_data['mainSubtitle']['data'])}개")
+                korean_font_size = adjust_subtitle_size(korean_overlay_size)
+                japanese_font_size = adjust_subtitle_size(japanese_overlay_size)
+                english_font_size = adjust_subtitle_size(english_overlay_size)
+                title_font_size = adjust_subtitle_size(title_overlay_size)
 
-            # 자막 필터를 video_filters에 추가
-            if subtitle_drawtext_filters:
-                video_filters.extend(subtitle_drawtext_filters)
-                logging.info(f"✅ 총 {len(subtitle_drawtext_filters)}개의 자막 drawtext 필터 추가됨")
+                # SRT 자막은 모두 흰색으로 고정
+                korean_color = "&H00FFFFFF"  # 흰색
+                japanese_color = "&H00FFFFFF"  # 흰색
+                english_color = "&H00FFFFFF"  # 흰색
+                title_color = "&H00FFFFFF"  # 흰색
+
+                logging.info(f"📏 자막 크기 조정: korean {korean_overlay_size}→{korean_font_size}, japanese {japanese_overlay_size}→{japanese_font_size}, english {english_overlay_size}→{english_font_size}, title {title_overlay_size}→{title_font_size}")
+                logging.info(f"🎨 SRT 자막 색상: 모두 흰색 (korean={korean_color}, japanese={japanese_color}, english={english_color}, title={title_color})")
+
+                for sub_type, sub_path in subtitle_files:
+                    # 자막 파일 경로 이스케이프
+                    sub_path_escaped = sub_path.replace("\\", "\\\\\\\\").replace(":", "\\:").replace("'", "\\'")
+
+                    # CJK(한글, 일본어, 중국어) 지원 폰트 사용
+                    # 자막 타입별로 적절한 폰트 선택
+                    if sub_type == "description":
+                        # description 자막은 일본어를 포함할 가능성이 높으므로 일본어 폰트 우선
+                        font_name = "Noto Sans CJK JP"
+                    elif sub_type == "japanese":
+                        # 일본어 자막은 명시적으로 일본어 폰트 사용
+                        font_name = "Noto Sans CJK JP"
+                    else:
+                        # 한국어 자막 (translation, main 등)
+                        font_name = "Noto Sans CJK KR"
+
+                    # 자막 위치 및 스타일 설정
+                    # Canvas 위치 정보 사용 (있으면 Canvas 위치, 없으면 기본값)
+                    if sub_type == "translation":
+                        # 주자막: Canvas 위치 정보 사용
+                        font_size = korean_font_size
+                        primary_color = korean_color
+                        outline_width = max(2, int(font_size * 0.06))
+
+                        # Canvas 위치 정보가 있으면 사용
+                        if canvas_positions_data and canvas_positions_data.get("translation"):
+                            canvas_style = canvas_positions_data["translation"]
+                            y_position = canvas_style.get("yPosition", 0.15)  # 0~1 비율
+                            margin_v = int(video_height * (1 - y_position))  # 하단에서부터의 거리
+                            font_size = canvas_style.get("fontSize", korean_font_size)
+                            # 색상 변환 필요시
+                            if canvas_style.get("color"):
+                                primary_color = css_to_ass_color(canvas_style["color"])
+                            if canvas_style.get("borderWidth"):
+                                outline_width = canvas_style["borderWidth"]
+                        else:
+                            margin_v = 200  # 기본값
+
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
+                    elif sub_type == "japanese":
+                        # 일본어자막: 하단에서 130px 위 (한글과 영어 사이)
+                        font_size = japanese_font_size
+                        primary_color = japanese_color
+                        outline_width = max(2, int(font_size * 0.06))
+                        margin_v = 130
+                        # 일본어 폰트 사용
+                        jp_font_name = "Noto Sans CJK JP"
+                        style = f"FontName={jp_font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
+                    elif sub_type == "description":
+                        # 보조자막: Canvas 위치 정보 사용
+                        font_size = english_font_size
+                        primary_color = english_color
+                        outline_width = max(2, int(font_size * 0.06))
+
+                        # Canvas 위치 정보가 있으면 사용
+                        if canvas_positions_data and canvas_positions_data.get("description"):
+                            canvas_style = canvas_positions_data["description"]
+                            y_position = canvas_style.get("yPosition", 0.70)  # 0~1 비율
+                            margin_v = int(video_height * (1 - y_position))
+                            font_size = canvas_style.get("fontSize", english_font_size)
+                            if canvas_style.get("color"):
+                                primary_color = css_to_ass_color(canvas_style["color"])
+                            if canvas_style.get("borderWidth"):
+                                outline_width = canvas_style["borderWidth"]
+                        else:
+                            margin_v = 60  # 기본값
+
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
+                    else:
+                        # 메인자막: Canvas 위치 정보 사용
+                        font_size = title_font_size
+                        primary_color = title_color
+                        outline_width = max(2, int(font_size * 0.06))
+
+                        # Canvas 위치 정보가 있으면 사용
+                        if canvas_positions_data and canvas_positions_data.get("main"):
+                            canvas_style = canvas_positions_data["main"]
+                            y_position = canvas_style.get("yPosition", 0.85)  # 0~1 비율
+                            margin_v = int(video_height * (1 - y_position))
+                            font_size = canvas_style.get("fontSize", title_font_size)
+                            if canvas_style.get("color"):
+                                primary_color = css_to_ass_color(canvas_style["color"])
+                            if canvas_style.get("borderWidth"):
+                                outline_width = canvas_style["borderWidth"]
+                        else:
+                            margin_v = 220  # 기본값
+
+                        style = f"FontName={font_name},FontSize={font_size},PrimaryColour={primary_color},OutlineColour=&H000000,BorderStyle=1,Outline={outline_width},Shadow=1,Alignment=2,MarginV={margin_v}"
+
+                    logging.info(f"📝 SRT 자막 스타일: {sub_type} - 폰트={font_name} {font_size}px, 색상={primary_color}, 외곽선={outline_width}px, MarginV={margin_v}")
+                    video_filters.append(f"subtitles={sub_path_escaped}:force_style='{style}'")
 
             # FFmpeg 명령어 구성
             cmd = ["/usr/bin/ffmpeg", "-i", str(video_file.absolute())]
-
-            # 이모지 PNG 파일 입력 추가
-            if emoji_png_files:
-                for png_path, _ in emoji_png_files:
-                    cmd.extend(["-i", str(png_path)])
 
             # 오디오 파일 입력 추가
             for audio_input in audio_inputs:
@@ -5063,50 +4884,8 @@ async def api_create_final_video(
 
             cmd.append("-y")  # 파일 덮어쓰기
 
-            # 비디오 필터 적용 (이모지 PNG overlay 포함)
-            if emoji_png_files:
-                # filter_complex 사용 (이모지 PNG overlay)
-                filter_parts = []
-
-                # 1. 기존 비디오 필터 적용 (있으면)
-                if video_filters:
-                    filter_parts.append(f"[0:v]{','.join(video_filters)}[vtxt]")
-                    current_input = "[vtxt]"
-                else:
-                    current_input = "[0:v]"
-
-                # 2. 이모지 PNG overlay 적용
-                for idx, (png_path, meta) in enumerate(emoji_png_files):
-                    png_input_idx = idx + 1  # 0은 비디오, 1부터 PNG
-                    x = meta.get("x", meta["width"] // 2)
-                    y = meta.get("y", meta["height"] - 100)
-
-                    # PNG 높이 (emoji_renderer에서 height=200으로 고정)
-                    png_height = 200
-
-                    # 오버레이 위치 계산
-                    # x: 가로 중앙 정렬
-                    overlay_x = f"({meta['width']}-w)/2"
-
-                    # y: 텍스트 중심이 지정한 y 좌표에 오도록 조정
-                    # PNG 내에서 텍스트는 중앙(textBaseline='middle')에 렌더링되므로
-                    # overlay y 좌표 = 원하는 y 좌표 - (PNG 높이 / 2)
-                    adjusted_y = y - (png_height // 2)
-                    overlay_y = str(adjusted_y)
-
-                    # 마지막 오버레이인지 확인
-                    is_last = (idx == len(emoji_png_files) - 1)
-                    output_label = "[vout]" if is_last else f"[v{idx+1}]"
-
-                    filter_parts.append(f"{current_input}[{png_input_idx}:v]overlay=x={overlay_x}:y={overlay_y}{output_label}")
-                    current_input = output_label
-
-                filter_complex = ";".join(filter_parts)
-                cmd.extend(["-filter_complex", filter_complex])
-                cmd.extend(["-map", "[vout]"])
-                logging.info(f"🎬 filter_complex: {filter_complex}")
-            elif video_filters:
-                # 이모지 없이 일반 필터만 있는 경우
+            # 비디오 필터 적용
+            if video_filters:
                 filter_string = ",".join(video_filters)
                 cmd.extend(["-vf", filter_string])
 
@@ -5127,9 +4906,6 @@ async def api_create_final_video(
             video_track_enabled = tracks_data.get("video", {}).get("enabled", True)
             video_muted = tracks_data.get("video", {}).get("muted", False)
 
-            # 오디오 입력 인덱스 오프셋 계산 (이모지 PNG가 있으면 오프셋 추가)
-            audio_offset = len(emoji_png_files) if emoji_png_files else 0
-
             if len(audio_inputs) > 0:
                 # 오디오 입력이 있는 경우
                 audio_filter_inputs = []
@@ -5138,47 +4914,26 @@ async def api_create_final_video(
                 if video_track_enabled and not video_muted and video_has_audio:
                     audio_filter_inputs.append("[0:a]")
 
-                # 추가 오디오 트랙들 (이모지 PNG 오프셋 고려)
+                # 추가 오디오 트랙들
                 for i in range(len(audio_inputs)):
-                    audio_filter_inputs.append(f"[{i+1+audio_offset}:a]")
+                    audio_filter_inputs.append(f"[{i+1}:a]")
 
                 if len(audio_filter_inputs) > 1:
                     # 여러 오디오 믹싱
                     audio_filter = f"{''.join(audio_filter_inputs)}amix=inputs={len(audio_filter_inputs)}:duration=first:dropout_transition=2[aout]"
-                    # 이모지 PNG가 있으면 filter_complex에 오디오 필터 추가
-                    if emoji_png_files:
-                        # 기존 filter_complex에 오디오 필터 추가
-                        existing_fc_idx = cmd.index("-filter_complex")
-                        cmd[existing_fc_idx + 1] = cmd[existing_fc_idx + 1] + ";" + audio_filter
-                        cmd.extend(["-map", "[aout]"])
-                    else:
-                        cmd.extend(["-filter_complex", audio_filter, "-map", "0:v", "-map", "[aout]"])
+                    cmd.extend(["-filter_complex", audio_filter, "-map", "0:v", "-map", "[aout]"])
                 elif len(audio_filter_inputs) == 1:
                     # 단일 오디오
-                    if emoji_png_files:
-                        # 비디오는 이미 [vout]으로 매핑됨
-                        cmd.extend(["-map", audio_filter_inputs[0].strip("[]")])
-                    else:
-                        cmd.extend(["-map", "0:v", "-map", audio_filter_inputs[0].strip("[]")])
+                    cmd.extend(["-map", "0:v", "-map", audio_filter_inputs[0].strip("[]")])
                 else:
                     # 오디오 없음
-                    if not emoji_png_files:
-                        cmd.extend(["-map", "0:v", "-an"])
-                    else:
-                        cmd.extend(["-an"])
+                    cmd.extend(["-map", "0:v", "-an"])
             else:
                 # 오디오 입력이 없는 경우
-                if not emoji_png_files:
-                    if video_track_enabled and not video_muted and video_has_audio:
-                        cmd.extend(["-map", "0:v", "-map", "0:a"])
-                    else:
-                        cmd.extend(["-map", "0:v", "-an"])
+                if video_track_enabled and not video_muted and video_has_audio:
+                    cmd.extend(["-map", "0:v", "-map", "0:a"])
                 else:
-                    # 이모지가 있으면 비디오는 이미 매핑됨
-                    if video_track_enabled and not video_muted and video_has_audio:
-                        cmd.extend(["-map", "0:a"])
-                    else:
-                        cmd.extend(["-an"])
+                    cmd.extend(["-map", "0:v", "-an"])
 
             # 출력 옵션
             cmd.extend([

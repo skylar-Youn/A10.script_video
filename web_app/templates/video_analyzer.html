@@ -25,14 +25,14 @@
 
         /* 전체 페이지에 기본 폰트 적용 */
         body, * {
-            font-family: 'Noto Sans KR Local', 'Noto Sans JP Local', '맑은 고딕', 'Malgun Gothic', Arial, sans-serif !important;
+            font-family: 'Noto Sans KR Local', 'Noto Sans JP Local', '맑은 고딕', 'Malgun Gothic', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI Symbol', sans-serif !important;
         }
 
         /* 비디오 오버레이 텍스트에 폰트 강제 적용 */
-        .video-title-overlay,
-        .video-subtitle-overlay,
-        .custom-subtitle-overlay {
-            font-family: 'Noto Sans KR Local', 'Noto Sans JP Local', '맑은 고딕', 'Malgun Gothic', Arial, sans-serif !important;
+        #video-container .video-title-overlay,
+        #video-container .video-subtitle-overlay,
+        #video-container .custom-subtitle-overlay {
+            font-family: 'Noto Sans KR Local', 'Noto Sans JP Local', '맑은 고딕', 'Malgun Gothic', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI Symbol', sans-serif;
         }
     </style>
 
@@ -506,10 +506,13 @@
                         <select id="overlay-title-dynamic-effect"
                                 style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                             <option value="none" selected>없음</option>
-                            <option value="fade">페이드</option>
-                            <option value="slide-up">슬라이드 업</option>
-                            <option value="bounce">바운스</option>
-                            <option value="pulse">펄스</option>
+                            <option value="fade">✨ 페이드</option>
+                            <option value="slide-in">➡️ 슬라이드 인</option>
+                            <option value="slide-up">⬆️ 슬라이드 업</option>
+                            <option value="bounce">⬇️ 바운스</option>
+                            <option value="scale">🔍 스케일</option>
+                            <option value="glow">💫 글로우</option>
+                            <option value="pulse">💓 펄스</option>
                         </select>
                     </div>
                 </div>
@@ -549,10 +552,14 @@
                         <select id="overlay-subtitle-dynamic-effect"
                                 style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                             <option value="none" selected>없음</option>
-                            <option value="fade">페이드</option>
-                            <option value="slide-down">슬라이드 다운</option>
-                            <option value="bounce">바운스</option>
-                            <option value="pulse">펄스</option>
+                            <option value="fade">✨ 페이드</option>
+                            <option value="slide-in">➡️ 슬라이드 인</option>
+                            <option value="slide-down">⬇️ 슬라이드 다운</option>
+                            <option value="slide-up">⬆️ 슬라이드 업</option>
+                            <option value="bounce">⬇️ 바운스</option>
+                            <option value="scale">🔍 스케일</option>
+                            <option value="glow">💫 글로우</option>
+                            <option value="pulse">💓 펄스</option>
                         </select>
                     </div>
                 </div>
@@ -592,14 +599,29 @@
                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                     </div>
                     <div>
-                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">효과</label>
-                        <select id="overlay-source-effect"
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">정적 효과</label>
+                        <select id="overlay-source-static-effect"
                                 style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                             <option value="none">없음</option>
                             <option value="outline" selected>외곽선</option>
                             <option value="shadow">그림자</option>
                             <option value="glow">글로우</option>
-                            <option value="fade">페이드</option>
+                            <option value="gradient">그라데이션</option>
+                            <option value="neon">네온</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">동적 효과</label>
+                        <select id="overlay-source-dynamic-effect"
+                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
+                            <option value="none" selected>없음</option>
+                            <option value="fade">✨ 페이드</option>
+                            <option value="slide-in">➡️ 슬라이드 인</option>
+                            <option value="slide-up">⬆️ 슬라이드 업</option>
+                            <option value="bounce">⬇️ 바운스</option>
+                            <option value="scale">🔍 스케일</option>
+                            <option value="glow">💫 글로우</option>
+                            <option value="pulse">💓 펄스</option>
                         </select>
                     </div>
                 </div>
@@ -634,15 +656,29 @@
                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                     </div>
                     <div>
-                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">효과</label>
-                        <select id="overlay-japanese-effect"
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">정적 효과</label>
+                        <select id="overlay-japanese-static-effect"
                                 style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                             <option value="none">없음</option>
                             <option value="outline" selected>외곽선</option>
                             <option value="shadow">그림자</option>
                             <option value="glow">글로우</option>
-                            <option value="fade">페이드</option>
-                            <option value="slide-up">슬라이드 업</option>
+                            <option value="gradient">그라데이션</option>
+                            <option value="neon">네온</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">동적 효과</label>
+                        <select id="overlay-japanese-dynamic-effect"
+                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
+                            <option value="none" selected>없음</option>
+                            <option value="fade">✨ 페이드</option>
+                            <option value="slide-in">➡️ 슬라이드 인</option>
+                            <option value="slide-up">⬆️ 슬라이드 업</option>
+                            <option value="bounce">⬇️ 바운스</option>
+                            <option value="scale">🔍 스케일</option>
+                            <option value="glow">💫 글로우</option>
+                            <option value="pulse">💓 펄스</option>
                         </select>
                     </div>
                 </div>
@@ -676,15 +712,29 @@
                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                     </div>
                     <div>
-                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">효과</label>
-                        <select id="overlay-korean-effect"
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">정적 효과</label>
+                        <select id="overlay-korean-static-effect"
                                 style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                             <option value="none">없음</option>
                             <option value="outline" selected>외곽선</option>
                             <option value="shadow">그림자</option>
                             <option value="glow">글로우</option>
-                            <option value="fade">페이드</option>
-                            <option value="slide-up">슬라이드 업</option>
+                            <option value="gradient">그라데이션</option>
+                            <option value="neon">네온</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">동적 효과</label>
+                        <select id="overlay-korean-dynamic-effect"
+                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
+                            <option value="none" selected>없음</option>
+                            <option value="fade">✨ 페이드</option>
+                            <option value="slide-in">➡️ 슬라이드 인</option>
+                            <option value="slide-up">⬆️ 슬라이드 업</option>
+                            <option value="bounce">⬇️ 바운스</option>
+                            <option value="scale">🔍 스케일</option>
+                            <option value="glow">💫 글로우</option>
+                            <option value="pulse">💓 펄스</option>
                         </select>
                     </div>
                 </div>
@@ -718,15 +768,29 @@
                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                     </div>
                     <div>
-                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">효과</label>
-                        <select id="overlay-english-effect"
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">정적 효과</label>
+                        <select id="overlay-english-static-effect"
                                 style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
                             <option value="none">없음</option>
                             <option value="outline" selected>외곽선</option>
                             <option value="shadow">그림자</option>
                             <option value="glow">글로우</option>
-                            <option value="fade">페이드</option>
-                            <option value="slide-up">슬라이드 업</option>
+                            <option value="gradient">그라데이션</option>
+                            <option value="neon">네온</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">동적 효과</label>
+                        <select id="overlay-english-dynamic-effect"
+                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
+                            <option value="none" selected>없음</option>
+                            <option value="fade">✨ 페이드</option>
+                            <option value="slide-in">➡️ 슬라이드 인</option>
+                            <option value="slide-up">⬆️ 슬라이드 업</option>
+                            <option value="bounce">⬇️ 바운스</option>
+                            <option value="scale">🔍 스케일</option>
+                            <option value="glow">💫 글로우</option>
+                            <option value="pulse">💓 펄스</option>
                         </select>
                     </div>
                 </div>
@@ -2175,6 +2239,60 @@ select option {
         transform: translateX(0);
         opacity: 1;
     }
+}
+
+/* 슬라이드 인 (왼쪽에서) */
+@keyframes slideIn {
+    from {
+        transform: translateX(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.effect-slide-in {
+    animation: slideIn 0.8s ease-out;
+}
+
+/* 스케일 (확대/축소) */
+@keyframes scaleAnimation {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.15);
+    }
+}
+
+.effect-scale {
+    animation: scaleAnimation 2s ease-in-out infinite;
+}
+
+/* 글로우 (빛나는 효과) */
+@keyframes glowAnimation {
+    0%, 100% {
+        text-shadow:
+            0 0 5px #fff,
+            0 0 10px #fff,
+            0 0 15px #fff,
+            0 0 20px #ff6b6b;
+    }
+    50% {
+        text-shadow:
+            0 0 10px #fff,
+            0 0 20px #fff,
+            0 0 30px #fff,
+            0 0 40px #ff6b6b,
+            0 0 50px #ff6b6b,
+            0 0 60px #ff6b6b;
+    }
+}
+
+.effect-glow {
+    animation: glowAnimation 2s ease-in-out infinite;
 }
 
 </style>
@@ -7754,7 +7872,15 @@ function loadTextOverlaySettings() {
             document.getElementById('overlay-korean-color').value = settings.korean.color || '#000000';
             document.getElementById('overlay-korean-x').value = settings.korean.x || '50';
             document.getElementById('overlay-korean-y').value = settings.korean.y || '65';
-            document.getElementById('overlay-korean-effect').value = settings.korean.effect || 'outline';
+            // 하위 호환성: 기존 effect 값이 있으면 staticEffect로 사용
+            if (settings.korean.staticEffect !== undefined) {
+                document.getElementById('overlay-korean-static-effect').value = settings.korean.staticEffect || 'outline';
+            } else if (settings.korean.effect) {
+                document.getElementById('overlay-korean-static-effect').value = settings.korean.effect || 'outline';
+            }
+            if (settings.korean.dynamicEffect !== undefined) {
+                document.getElementById('overlay-korean-dynamic-effect').value = settings.korean.dynamicEffect || 'none';
+            }
 
             // 크기 표시 업데이트
             document.getElementById('korean-size-display').textContent = settings.korean.size + 'px';
@@ -7767,7 +7893,15 @@ function loadTextOverlaySettings() {
             document.getElementById('overlay-japanese-color').value = settings.japanese.color || '#000000';
             document.getElementById('overlay-japanese-x').value = settings.japanese.x || '50';
             document.getElementById('overlay-japanese-y').value = settings.japanese.y || '83';
-            document.getElementById('overlay-japanese-effect').value = settings.japanese.effect || 'outline';
+            // 하위 호환성: 기존 effect 값이 있으면 staticEffect로 사용
+            if (settings.japanese.staticEffect !== undefined) {
+                document.getElementById('overlay-japanese-static-effect').value = settings.japanese.staticEffect || 'outline';
+            } else if (settings.japanese.effect) {
+                document.getElementById('overlay-japanese-static-effect').value = settings.japanese.effect || 'outline';
+            }
+            if (settings.japanese.dynamicEffect !== undefined) {
+                document.getElementById('overlay-japanese-dynamic-effect').value = settings.japanese.dynamicEffect || 'none';
+            }
 
             // 크기 표시 업데이트
             document.getElementById('japanese-size-display').textContent = settings.japanese.size + 'px';
@@ -7780,7 +7914,15 @@ function loadTextOverlaySettings() {
             document.getElementById('overlay-english-color').value = settings.english.color || '#000000';
             document.getElementById('overlay-english-x').value = settings.english.x || '50';
             document.getElementById('overlay-english-y').value = settings.english.y || '90';
-            document.getElementById('overlay-english-effect').value = settings.english.effect || 'outline';
+            // 하위 호환성: 기존 effect 값이 있으면 staticEffect로 사용
+            if (settings.english.staticEffect !== undefined) {
+                document.getElementById('overlay-english-static-effect').value = settings.english.staticEffect || 'outline';
+            } else if (settings.english.effect) {
+                document.getElementById('overlay-english-static-effect').value = settings.english.effect || 'outline';
+            }
+            if (settings.english.dynamicEffect !== undefined) {
+                document.getElementById('overlay-english-dynamic-effect').value = settings.english.dynamicEffect || 'none';
+            }
 
             // 크기 표시 업데이트
             document.getElementById('english-size-display').textContent = settings.english.size + 'px';
@@ -7921,7 +8063,8 @@ function applyKoreanSubtitle() {
     const color = document.getElementById('overlay-korean-color').value;
     const x = document.getElementById('overlay-korean-x').value;
     const y = document.getElementById('overlay-korean-y').value;
-    const effect = document.getElementById('overlay-korean-effect').value;
+    const staticEffect = document.getElementById('overlay-korean-static-effect').value;
+    const dynamicEffect = document.getElementById('overlay-korean-dynamic-effect').value;
 
     if (!text) {
         overlay.textContent = '주 자막을 입력하세요';
@@ -7947,12 +8090,19 @@ function applyKoreanSubtitle() {
     const optimalFont = getFontFamilyForLanguage(detectedLang);
     overlay.style.fontFamily = optimalFont;
 
-    // 효과 적용
+    // 효과 제거 후 재적용
     overlay.className = 'custom-subtitle-overlay';
     overlay.setAttribute('data-lang', detectedLang);
     overlay.setAttribute('lang', detectedLang);
-    if (effect !== 'none') {
-        overlay.classList.add(`effect-${effect}`);
+
+    // 정적 효과 적용
+    if (staticEffect && staticEffect !== 'none') {
+        overlay.classList.add(`effect-${staticEffect}`);
+    }
+
+    // 동적 효과 적용
+    if (dynamicEffect && dynamicEffect !== 'none') {
+        overlay.classList.add(`effect-${dynamicEffect}`);
     }
 
     console.log(`✅ 주 자막 적용: ${text} (언어: ${detectedLang})`);
@@ -7966,7 +8116,8 @@ function applyJapaneseSubtitle() {
     const color = document.getElementById('overlay-japanese-color').value;
     const x = document.getElementById('overlay-japanese-x').value;
     const y = document.getElementById('overlay-japanese-y').value;
-    const effect = document.getElementById('overlay-japanese-effect').value;
+    const staticEffect = document.getElementById('overlay-japanese-static-effect').value;
+    const dynamicEffect = document.getElementById('overlay-japanese-dynamic-effect').value;
 
     if (!text) {
         overlay.textContent = '日本語字幕を入力してください';
@@ -7987,16 +8138,23 @@ function applyJapaneseSubtitle() {
     overlay.style.left = x + '%';
     overlay.style.top = y + '%';
 
-    // 일본어 폰트 최적화
-    const optimalFont = "'Noto Sans JP', 'Yu Gothic', Meiryo, 'Hiragino Kaku Gothic ProN', sans-serif";
+    // 일본어 폰트 최적화 (이모지 폰트 포함)
+    const optimalFont = getFontFamilyForLanguage('ja');
     overlay.style.fontFamily = optimalFont;
 
-    // 효과 적용
+    // 효과 제거 후 재적용
     overlay.className = 'custom-subtitle-overlay';
     overlay.setAttribute('data-lang', 'japanese');
     overlay.setAttribute('lang', 'ja');
-    if (effect !== 'none') {
-        overlay.classList.add(`effect-${effect}`);
+
+    // 정적 효과 적용
+    if (staticEffect && staticEffect !== 'none') {
+        overlay.classList.add(`effect-${staticEffect}`);
+    }
+
+    // 동적 효과 적용
+    if (dynamicEffect && dynamicEffect !== 'none') {
+        overlay.classList.add(`effect-${dynamicEffect}`);
     }
 
     console.log(`✅ 메인 자막 (일본어) 적용: ${text}`);
@@ -8010,7 +8168,8 @@ function applyEnglishSubtitle() {
     const color = document.getElementById('overlay-english-color').value;
     const x = document.getElementById('overlay-english-x').value;
     const y = document.getElementById('overlay-english-y').value;
-    const effect = document.getElementById('overlay-english-effect').value;
+    const staticEffect = document.getElementById('overlay-english-static-effect').value;
+    const dynamicEffect = document.getElementById('overlay-english-dynamic-effect').value;
 
     if (!text) {
         overlay.textContent = '보조 자막을 입력하세요';
@@ -8036,12 +8195,19 @@ function applyEnglishSubtitle() {
     const optimalFont = getFontFamilyForLanguage(detectedLang);
     overlay.style.fontFamily = optimalFont;
 
-    // 효과 적용
+    // 효과 제거 후 재적용
     overlay.className = 'custom-subtitle-overlay';
     overlay.setAttribute('data-lang', detectedLang);
     overlay.setAttribute('lang', detectedLang);
-    if (effect !== 'none') {
-        overlay.classList.add(`effect-${effect}`);
+
+    // 정적 효과 적용
+    if (staticEffect && staticEffect !== 'none') {
+        overlay.classList.add(`effect-${staticEffect}`);
+    }
+
+    // 동적 효과 적용
+    if (dynamicEffect && dynamicEffect !== 'none') {
+        overlay.classList.add(`effect-${dynamicEffect}`);
     }
 
     console.log(`✅ 보조 자막 적용: ${text} (언어: ${detectedLang})`);
@@ -8236,14 +8402,14 @@ function detectLanguage(text) {
  */
 function getFontFamilyForLanguage(lang) {
     const fontStacks = {
-        // 일본어: 시스템 폰트 우선 + Google Fonts fallback
-        'ja': "'ヒラギノ角ゴ ProN', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic', 'メイリオ', Meiryo, 'MS PGothic', 'Noto Sans JP', 'Noto Sans CJK JP', sans-serif",
+        // 일본어: 시스템 폰트 우선 + Google Fonts fallback + 이모지 폰트
+        'ja': "'ヒラギノ角ゴ ProN', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic', 'メイリオ', Meiryo, 'MS PGothic', 'Noto Sans JP', 'Noto Sans CJK JP', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI Symbol', sans-serif",
 
-        // 한국어: 시스템 폰트 우선 + Google Fonts fallback
-        'ko': "'맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Noto Sans CJK KR', sans-serif",
+        // 한국어: 시스템 폰트 우선 + Google Fonts fallback + 이모지 폰트
+        'ko': "'맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Noto Sans CJK KR', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI Symbol', sans-serif",
 
-        // 영어: 시스템 폰트
-        'en': "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+        // 영어: 시스템 폰트 + 이모지 폰트
+        'en': "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI Symbol', sans-serif"
     };
 
     return fontStacks[lang] || fontStacks['ko'];
@@ -8288,7 +8454,7 @@ function applyTitle() {
 
         // 동적 효과 적용
         if (dynamicEffect && dynamicEffect !== 'none') {
-            titleOverlay.classList.add(`animation-${dynamicEffect}`);
+            titleOverlay.classList.add(`effect-${dynamicEffect}`);
         }
     }
     console.log(`✅ 제목 적용: ${text}`);
@@ -8337,7 +8503,7 @@ function applySubtitle() {
 
         // 동적 효과 적용
         if (dynamicEffect && dynamicEffect !== 'none') {
-            subtitleOverlay.classList.add(`animation-${dynamicEffect}`);
+            subtitleOverlay.classList.add(`effect-${dynamicEffect}`);
         }
     }
     console.log(`✅ 부제목 적용: ${text}`);
@@ -8354,7 +8520,8 @@ function applySource() {
     const color = document.getElementById('overlay-source-color').value;
     const x = document.getElementById('overlay-source-x').value;
     const y = document.getElementById('overlay-source-y').value;
-    const effect = document.getElementById('overlay-source-effect').value;
+    const staticEffect = document.getElementById('overlay-source-static-effect').value;
+    const dynamicEffect = document.getElementById('overlay-source-dynamic-effect').value;
 
     if (!text) {
         overlay.textContent = '출처를 입력하세요';
@@ -8378,11 +8545,23 @@ function applySource() {
     overlay.style.top = `${y}%`;
     overlay.style.left = `${x}%`;
 
-    // 효과 제거
+    // 🌏 언어 자동 감지 및 최적 폰트 적용 (이모지 폰트 포함)
+    const detectedLang = detectLanguage(text);
+    const optimalFont = getFontFamilyForLanguage(detectedLang);
+    overlay.style.fontFamily = optimalFont;
+
+    // 효과 제거 후 재적용
     overlay.className = 'custom-subtitle-overlay';
-    overlay.setAttribute('data-lang', 'source');
-    if (effect !== 'none') {
-        overlay.classList.add(`effect-${effect}`);
+    overlay.setAttribute('data-lang', detectedLang);
+
+    // 정적 효과 적용
+    if (staticEffect && staticEffect !== 'none') {
+        overlay.classList.add(`effect-${staticEffect}`);
+    }
+
+    // 동적 효과 적용
+    if (dynamicEffect && dynamicEffect !== 'none') {
+        overlay.classList.add(`effect-${dynamicEffect}`);
     }
 
     console.log(`✅ 출처 적용: ${text}`);
@@ -8580,7 +8759,8 @@ function saveTextOverlaySettingsWithSubtitles() {
             color: document.getElementById('overlay-korean-color').value,
             x: document.getElementById('overlay-korean-x').value,
             y: document.getElementById('overlay-korean-y').value,
-            effect: document.getElementById('overlay-korean-effect').value
+            staticEffect: document.getElementById('overlay-korean-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-korean-dynamic-effect').value
         },
         japanese: {
             text: document.getElementById('overlay-japanese-input').value,
@@ -8588,7 +8768,8 @@ function saveTextOverlaySettingsWithSubtitles() {
             color: document.getElementById('overlay-japanese-color').value,
             x: document.getElementById('overlay-japanese-x').value,
             y: document.getElementById('overlay-japanese-y').value,
-            effect: document.getElementById('overlay-japanese-effect').value
+            staticEffect: document.getElementById('overlay-japanese-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-japanese-dynamic-effect').value
         },
         english: {
             text: document.getElementById('overlay-english-input').value,
@@ -8596,7 +8777,8 @@ function saveTextOverlaySettingsWithSubtitles() {
             color: document.getElementById('overlay-english-color').value,
             x: document.getElementById('overlay-english-x').value,
             y: document.getElementById('overlay-english-y').value,
-            effect: document.getElementById('overlay-english-effect').value
+            staticEffect: document.getElementById('overlay-english-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-english-dynamic-effect').value
         },
         blackBars: {
             top: {
@@ -8658,7 +8840,8 @@ function saveTextOverlaySettingsAs() {
             color: document.getElementById('overlay-source-color').value,
             x: document.getElementById('overlay-source-x').value,
             y: document.getElementById('overlay-source-y').value,
-            effect: document.getElementById('overlay-source-effect').value,
+            staticEffect: document.getElementById('overlay-source-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-source-dynamic-effect').value,
             hide: document.getElementById('source-overlay-hide').checked
         },
         korean: {
@@ -8667,7 +8850,8 @@ function saveTextOverlaySettingsAs() {
             color: document.getElementById('overlay-korean-color').value,
             x: document.getElementById('overlay-korean-x').value,
             y: document.getElementById('overlay-korean-y').value,
-            effect: document.getElementById('overlay-korean-effect').value
+            staticEffect: document.getElementById('overlay-korean-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-korean-dynamic-effect').value
         },
         japanese: {
             text: document.getElementById('overlay-japanese-input').value,
@@ -8675,7 +8859,8 @@ function saveTextOverlaySettingsAs() {
             color: document.getElementById('overlay-japanese-color').value,
             x: document.getElementById('overlay-japanese-x').value,
             y: document.getElementById('overlay-japanese-y').value,
-            effect: document.getElementById('overlay-japanese-effect').value
+            staticEffect: document.getElementById('overlay-japanese-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-japanese-dynamic-effect').value
         },
         english: {
             text: document.getElementById('overlay-english-input').value,
@@ -8683,7 +8868,8 @@ function saveTextOverlaySettingsAs() {
             color: document.getElementById('overlay-english-color').value,
             x: document.getElementById('overlay-english-x').value,
             y: document.getElementById('overlay-english-y').value,
-            effect: document.getElementById('overlay-english-effect').value
+            staticEffect: document.getElementById('overlay-english-static-effect').value,
+            dynamicEffect: document.getElementById('overlay-english-dynamic-effect').value
         },
         blackBars: {
             top: {
@@ -8876,7 +9062,15 @@ function applySettings(settings) {
         if (document.getElementById('overlay-source-color')) document.getElementById('overlay-source-color').value = settings.source.color || '#ffffff';
         if (document.getElementById('overlay-source-x')) document.getElementById('overlay-source-x').value = settings.source.x || 10;
         if (document.getElementById('overlay-source-y')) document.getElementById('overlay-source-y').value = settings.source.y || 10;
-        if (document.getElementById('overlay-source-effect')) document.getElementById('overlay-source-effect').value = settings.source.effect || 'none';
+        // 하위 호환성
+        if (settings.source.staticEffect !== undefined && document.getElementById('overlay-source-static-effect')) {
+            document.getElementById('overlay-source-static-effect').value = settings.source.staticEffect || 'none';
+        } else if (settings.source.effect && document.getElementById('overlay-source-static-effect')) {
+            document.getElementById('overlay-source-static-effect').value = settings.source.effect || 'none';
+        }
+        if (settings.source.dynamicEffect !== undefined && document.getElementById('overlay-source-dynamic-effect')) {
+            document.getElementById('overlay-source-dynamic-effect').value = settings.source.dynamicEffect || 'none';
+        }
         if (document.getElementById('source-overlay-hide')) document.getElementById('source-overlay-hide').checked = settings.source.hide || false;
     }
 
@@ -8887,7 +9081,15 @@ function applySettings(settings) {
         if (document.getElementById('overlay-korean-color')) document.getElementById('overlay-korean-color').value = settings.korean.color || '#ffffff';
         if (document.getElementById('overlay-korean-x')) document.getElementById('overlay-korean-x').value = settings.korean.x || 50;
         if (document.getElementById('overlay-korean-y')) document.getElementById('overlay-korean-y').value = settings.korean.y || 80;
-        if (document.getElementById('overlay-korean-effect')) document.getElementById('overlay-korean-effect').value = settings.korean.effect || 'none';
+        // 하위 호환성
+        if (settings.korean.staticEffect !== undefined && document.getElementById('overlay-korean-static-effect')) {
+            document.getElementById('overlay-korean-static-effect').value = settings.korean.staticEffect || 'none';
+        } else if (settings.korean.effect && document.getElementById('overlay-korean-static-effect')) {
+            document.getElementById('overlay-korean-static-effect').value = settings.korean.effect || 'none';
+        }
+        if (settings.korean.dynamicEffect !== undefined && document.getElementById('overlay-korean-dynamic-effect')) {
+            document.getElementById('overlay-korean-dynamic-effect').value = settings.korean.dynamicEffect || 'none';
+        }
     }
 
     // 일본어 자막 설정 적용
@@ -8897,7 +9099,15 @@ function applySettings(settings) {
         if (document.getElementById('overlay-japanese-color')) document.getElementById('overlay-japanese-color').value = settings.japanese.color || '#000000';
         if (document.getElementById('overlay-japanese-x')) document.getElementById('overlay-japanese-x').value = settings.japanese.x || 50;
         if (document.getElementById('overlay-japanese-y')) document.getElementById('overlay-japanese-y').value = settings.japanese.y || 83;
-        if (document.getElementById('overlay-japanese-effect')) document.getElementById('overlay-japanese-effect').value = settings.japanese.effect || 'outline';
+        // 하위 호환성
+        if (settings.japanese.staticEffect !== undefined && document.getElementById('overlay-japanese-static-effect')) {
+            document.getElementById('overlay-japanese-static-effect').value = settings.japanese.staticEffect || 'outline';
+        } else if (settings.japanese.effect && document.getElementById('overlay-japanese-static-effect')) {
+            document.getElementById('overlay-japanese-static-effect').value = settings.japanese.effect || 'outline';
+        }
+        if (settings.japanese.dynamicEffect !== undefined && document.getElementById('overlay-japanese-dynamic-effect')) {
+            document.getElementById('overlay-japanese-dynamic-effect').value = settings.japanese.dynamicEffect || 'none';
+        }
     }
 
     // 영어 자막 설정 적용
@@ -8907,7 +9117,15 @@ function applySettings(settings) {
         if (document.getElementById('overlay-english-color')) document.getElementById('overlay-english-color').value = settings.english.color || '#ffe14d';
         if (document.getElementById('overlay-english-x')) document.getElementById('overlay-english-x').value = settings.english.x || 50;
         if (document.getElementById('overlay-english-y')) document.getElementById('overlay-english-y').value = settings.english.y || 90;
-        if (document.getElementById('overlay-english-effect')) document.getElementById('overlay-english-effect').value = settings.english.effect || 'none';
+        // 하위 호환성
+        if (settings.english.staticEffect !== undefined && document.getElementById('overlay-english-static-effect')) {
+            document.getElementById('overlay-english-static-effect').value = settings.english.staticEffect || 'none';
+        } else if (settings.english.effect && document.getElementById('overlay-english-static-effect')) {
+            document.getElementById('overlay-english-static-effect').value = settings.english.effect || 'none';
+        }
+        if (settings.english.dynamicEffect !== undefined && document.getElementById('overlay-english-dynamic-effect')) {
+            document.getElementById('overlay-english-dynamic-effect').value = settings.english.dynamicEffect || 'none';
+        }
     }
 
     // Canvas 자막 위치 복원
