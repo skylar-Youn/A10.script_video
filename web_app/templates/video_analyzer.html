@@ -1062,6 +1062,25 @@
                         <button id="fit-to-subtitles">📝 자막에 맞춤</button>
                     </div>
 
+                    <!-- 자막 크기 빠른 조절 -->
+                    <div class="subtitle-size-controls" style="display: flex; gap: 15px; align-items: center; padding: 8px; background: rgba(0, 0, 0, 0.2); border-radius: 4px; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <label style="color: white; font-size: 0.85rem; white-space: nowrap;">📝 메인:</label>
+                            <input type="range" id="timeline-main-size" min="18" max="96" value="50" step="2" style="width: 100px;">
+                            <span id="timeline-main-size-display" style="color: #ffe14d; font-size: 0.85rem; min-width: 40px;">50px</span>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <label style="color: white; font-size: 0.85rem; white-space: nowrap;">🌐 주:</label>
+                            <input type="range" id="timeline-translation-size" min="18" max="96" value="50" step="2" style="width: 100px;">
+                            <span id="timeline-translation-size-display" style="color: #ffe14d; font-size: 0.85rem; min-width: 40px;">50px</span>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <label style="color: white; font-size: 0.85rem; white-space: nowrap;">📋 보조:</label>
+                            <input type="range" id="timeline-description-size" min="18" max="96" value="50" step="2" style="width: 100px;">
+                            <span id="timeline-description-size-display" style="color: #ffe14d; font-size: 0.85rem; min-width: 40px;">50px</span>
+                        </div>
+                    </div>
+
                     <div class="time-display">
                         <span id="current-time">0:00</span> / <span id="total-time">5:00</span>
                     </div>
@@ -9484,6 +9503,113 @@ document.addEventListener('DOMContentLoaded', function() {
     if (blackBoxY2) blackBoxY2.addEventListener('input', updateBlackBox);
     if (blackBoxOpacity) blackBoxOpacity.addEventListener('input', updateBlackBox);
     if (blackBoxEnable) blackBoxEnable.addEventListener('change', updateBlackBox);
+
+    // 타임라인 자막 크기 조절 슬라이더 동기화
+    const timelineMainSize = document.getElementById('timeline-main-size');
+    const timelineTranslationSize = document.getElementById('timeline-translation-size');
+    const timelineDescriptionSize = document.getElementById('timeline-description-size');
+
+    if (timelineMainSize) {
+        timelineMainSize.addEventListener('input', function() {
+            const size = this.value;
+            document.getElementById('timeline-main-size-display').textContent = size + 'px';
+            console.log(`📝 메인 자막 크기 변경: ${size}px`);
+
+            // Canvas subtitleStyles 업데이트
+            if (window.canvasPreview && window.canvasPreview.subtitleStyles) {
+                window.canvasPreview.subtitleStyles.main.fontSize = parseInt(size);
+                console.log(`  ✅ Canvas subtitleStyles.main.fontSize = ${size}`);
+                window.canvasPreview.render();
+            }
+
+            // HTML 오버레이 업데이트
+            const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+            if (japaneseOverlay && !japaneseOverlay.classList.contains('empty')) {
+                japaneseOverlay.style.fontSize = size + 'px';
+                console.log(`  ✅ HTML 오버레이 fontSize 업데이트`);
+            }
+
+            // 원래 슬라이더와 동기화
+            const mainSlider = document.getElementById('overlay-japanese-size');
+            if (mainSlider) {
+                mainSlider.value = size;
+                document.getElementById('japanese-size-display').textContent = size + 'px';
+            }
+
+            // Canvas 전체 업데이트
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    if (timelineTranslationSize) {
+        timelineTranslationSize.addEventListener('input', function() {
+            const size = this.value;
+            document.getElementById('timeline-translation-size-display').textContent = size + 'px';
+            console.log(`🌐 주 자막 크기 변경: ${size}px`);
+
+            // Canvas subtitleStyles 업데이트
+            if (window.canvasPreview && window.canvasPreview.subtitleStyles) {
+                window.canvasPreview.subtitleStyles.translation.fontSize = parseInt(size);
+                console.log(`  ✅ Canvas subtitleStyles.translation.fontSize = ${size}`);
+                window.canvasPreview.render();
+            }
+
+            // HTML 오버레이 업데이트
+            const koreanOverlay = document.getElementById('korean-subtitle-overlay');
+            if (koreanOverlay && !koreanOverlay.classList.contains('empty')) {
+                koreanOverlay.style.fontSize = size + 'px';
+                console.log(`  ✅ HTML 오버레이 fontSize 업데이트`);
+            }
+
+            // 원래 슬라이더와 동기화
+            const translationSlider = document.getElementById('overlay-korean-size');
+            if (translationSlider) {
+                translationSlider.value = size;
+                document.getElementById('korean-size-display').textContent = size + 'px';
+            }
+
+            // Canvas 전체 업데이트
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    if (timelineDescriptionSize) {
+        timelineDescriptionSize.addEventListener('input', function() {
+            const size = this.value;
+            document.getElementById('timeline-description-size-display').textContent = size + 'px';
+            console.log(`📋 보조 자막 크기 변경: ${size}px`);
+
+            // Canvas subtitleStyles 업데이트
+            if (window.canvasPreview && window.canvasPreview.subtitleStyles) {
+                window.canvasPreview.subtitleStyles.description.fontSize = parseInt(size);
+                console.log(`  ✅ Canvas subtitleStyles.description.fontSize = ${size}`);
+                window.canvasPreview.render();
+            }
+
+            // HTML 오버레이 업데이트
+            const englishOverlay = document.getElementById('english-subtitle-overlay');
+            if (englishOverlay && !englishOverlay.classList.contains('empty')) {
+                englishOverlay.style.fontSize = size + 'px';
+                console.log(`  ✅ HTML 오버레이 fontSize 업데이트`);
+            }
+
+            // 원래 슬라이더와 동기화
+            const descriptionSlider = document.getElementById('overlay-english-size');
+            if (descriptionSlider) {
+                descriptionSlider.value = size;
+                document.getElementById('english-size-display').textContent = size + 'px';
+            }
+
+            // Canvas 전체 업데이트
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
 });
 
 // 자막 미리보기 함수
