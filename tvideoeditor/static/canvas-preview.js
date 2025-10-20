@@ -34,21 +34,21 @@ class CanvasVideoPreview {
         this.subtitleStyles = {
             main: {
                 yPosition: 0.85,        // 화면 높이의 85% 위치
-                fontSize: 50,
+                fontSize: 40,
                 color: '#ffffff',
                 borderWidth: 3,
                 borderColor: '#000000'
             },
             translation: {
                 yPosition: 0.15,        // 화면 높이의 15% 위치
-                fontSize: 50,
+                fontSize: 36,
                 color: '#ffe14d',       // 노란색
                 borderWidth: 3,
                 borderColor: '#000000'
             },
             description: {
                 yPosition: 0.70,        // 화면 높이의 70% 위치
-                fontSize: 50,
+                fontSize: 32,
                 color: '#ffffff',
                 borderWidth: 2,
                 borderColor: '#000000'
