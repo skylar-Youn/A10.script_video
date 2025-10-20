@@ -838,23 +838,23 @@ class CanvasVideoPreview {
         const overlayMap = {
             'title': {
                 overlayId: 'video-title-overlay',
-                // 제목은 현재 Y 위치 컨트롤이 없음 (transform 사용)
                 updateMethod: 'transform'
             },
             'subtitle': {
                 overlayId: 'video-subtitle-overlay',
-                // 부제목도 현재 Y 위치 컨트롤이 없음 (transform 사용)
                 updateMethod: 'transform'
             },
             'korean': {
                 overlayId: 'korean-subtitle-overlay',
                 yInputId: 'overlay-korean-y',
-                updateMethod: 'percentage'
+                updateMethod: 'percentage',
+                timelineType: 'translation'  // ⭐ 타임라인 자막 매핑
             },
             'english': {
                 overlayId: 'english-subtitle-overlay',
                 yInputId: 'overlay-english-y',
-                updateMethod: 'percentage'
+                updateMethod: 'percentage',
+                timelineType: 'description'  // ⭐ 타임라인 자막 매핑
             }
         };
 
@@ -884,9 +884,15 @@ class CanvasVideoPreview {
                     console.log(`  🎛️ ${mapping.yInputId} 값 업데이트: ${Math.round(parseFloat(yPercent))}`);
                 }
             }
+
+            // ⭐ 타임라인 자막 위치도 동기화 (영상 제작 시 반영되도록)
+            if (mapping.timelineType && this.subtitleStyles && this.subtitleStyles[mapping.timelineType]) {
+                const yPosition = parseFloat(yPercent) / 100;
+                this.subtitleStyles[mapping.timelineType].yPosition = yPosition;
+                console.log(`  🎬 타임라인 ${mapping.timelineType} 위치 동기화: ${yPosition.toFixed(4)} (${yPercent}%)`);
+            }
         } else if (mapping.updateMethod === 'transform') {
             // transform 방식 (title, subtitle)
-            // 현재 translateX 유지하면서 translateY만 업데이트
             const currentTransform = htmlOverlay.style.transform || '';
             const xMatch = currentTransform.match(/translateX\(([^)]+)\)/);
             const translateX = xMatch ? xMatch[1] : '-50%';
