@@ -216,6 +216,27 @@ class CanvasVideoPreview {
             this.ctx.fillStyle = `rgba(0, 0, 0, ${this.bottomBlackBar.opacity})`;
             this.ctx.fillRect(0, y, width, barHeight);
         }
+
+        // ⬛ 검정 박스 가리기 (사용자 지정 영역)
+        const blackBoxEnable = document.getElementById('black-box-enable');
+        if (blackBoxEnable && blackBoxEnable.checked) {
+            const x1Percent = parseFloat(document.getElementById('black-box-x1')?.value || 0);
+            const y1Percent = parseFloat(document.getElementById('black-box-y1')?.value || 0);
+            const x2Percent = parseFloat(document.getElementById('black-box-x2')?.value || 100);
+            const y2Percent = parseFloat(document.getElementById('black-box-y2')?.value || 20);
+            const opacity = parseFloat(document.getElementById('black-box-opacity')?.value || 100) / 100;
+
+            const x1 = width * (x1Percent / 100);
+            const y1 = height * (y1Percent / 100);
+            const x2 = width * (x2Percent / 100);
+            const y2 = height * (y2Percent / 100);
+
+            const boxWidth = x2 - x1;
+            const boxHeight = y2 - y1;
+
+            this.ctx.fillStyle = `rgba(0, 0, 0, ${opacity})`;
+            this.ctx.fillRect(x1, y1, boxWidth, boxHeight);
+        }
     }
 
     /**
