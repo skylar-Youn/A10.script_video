@@ -754,10 +754,12 @@ class CanvasVideoPreview {
         if (this.isDragging) {
             console.log(`✅ 드래그 완료: ${this.dragTarget.type}`);
 
-            // 위치 정보 출력
+            // 위치 및 크기 정보 출력
             if (['main', 'translation', 'description'].includes(this.dragTarget.type)) {
-                const yPos = this.subtitleStyles[this.dragTarget.type].yPosition;
-                console.log(`📍 ${this.dragTarget.type} 자막 위치: ${(yPos * 100).toFixed(1)}%`);
+                const style = this.subtitleStyles[this.dragTarget.type];
+                const yPos = style.yPosition;
+                const fontSize = style.fontSize || '?';
+                console.log(`📍 ${this.dragTarget.type} 자막 - 위치: ${(yPos * 100).toFixed(1)}%, 크기: ${fontSize}px`);
             }
         }
 
