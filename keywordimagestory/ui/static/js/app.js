@@ -1860,6 +1860,103 @@ function renderLongScriptResults(result) {
   `;
 }
 
+function renderMediaPrompts(data) {
+  const resultsSection = document.getElementById("media-prompts-results");
+  const container = document.getElementById("media-prompts-container");
+
+  if (!resultsSection || !container) return;
+
+  if (!data || !Array.isArray(data.prompts) || data.prompts.length === 0) {
+    container.innerHTML = '<div class="placeholder"><p>생성된 프롬프트가 없습니다.</p></div>';
+    resultsSection.style.display = "none";
+    return;
+  }
+
+  const createCopyButton = (text, label) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary copy-prompt-btn";
+    btn.textContent = `📋 ${label} 복사`;
+    btn.dataset.promptText = text;
+
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        const originalText = btn.textContent;
+        btn.textContent = "✓ 복사됨!";
+        setTimeout(() => {
+          btn.textContent = originalText;
+        }, 2000);
+      } catch (error) {
+        console.error("Failed to copy prompt:", error);
+        alert("클립보드에 복사하지 못했습니다.");
+      }
+    });
+
+    return btn;
+  };
+
+  const promptsHtml = data.prompts.map((prompt, idx) => {
+    return `
+      <div class="prompt-scene-card" style="margin-bottom: 2rem; padding: 1.5rem; border: 1px solid #ddd; border-radius: 8px; background: #f9f9f9;">
+        <div class="prompt-scene-header" style="margin-bottom: 1rem;">
+          <h4 style="margin: 0 0 0.5rem 0;">🎬 Scene ${prompt.scene_number}: ${escapeHtml(prompt.scene_title)}</h4>
+          <p style="margin: 0; font-size: 0.9rem; color: #666; font-style: italic;">${escapeHtml(prompt.scene_content)}</p>
+        </div>
+
+        <div class="prompt-section" style="margin-bottom: 1.5rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h5 style="margin: 0; color: #0066cc;">🖼️ 이미지 생성 프롬프트 (Kling, Midjourney, DALL-E)</h5>
+            <div class="prompt-actions-${idx}-image"></div>
+          </div>
+          <div style="padding: 1rem; background: white; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap; font-family: monospace; font-size: 0.9rem;">
+${escapeHtml(prompt.image_prompt)}
+          </div>
+        </div>
+
+        <div class="prompt-section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h5 style="margin: 0; color: #cc6600;">🎥 영상 생성 프롬프트 (Sora, Runway, Kling, Pika)</h5>
+            <div class="prompt-actions-${idx}-video"></div>
+          </div>
+          <div style="padding: 1rem; background: white; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap; font-family: monospace; font-size: 0.9rem;">
+${escapeHtml(prompt.video_prompt)}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="media-prompts-header" style="margin-bottom: 1.5rem; padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px;">
+      <h3 style="margin: 0 0 0.5rem 0; color: white;">✨ ${escapeHtml(data.topic)}</h3>
+      <p style="margin: 0; opacity: 0.9;">총 ${data.total_scenes}개 장면의 이미지/영상 프롬프트가 생성되었습니다.</p>
+    </div>
+    ${promptsHtml}
+  `;
+
+  // 복사 버튼 추가
+  data.prompts.forEach((prompt, idx) => {
+    const imageActionsDiv = container.querySelector(`.prompt-actions-${idx}-image`);
+    const videoActionsDiv = container.querySelector(`.prompt-actions-${idx}-video`);
+
+    if (imageActionsDiv) {
+      const imageCopyBtn = createCopyButton(prompt.image_prompt, "이미지 프롬프트");
+      imageActionsDiv.appendChild(imageCopyBtn);
+    }
+
+    if (videoActionsDiv) {
+      const videoCopyBtn = createCopyButton(prompt.video_prompt, "영상 프롬프트");
+      videoActionsDiv.appendChild(videoCopyBtn);
+    }
+  });
+
+  resultsSection.style.display = "block";
+
+  // 결과 영역으로 스크롤
+  resultsSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function getLanguageDisplayName(code) {
   const normalized = (code || "").toLowerCase();
   if (normalized.startsWith("ko")) return "한국어";
@@ -6883,6 +6980,41 @@ function initLongScriptTool() {
       } catch (error) {
         console.error("Failed to copy long script:", error);
         alert("클립보드에 복사하지 못했습니다. 직접 복사해 주세요.");
+      }
+    });
+  }
+
+  // 이미지/영상 프롬프트 생성 버튼
+  const mediaPromptsButton = form ? form.querySelector("[data-generate-media-prompts]") : null;
+  if (mediaPromptsButton) {
+    mediaPromptsButton.addEventListener("click", async () => {
+      const content = editor.value || "";
+      if (!content.trim()) {
+        alert("대본 내용을 먼저 작성하거나 생성해주세요.");
+        return;
+      }
+
+      const topicValue = topicInput ? topicInput.value.trim() : "콘텐츠";
+
+      setButtonBusy(mediaPromptsButton, true);
+      try {
+        const requestBody = {
+          script_content: content,
+          topic: topicValue
+        };
+
+        const data = await api("/api/generate/media-prompts-from-script", {
+          method: "POST",
+          body: JSON.stringify(requestBody)
+        });
+
+        renderMediaPrompts(data);
+        showNotification(`${data.total_scenes}개 장면의 프롬프트를 생성했습니다.`, "success");
+      } catch (error) {
+        console.error("Failed to generate media prompts:", error);
+        showNotification(error.message || "프롬프트 생성에 실패했습니다.", "error");
+      } finally {
+        setButtonBusy(mediaPromptsButton, false);
       }
     });
   }

@@ -343,6 +343,122 @@ async def api_generate_long_script(payload: dict[str, Any] = Body(...)) -> dict[
     }
 
 
+@app.post("/api/generate/media-prompts-from-script")
+async def api_generate_media_prompts_from_script(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """대본에서 각 장면별 이미지/영상 생성 프롬프트를 생성합니다."""
+    script_content = str(payload.get("script_content", "")).strip()
+    if not script_content:
+        raise HTTPException(status_code=400, detail="script_content is required")
+
+    topic = str(payload.get("topic", "콘텐츠")).strip()
+
+    # 대본을 장면별로 파싱
+    scenes = []
+    current_scene = {"title": "", "content": ""}
+
+    lines = script_content.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if current_scene["content"]:
+                scenes.append(current_scene)
+                current_scene = {"title": "", "content": ""}
+            continue
+
+        # 장면 제목 감지 (🎧, 🎬, ⚛️, 🧘, 🧠, 🌌, 🧑‍🔬, 🧩, 🌠 등)
+        if any(emoji in line for emoji in ['🎧', '🎬', '⚛️', '🧘', '🧠', '🌌', '🧑‍🔬', '🧩', '🌠', '📹', '✍️']) or \
+           line.startswith('[') or \
+           (line.startswith('#') and not current_scene["content"]):
+            if current_scene["content"]:
+                scenes.append(current_scene)
+            current_scene = {"title": line, "content": ""}
+        else:
+            current_scene["content"] += line + "\n"
+
+    # 마지막 장면 추가
+    if current_scene["content"]:
+        scenes.append(current_scene)
+
+    # 각 장면별로 프롬프트 생성
+    scene_prompts = []
+    for idx, scene in enumerate(scenes):
+        scene_num = idx + 1
+        scene_title = scene["title"] or f"Scene {scene_num}"
+        scene_content = scene["content"].strip()
+
+        if not scene_content:
+            continue
+
+        # 이미지 생성 프롬프트 생성
+        image_prompt_instruction = f"""You are a professional image prompt generator for AI image generation tools (Midjourney, DALL-E, Stable Diffusion, Kling AI).
+
+Based on the following scene from a video script, create a detailed English image generation prompt.
+
+Scene Title: {scene_title}
+Scene Content:
+{scene_content[:500]}
+
+Requirements:
+- Write in English only
+- Be specific about visual elements, lighting, colors, composition, mood
+- Include artistic style if relevant
+- Keep it under 150 words
+- Make it suitable for image generation AI
+
+Format: Just provide the prompt text without any prefixes or explanations."""
+
+        try:
+            image_prompt = openai_client.generate_structured(
+                instructions=image_prompt_instruction,
+                content=scene_content
+            )
+        except Exception as exc:
+            logger.error(f"Failed to generate image prompt for scene {scene_num}: {exc}")
+            image_prompt = f"Scene {scene_num}: {scene_title}"
+
+        # 영상 생성 프롬프트 생성
+        video_prompt_instruction = f"""You are a professional video prompt generator for AI video generation tools (Sora, Runway, Kling AI, Pika).
+
+Based on the following scene from a video script, create a detailed English video generation prompt.
+
+Scene Title: {scene_title}
+Scene Content:
+{scene_content[:500]}
+
+Requirements:
+- Write in English only
+- Describe camera movements, transitions, actions, and motion
+- Include atmosphere, mood, pacing
+- Specify visual style and cinematography if relevant
+- Keep it under 150 words
+- Make it suitable for video generation AI
+
+Format: Just provide the prompt text without any prefixes or explanations."""
+
+        try:
+            video_prompt = openai_client.generate_structured(
+                instructions=video_prompt_instruction,
+                content=scene_content
+            )
+        except Exception as exc:
+            logger.error(f"Failed to generate video prompt for scene {scene_num}: {exc}")
+            video_prompt = f"Scene {scene_num}: {scene_title}"
+
+        scene_prompts.append({
+            "scene_number": scene_num,
+            "scene_title": scene_title,
+            "scene_content": scene_content[:200] + ("..." if len(scene_content) > 200 else ""),
+            "image_prompt": image_prompt.strip(),
+            "video_prompt": video_prompt.strip(),
+        })
+
+    return {
+        "topic": topic,
+        "total_scenes": len(scene_prompts),
+        "prompts": scene_prompts,
+    }
+
+
 @app.post("/api/tools/frames")
 async def api_save_trimmed_frame(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     data_url = str(payload.get("data_url", "")).strip()

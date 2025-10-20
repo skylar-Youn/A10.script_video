@@ -501,21 +501,72 @@
                             <option value="neon">네온</option>
                         </select>
                     </div>
-                    <div>
-                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">동적 효과</label>
-                        <select id="overlay-title-dynamic-effect"
-                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
-                            <option value="none" selected>없음</option>
-                            <option value="fade">✨ 페이드</option>
-                            <option value="slide-in">➡️ 슬라이드 인</option>
-                            <option value="slide-up">⬆️ 슬라이드 업</option>
-                            <option value="bounce">⬇️ 바운스</option>
-                            <option value="scale">🔍 스케일</option>
-                            <option value="glow">💫 글로우</option>
-                            <option value="pulse">💓 펄스</option>
-                        </select>
-                    </div>
                 </div>
+
+                <!-- 제목 동적 효과 (복수 선택) -->
+                <div style="margin-top: 12px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; cursor: pointer;" onclick="toggleTitleEffectsPanel()">
+                        <label style="margin: 0; color: white; font-size: 0.9rem; font-weight: bold;">🎬 동적 효과 (복수 선택 가능)</label>
+                        <span id="title-effects-toggle" style="color: white; font-size: 1rem; transition: transform 0.3s;">▼</span>
+                    </div>
+                    <div id="title-effects-panel">
+
+                    <!-- 2025 트렌드 -->
+                    <div style="margin-bottom: 8px;">
+                        <label style="display: block; color: #ffd700; font-size: 0.85rem; font-weight: bold; margin-bottom: 4px;">🔥 2025 트렌드</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="fire" onchange="updateTitleEffectCombination()">
+                                <span>🔥 Fire</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="glitch" onchange="updateTitleEffectCombination()">
+                                <span>✨ Glitch</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="wave" onchange="updateTitleEffectCombination()">
+                                <span>🌊 Wave</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="elastic" onchange="updateTitleEffectCombination()">
+                                <span>🎯 Elastic</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="neonGlow" onchange="updateTitleEffectCombination()">
+                                <span>💡 Neon</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="scalePulse" onchange="updateTitleEffectCombination()">
+                                <span>💓 Pulse</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 클래식 효과 -->
+                    <div>
+                        <label style="display: block; color: #87ceeb; font-size: 0.85rem; font-weight: bold; margin-bottom: 4px;">📼 클래식</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="fadeIn" onchange="updateTitleEffectCombination()">
+                                <span>Fade In</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="slideUp" onchange="updateTitleEffectCombination()">
+                                <span>Slide Up</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="zoom" onchange="updateTitleEffectCombination()">
+                                <span>Zoom</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="title-animation-effect-checkbox" data-effect="bounce" onchange="updateTitleEffectCombination()">
+                                <span>Bounce</span>
+                            </label>
+                        </div>
+                    </div>
+                    </div> <!-- title-effects-panel 닫기 -->
+                </div>
+
                 <button onclick="applyTitle()" class="btn-primary" style="margin-top: 10px; padding: 8px 16px; width: 100%; background: #10b981;">✅ 제목 적용</button>
             </div>
 
@@ -547,22 +598,72 @@
                             <option value="neon">네온</option>
                         </select>
                     </div>
-                    <div>
-                        <label style="color: #1a1a1a; font-size: 0.9rem; background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px;">동적 효과</label>
-                        <select id="overlay-subtitle-dynamic-effect"
-                                style="width: 100%; padding: 6px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 4px; color: #1a1a1a;">
-                            <option value="none" selected>없음</option>
-                            <option value="fade">✨ 페이드</option>
-                            <option value="slide-in">➡️ 슬라이드 인</option>
-                            <option value="slide-down">⬇️ 슬라이드 다운</option>
-                            <option value="slide-up">⬆️ 슬라이드 업</option>
-                            <option value="bounce">⬇️ 바운스</option>
-                            <option value="scale">🔍 스케일</option>
-                            <option value="glow">💫 글로우</option>
-                            <option value="pulse">💓 펄스</option>
-                        </select>
-                    </div>
                 </div>
+
+                <!-- 부제목 동적 효과 (복수 선택) -->
+                <div style="margin-top: 12px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; cursor: pointer;" onclick="toggleSubtitleEffectsPanel()">
+                        <label style="margin: 0; color: white; font-size: 0.9rem; font-weight: bold;">🎬 동적 효과 (복수 선택 가능)</label>
+                        <span id="subtitle-effects-toggle" style="color: white; font-size: 1rem; transition: transform 0.3s;">▼</span>
+                    </div>
+                    <div id="subtitle-effects-panel">
+
+                    <!-- 2025 트렌드 -->
+                    <div style="margin-bottom: 8px;">
+                        <label style="display: block; color: #ffd700; font-size: 0.85rem; font-weight: bold; margin-bottom: 4px;">🔥 2025 트렌드</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="fire" onchange="updateSubtitleEffectCombination()">
+                                <span>🔥 Fire</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="glitch" onchange="updateSubtitleEffectCombination()">
+                                <span>✨ Glitch</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="wave" onchange="updateSubtitleEffectCombination()">
+                                <span>🌊 Wave</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="elastic" onchange="updateSubtitleEffectCombination()">
+                                <span>🎯 Elastic</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="neonGlow" onchange="updateSubtitleEffectCombination()">
+                                <span>💡 Neon</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="scalePulse" onchange="updateSubtitleEffectCombination()">
+                                <span>💓 Pulse</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 클래식 효과 -->
+                    <div>
+                        <label style="display: block; color: #87ceeb; font-size: 0.85rem; font-weight: bold; margin-bottom: 4px;">📼 클래식</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="fadeIn" onchange="updateSubtitleEffectCombination()">
+                                <span>Fade In</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="slideUp" onchange="updateSubtitleEffectCombination()">
+                                <span>Slide Up</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="zoom" onchange="updateSubtitleEffectCombination()">
+                                <span>Zoom</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; color: white; font-size: 0.8rem; cursor: pointer;">
+                                <input type="checkbox" class="subtitle-animation-effect-checkbox" data-effect="bounce" onchange="updateSubtitleEffectCombination()">
+                                <span>Bounce</span>
+                            </label>
+                        </div>
+                    </div>
+                    </div> <!-- subtitle-effects-panel 닫기 -->
+                </div>
+
                 <button onclick="applySubtitle()" class="btn-primary" style="margin-top: 10px; padding: 8px 16px; width: 100%; background: #10b981;">✅ 부제목 적용</button>
             </div>
 
@@ -1499,25 +1600,75 @@
 
                     <!-- 동적 효과 -->
                     <div style="margin-bottom: 20px; padding: 12px; background: rgba(42, 46, 62, 0.5); border-radius: 6px;">
-                        <h5 style="margin: 0 0 12px 0; color: #f0f4f8; font-size: 0.95rem;">🎬 동적 효과 (공통)</h5>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; cursor: pointer;" onclick="toggleDynamicEffectsPanel()">
+                            <h5 style="margin: 0; color: #f0f4f8; font-size: 0.95rem;">🎬 동적 효과 (복수 선택 가능)</h5>
+                            <span id="dynamic-effects-toggle" style="color: #f0f4f8; font-size: 1rem; transition: transform 0.3s;">▼</span>
+                        </div>
+                        <div id="dynamic-effects-panel">
 
-                        <div style="margin-bottom: 12px;">
-                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">애니메이션 타입</label>
-                            <select id="animation-type" onchange="updateAnimationType(this.value)"
-                                    style="width: 100%; padding: 8px; background: rgba(26, 30, 46, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; color: #f0f4f8; font-size: 0.9rem; cursor: pointer;">
-                                <option value="none">없음</option>
-                                <option value="fadeIn">페이드 인</option>
-                                <option value="slideUp">아래에서 위로</option>
-                                <option value="slideDown">위에서 아래로</option>
-                                <option value="slideLeft">오른쪽에서 왼쪽으로</option>
-                                <option value="slideRight">왼쪽에서 오른쪽으로</option>
-                                <option value="zoom">줌 인</option>
-                                <option value="bounce">바운스</option>
-                                <option value="typing">타이핑 효과</option>
-                            </select>
+                        <!-- 2025 트렌드 효과 -->
+                        <div style="margin-bottom: 15px;">
+                            <h6 style="margin: 0 0 8px 0; color: #ffa500; font-size: 0.9rem;">🔥 2025 트렌드</h6>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,165,0,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="fire" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>🔥 Fire</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,165,0,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="glitch" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>✨ Glitch</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,165,0,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="wave" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>🌊 Wave</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,165,0,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="elastic" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>🎯 Elastic</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,165,0,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="neonGlow" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>💡 Neon</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,165,0,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="scalePulse" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>💓 Pulse</span>
+                                </label>
+                            </div>
                         </div>
 
-                        <div id="animation-controls" style="display: none;">
+                        <!-- 클래식 효과 -->
+                        <div style="margin-bottom: 15px;">
+                            <h6 style="margin: 0 0 8px 0; color: #4a9eff; font-size: 0.9rem;">📼 클래식</h6>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(74,158,255,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="fadeIn" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>Fade In</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(74,158,255,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="slideUp" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>Slide Up</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(74,158,255,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="zoom" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>Zoom</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; color: #b0c4de; font-size: 0.85rem; cursor: pointer; padding: 6px; background: rgba(26, 30, 46, 0.5); border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='rgba(74,158,255,0.1)'" onmouseout="this.style.background='rgba(26,30,46,0.5)'">
+                                    <input type="checkbox" class="animation-effect-checkbox" data-effect="bounce" onchange="updateEffectCombination()" style="cursor: pointer;">
+                                    <span>Bounce</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- 공통 설정 -->
+                        <div id="animation-controls-combined" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; margin-top: 12px;">
+                            <div style="margin-bottom: 10px;">
+                                <label style="display: flex; align-items: center; gap: 8px; color: #b0c4de; font-size: 0.85rem; cursor: pointer;">
+                                    <input type="checkbox" id="animation-loop" onchange="updateAnimationLoop(this.checked)" style="cursor: pointer;">
+                                    🔄 반복 (자막이 있는 동안 계속)
+                                </label>
+                            </div>
+
                             <div style="margin-bottom: 10px;">
                                 <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
                                     애니메이션 속도: <span id="animation-duration-value">0.5초</span>
@@ -1538,8 +1689,9 @@
                         </div>
 
                         <p style="margin: 10px 0 0 0; padding: 6px; background: rgba(139, 92, 246, 0.05); border-left: 2px solid #8b5cf6; border-radius: 3px; color: #b0c4de; font-size: 0.8rem;">
-                            💡 동적 효과는 자막이 나타날 때 적용됩니다.
+                            💡 <strong>여러 효과를 동시에 체크</strong>하여 독특한 조합을 만들어보세요! 예: Fire + Wave, Glitch + Neon
                         </p>
+                        </div> <!-- dynamic-effects-panel 닫기 -->
                     </div>
 
                     <p style="margin: 10px 0 0 0; padding: 8px; background: rgba(255, 159, 67, 0.05); border-left: 3px solid #ff9f43; border-radius: 4px; color: #b0c4de; font-size: 0.85rem;">
@@ -12360,6 +12512,48 @@ function toggleSubtitleStylePanel() {
     }
 }
 
+// 동적 효과 패널 토글 (자막 위치/스타일)
+function toggleDynamicEffectsPanel() {
+    const content = document.getElementById('dynamic-effects-panel');
+    const toggle = document.getElementById('dynamic-effects-toggle');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggle.textContent = '▼';
+    } else {
+        content.style.display = 'none';
+        toggle.textContent = '▶';
+    }
+}
+
+// 제목 동적 효과 패널 토글
+function toggleTitleEffectsPanel() {
+    const content = document.getElementById('title-effects-panel');
+    const toggle = document.getElementById('title-effects-toggle');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggle.textContent = '▼';
+    } else {
+        content.style.display = 'none';
+        toggle.textContent = '▶';
+    }
+}
+
+// 부제목 동적 효과 패널 토글
+function toggleSubtitleEffectsPanel() {
+    const content = document.getElementById('subtitle-effects-panel');
+    const toggle = document.getElementById('subtitle-effects-toggle');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggle.textContent = '▼';
+    } else {
+        content.style.display = 'none';
+        toggle.textContent = '▶';
+    }
+}
+
 // ==================== 자막 스타일 조절 ====================
 function updateSubtitlePosition(trackType, value) {
     // 퍼센트 값으로 표시
@@ -12485,6 +12679,44 @@ function updateAnimationDelay(value) {
         window.canvasPreview.setAnimationDelay(delay);
         console.log(`✅ 애니메이션 지연:`, delay);
     }
+}
+
+function updateAnimationLoop(enabled) {
+    if (window.canvasPreview) {
+        window.canvasPreview.setAnimationLoop(enabled);
+        console.log(`✅ 애니메이션 반복:`, enabled);
+    }
+}
+
+function updateEffectCombination() {
+    // 선택된 모든 효과 수집
+    const checkboxes = document.querySelectorAll('.animation-effect-checkbox:checked');
+    const selectedEffects = Array.from(checkboxes).map(cb => cb.getAttribute('data-effect'));
+
+    if (window.canvasPreview) {
+        window.canvasPreview.setAnimationEffects(selectedEffects);
+        console.log(`✅ 선택된 효과 조합:`, selectedEffects);
+    }
+}
+
+// 제목 효과 조합 업데이트
+function updateTitleEffectCombination() {
+    const checkboxes = document.querySelectorAll('.title-animation-effect-checkbox:checked');
+    const selectedEffects = Array.from(checkboxes).map(cb => cb.getAttribute('data-effect'));
+
+    // 제목 효과를 전역 변수에 저장 (applyTitle에서 사용)
+    window.titleEffects = selectedEffects;
+    console.log(`✅ 제목 효과 조합:`, selectedEffects);
+}
+
+// 부제목 효과 조합 업데이트
+function updateSubtitleEffectCombination() {
+    const checkboxes = document.querySelectorAll('.subtitle-animation-effect-checkbox:checked');
+    const selectedEffects = Array.from(checkboxes).map(cb => cb.getAttribute('data-effect'));
+
+    // 부제목 효과를 전역 변수에 저장 (applySubtitle에서 사용)
+    window.subtitleEffects = selectedEffects;
+    console.log(`✅ 부제목 효과 조합:`, selectedEffects);
 }
 
 // ==================== 성능 대시보드 ====================
@@ -12799,6 +13031,9 @@ function syncOverlaysToCanvas() {
         const titleStyle = window.getComputedStyle(titleOverlay);
         const fontSize = parseInt(titleStyle.fontSize) || 48;
 
+        // 제목에 멀티 효과 적용
+        const titleEffects = window.titleEffects || [];
+
         canvasPreview.addOverlay({
             text: titleOverlay.textContent.trim(),
             x: canvasPreview.canvas.width / 2,
@@ -12807,14 +13042,20 @@ function syncOverlaysToCanvas() {
             color: titleStyle.color || '#ffffff',
             borderWidth: 4,
             borderColor: '#000000',
-            type: 'title'  // ⭐ type 추가
+            type: 'title',  // ⭐ type 추가
+            effects: titleEffects  // ⭐ 멀티 효과 추가
         });
+
+        console.log(`🎬 제목 효과 적용:`, titleEffects);
     }
 
     // 부제목 오버레이
     if (subtitleOverlay && subtitleOverlay.style.display !== 'none' && subtitleOverlay.textContent.trim() !== '부제목을 입력하세요') {
         const subtitleStyle = window.getComputedStyle(subtitleOverlay);
         const fontSize = parseInt(subtitleStyle.fontSize) || 32;
+
+        // 부제목에 멀티 효과 적용
+        const subtitleEffects = window.subtitleEffects || [];
 
         canvasPreview.addOverlay({
             text: subtitleOverlay.textContent.trim(),
@@ -12824,8 +13065,11 @@ function syncOverlaysToCanvas() {
             color: subtitleStyle.color || '#ffe14d',
             borderWidth: 3,
             borderColor: '#000000',
-            type: 'subtitle'  // ⭐ type 추가
+            type: 'subtitle',  // ⭐ type 추가
+            effects: subtitleEffects  // ⭐ 멀티 효과 추가
         });
+
+        console.log(`🎬 부제목 효과 적용:`, subtitleEffects);
     }
 
     console.log('🎨 Canvas 오버레이 동기화 완료:', canvasPreview.overlays);
