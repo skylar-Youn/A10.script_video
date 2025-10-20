@@ -3626,9 +3626,16 @@ function updateTemplatePreview(templateOption) {
   subtitleBox.style.setProperty('left', `${subtitleX * 100}%`, 'important');
   subtitleBox.style.setProperty('top', `${subtitleY * 100}%`, 'important');
 
-  // 크기 조정 - 사용자 지정 크기로 설정
-  titleBox.style.setProperty('font-size', '36px', 'important');
-  subtitleBox.style.setProperty('font-size', '24px', 'important');
+  // 크기 조정 - 슬라이더 값 사용
+  const titleSizeSlider = document.getElementById('title-size');
+  const subtitleSizeSlider = document.getElementById('subtitle-size');
+
+  if (titleSizeSlider) {
+    titleBox.style.setProperty('font-size', `${titleSizeSlider.value}px`, 'important');
+  }
+  if (subtitleSizeSlider) {
+    subtitleBox.style.setProperty('font-size', `${subtitleSizeSlider.value}px`, 'important');
+  }
 
   // 템플릿별 스타일 적용
   preview.className = `template-preview template-${templateId}`;
@@ -3664,9 +3671,16 @@ function applyTextEffects() {
     subtitleBox.classList.add(`dynamic-${dynamicEffect}`);
   }
 
-  // 효과 적용 후에도 폰트 크기 유지
-  titleBox.style.setProperty('font-size', '36px', 'important');
-  subtitleBox.style.setProperty('font-size', '24px', 'important');
+  // 효과 적용 후에도 폰트 크기 유지 (슬라이더 값 사용)
+  const titleSizeSlider = document.getElementById('title-size');
+  const subtitleSizeSlider = document.getElementById('subtitle-size');
+
+  if (titleSizeSlider) {
+    titleBox.style.setProperty('font-size', `${titleSizeSlider.value}px`, 'important');
+  }
+  if (subtitleSizeSlider) {
+    subtitleBox.style.setProperty('font-size', `${subtitleSizeSlider.value}px`, 'important');
+  }
 }
 
 function initStoryKeywordPage() {
@@ -4777,7 +4791,11 @@ function buildProjectMarkup(project, totalDuration) {
 
                     <!-- 제목 영역 컨트롤 -->
                     <div class="area-control-group">
-                      <h4 class="area-title">📝 제목 영역</h4>
+                      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                        <h4 class="area-title" style="margin: 0;">📝 제목 영역</h4>
+                        <input type="checkbox" id="source-overlay-hide-title" style="cursor: pointer;" />
+                        <label for="source-overlay-hide-title" style="cursor: pointer; color: #94a3b8; font-size: 0.85rem; margin: 0;" title="체크하면 출처 오버레이를 숨깁니다">🙈 화면에서 숨기기</label>
+                      </div>
                       <button type="button" class="auto-adjust-btn" data-area="title">⚡ 자동조정</button>
                       <div class="control-group">
                         <label class="control-label">폰트 크기</label>
@@ -4811,7 +4829,11 @@ function buildProjectMarkup(project, totalDuration) {
 
                     <!-- 자막 영역 컨트롤 -->
                     <div class="area-control-group">
-                      <h4 class="area-title">💬 자막 영역</h4>
+                      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                        <h4 class="area-title" style="margin: 0;">💬 자막 영역</h4>
+                        <input type="checkbox" id="source-overlay-hide-subtitle" style="cursor: pointer;" />
+                        <label for="source-overlay-hide-subtitle" style="cursor: pointer; color: #94a3b8; font-size: 0.85rem; margin: 0;" title="체크하면 출처 오버레이를 숨깁니다">🙈 화면에서 숨기기</label>
+                      </div>
                       <button type="button" class="auto-adjust-btn" data-area="subtitle">⚡ 자동조정</button>
                       <div class="control-group">
                         <label class="control-label">폰트 크기</label>
@@ -5634,19 +5656,33 @@ function bindProjectHandlers() {
 
   const refreshPreview = () => {
     if (previewTitle && titleSize) {
-      previewTitle.style.fontSize = `${titleSize.value}px`;
+      const value = titleSize.value + 'px';
+      previewTitle.style.setProperty('font-size', value, 'important');
       // 크기 표시 업데이트
       const titleSizeDisplay = titleSize.parentNode.querySelector(".size-display");
       if (titleSizeDisplay) {
-        titleSizeDisplay.textContent = `${titleSize.value}px`;
+        titleSizeDisplay.textContent = value;
+      }
+      // size-bar 업데이트 (24-60 범위를 0-100%로 변환)
+      const barPercentage = ((titleSize.value - 24) / (60 - 24)) * 100;
+      const sizeBar = titleSize.parentNode.querySelector('.size-bar-fill');
+      if (sizeBar) {
+        sizeBar.style.width = barPercentage + '%';
       }
     }
     if (previewSubtitle && subtitleSize) {
-      previewSubtitle.style.fontSize = `${subtitleSize.value}px`;
+      const value = subtitleSize.value + 'px';
+      previewSubtitle.style.setProperty('font-size', value, 'important');
       // 크기 표시 업데이트
       const subtitleSizeDisplay = subtitleSize.parentNode.querySelector(".size-display");
       if (subtitleSizeDisplay) {
-        subtitleSizeDisplay.textContent = `${subtitleSize.value}px`;
+        subtitleSizeDisplay.textContent = value;
+      }
+      // size-bar 업데이트 (16-48 범위를 0-100%로 변환)
+      const barPercentage = ((subtitleSize.value - 16) / (48 - 16)) * 100;
+      const sizeBar = subtitleSize.parentNode.querySelector('.size-bar-fill');
+      if (sizeBar) {
+        sizeBar.style.width = barPercentage + '%';
       }
     }
   };
@@ -5939,43 +5975,9 @@ function bindTemplateControls(container) {
   // 저장된 설정 목록 로드
   loadSettingsList();
 
-  // 제목 크기 슬라이더
-  const titleSizeSlider = container.querySelector('#title-size');
-  if (titleSizeSlider) {
-    titleSizeSlider.addEventListener('input', function() {
-      const value = this.value + 'px';
-      this.nextElementSibling.textContent = value;
-      // size-bar 업데이트 (24-60 범위를 0-100%로 변환)
-      const barPercentage = ((this.value - 24) / (60 - 24)) * 100;
-      const sizeBar = this.nextElementSibling.nextElementSibling.querySelector('.size-bar-fill');
-      if (sizeBar) {
-        sizeBar.style.width = barPercentage + '%';
-      }
-      const titleBox = document.getElementById('preview-title');
-      if (titleBox) {
-        titleBox.style.setProperty('font-size', value, 'important');
-      }
-    });
-  }
+  // 제목 크기 슬라이더 - refreshPreview에서 이미 처리됨 (중복 제거됨)
 
-  // 자막 크기 슬라이더
-  const subtitleSizeSlider = container.querySelector('#subtitle-size');
-  if (subtitleSizeSlider) {
-    subtitleSizeSlider.addEventListener('input', function() {
-      const value = this.value + 'px';
-      this.nextElementSibling.textContent = value;
-      // size-bar 업데이트 (16-40 범위를 0-100%로 변환)
-      const barPercentage = ((this.value - 16) / (40 - 16)) * 100;
-      const sizeBar = this.nextElementSibling.nextElementSibling.querySelector('.size-bar-fill');
-      if (sizeBar) {
-        sizeBar.style.width = barPercentage + '%';
-      }
-      const subtitleBox = document.getElementById('preview-subtitle');
-      if (subtitleBox) {
-        subtitleBox.style.setProperty('font-size', value, 'important');
-      }
-    });
-  }
+  // 자막 크기 슬라이더 - refreshPreview에서 이미 처리됨 (중복 제거됨)
 
   // 미디어 추가 버튼 이벤트
   const mediaAddButtons = container.querySelectorAll('.media-add-btn');
