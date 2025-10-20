@@ -1271,36 +1271,280 @@
                 </div>
             </div>
 
-            <!-- 자막 스타일 설정 -->
-            <div class="subtitle-style-settings" style="margin-top: 20px; padding: 15px; background: rgba(26, 30, 46, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
-                <h4 style="margin: 0 0 15px 0; color: #f0f4f8; font-size: 1rem;">🎭 자막 레이아웃 템플릿</h4>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
-                    <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: rgba(42, 46, 62, 0.8); border-radius: 6px; border: 2px solid transparent; cursor: pointer; transition: all 0.3s ease;" onmouseenter="this.style.borderColor='rgba(74, 158, 255, 0.5)'" onmouseleave="if(!this.querySelector('input').checked) this.style.borderColor='transparent'">
-                        <input type="radio" name="subtitle-template-video" value="classic" checked style="width: 18px; height: 18px; cursor: pointer;" onchange="toggleBannerControls()">
-                        <div>
-                            <strong style="display: block; color: #f0f4f8; font-size: 0.95rem;">Classic</strong>
-                            <small style="color: #b0c4de; font-size: 0.85rem;">하단 실시간 자막</small>
-                        </div>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: rgba(42, 46, 62, 0.8); border-radius: 6px; border: 2px solid transparent; cursor: pointer; transition: all 0.3s ease;" onmouseenter="this.style.borderColor='rgba(74, 158, 255, 0.5)'" onmouseleave="if(!this.querySelector('input').checked) this.style.borderColor='transparent'">
-                        <input type="radio" name="subtitle-template-video" value="banner" style="width: 18px; height: 18px; cursor: pointer;" onchange="toggleBannerControls()">
-                        <div>
-                            <strong style="display: block; color: #f0f4f8; font-size: 0.95rem;">Banner</strong>
-                            <small style="color: #b0c4de; font-size: 0.85rem;">상단 배너 + 자막</small>
-                        </div>
-                    </label>
+            <!-- 자막 위치/스타일 조절 -->
+            <div class="subtitle-position-controls" style="margin-top: 20px; padding: 15px; background: rgba(26, 30, 46, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; cursor: pointer;" onclick="toggleSubtitleStylePanel()">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span id="subtitle-style-toggle" style="color: #f0f4f8; font-size: 1.2rem; transition: transform 0.3s;">▶</span>
+                        <h4 style="margin: 0; color: #f0f4f8; font-size: 1rem;">🎨 자막 위치/스타일 조절</h4>
+                    </div>
                 </div>
+                <div id="subtitle-style-panel" style="display: none;">
+                    <!-- 메인 자막 -->
+                    <div style="margin-bottom: 20px; padding: 12px; background: rgba(42, 46, 62, 0.5); border-radius: 6px;">
+                        <h5 style="margin: 0 0 12px 0; color: #f0f4f8; font-size: 0.95rem;">📺 메인 자막 (하단)</h5>
 
-                <div id="banner-controls-video" style="display: none; padding: 12px; background: rgba(42, 46, 62, 0.5); border-radius: 6px;">
-                    <div style="margin-bottom: 10px;">
-                        <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.9rem;">주 텍스트 (상단)</label>
-                        <input type="text" id="banner-primary-video" placeholder="예: 충격적인 사건!" style="width: 100%; padding: 8px; background: rgba(26, 30, 46, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; color: #f0f4f8; font-size: 0.9rem;">
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                위치 (Y): <span id="main-position-value">85%</span>
+                            </label>
+                            <input type="range" id="main-position" min="0" max="100" value="85"
+                                   oninput="updateSubtitlePosition('main', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
+
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                글자 크기: <span id="main-fontsize-value">50px</span>
+                            </label>
+                            <input type="range" id="main-fontsize" min="10" max="200" value="50"
+                                   oninput="updateSubtitleStyle('main', 'fontSize', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">글자 색상</label>
+                                <input type="color" id="main-color" value="#ffffff"
+                                       oninput="updateSubtitleStyle('main', 'color', this.value)"
+                                       style="width: 100%; height: 35px; cursor: pointer; background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">테두리 색상</label>
+                                <input type="color" id="main-bordercolor" value="#000000"
+                                       oninput="updateSubtitleStyle('main', 'borderColor', this.value)"
+                                       style="width: 100%; height: 35px; cursor: pointer; background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                테두리 두께: <span id="main-borderwidth-value">3px</span>
+                            </label>
+                            <input type="range" id="main-borderwidth" min="0" max="10" value="3" step="0.5"
+                                   oninput="updateSubtitleStyle('main', 'borderWidth', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
                     </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.9rem;">보조 텍스트 (하단) - 비워두면 실시간 자막 표시</label>
-                        <input type="text" id="banner-secondary-video" placeholder="비워두면 실시간 자막이 표시됩니다" style="width: 100%; padding: 8px; background: rgba(26, 30, 46, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; color: #f0f4f8; font-size: 0.9rem;">
+
+                    <!-- 주 자막 (번역) -->
+                    <div style="margin-bottom: 20px; padding: 12px; background: rgba(42, 46, 62, 0.5); border-radius: 6px;">
+                        <h5 style="margin: 0 0 12px 0; color: #f0f4f8; font-size: 0.95rem;">🌐 주 자막 (상단 번역)</h5>
+
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                위치 (Y): <span id="translation-position-value">15%</span>
+                            </label>
+                            <input type="range" id="translation-position" min="0" max="100" value="15"
+                                   oninput="updateSubtitlePosition('translation', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
+
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                글자 크기: <span id="translation-fontsize-value">50px</span>
+                            </label>
+                            <input type="range" id="translation-fontsize" min="10" max="200" value="50"
+                                   oninput="updateSubtitleStyle('translation', 'fontSize', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">글자 색상</label>
+                                <input type="color" id="translation-color" value="#ffe14d"
+                                       oninput="updateSubtitleStyle('translation', 'color', this.value)"
+                                       style="width: 100%; height: 35px; cursor: pointer; background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">테두리 색상</label>
+                                <input type="color" id="translation-bordercolor" value="#000000"
+                                       oninput="updateSubtitleStyle('translation', 'borderColor', this.value)"
+                                       style="width: 100%; height: 35px; cursor: pointer; background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                테두리 두께: <span id="translation-borderwidth-value">3px</span>
+                            </label>
+                            <input type="range" id="translation-borderwidth" min="0" max="10" value="3" step="0.5"
+                                   oninput="updateSubtitleStyle('translation', 'borderWidth', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
                     </div>
-                    <p style="margin: 10px 0 0 0; padding: 8px; background: rgba(0, 255, 136, 0.05); border-left: 3px solid #00ff88; border-radius: 4px; color: #b0c4de; font-size: 0.85rem;">💡 팁: 보조 텍스트를 비워두면 하단에서도 실시간 자막을 볼 수 있습니다.</p>
+
+                    <!-- 보조 자막 -->
+                    <div style="margin-bottom: 20px; padding: 12px; background: rgba(42, 46, 62, 0.5); border-radius: 6px;">
+                        <h5 style="margin: 0 0 12px 0; color: #f0f4f8; font-size: 0.95rem;">🔊 보조 자막 (중간)</h5>
+
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                위치 (Y): <span id="description-position-value">70%</span>
+                            </label>
+                            <input type="range" id="description-position" min="0" max="100" value="70"
+                                   oninput="updateSubtitlePosition('description', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
+
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                글자 크기: <span id="description-fontsize-value">50px</span>
+                            </label>
+                            <input type="range" id="description-fontsize" min="10" max="200" value="50"
+                                   oninput="updateSubtitleStyle('description', 'fontSize', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">글자 색상</label>
+                                <input type="color" id="description-color" value="#ffffff"
+                                       oninput="updateSubtitleStyle('description', 'color', this.value)"
+                                       style="width: 100%; height: 35px; cursor: pointer; background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">테두리 색상</label>
+                                <input type="color" id="description-bordercolor" value="#000000"
+                                       oninput="updateSubtitleStyle('description', 'borderColor', this.value)"
+                                       style="width: 100%; height: 35px; cursor: pointer; background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 10px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                테두리 두께: <span id="description-borderwidth-value">2px</span>
+                            </label>
+                            <input type="range" id="description-borderwidth" min="0" max="10" value="2" step="0.5"
+                                   oninput="updateSubtitleStyle('description', 'borderWidth', this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
+                    </div>
+
+                    <!-- 정적 효과 -->
+                    <div style="margin-bottom: 20px; padding: 12px; background: rgba(42, 46, 62, 0.5); border-radius: 6px;">
+                        <h5 style="margin: 0 0 12px 0; color: #f0f4f8; font-size: 0.95rem;">✨ 정적 효과 (공통)</h5>
+
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: flex; align-items: center; gap: 8px; color: #b0c4de; font-size: 0.85rem; cursor: pointer;">
+                                <input type="checkbox" id="effect-shadow-enable" onchange="updateSubtitleEffect('shadow', this.checked)" style="cursor: pointer;">
+                                그림자 효과
+                            </label>
+                            <div id="shadow-controls" style="display: none; margin-top: 8px; padding-left: 24px;">
+                                <div style="margin-bottom: 8px;">
+                                    <label style="display: block; margin-bottom: 3px; color: #b0c4de; font-size: 0.8rem;">
+                                        그림자 거리: <span id="shadow-blur-value">4px</span>
+                                    </label>
+                                    <input type="range" id="shadow-blur" min="0" max="20" value="4"
+                                           oninput="updateShadowStyle('blur', this.value)"
+                                           style="width: 100%; cursor: pointer;">
+                                </div>
+                                <div style="margin-bottom: 8px;">
+                                    <label style="display: block; margin-bottom: 3px; color: #b0c4de; font-size: 0.8rem;">
+                                        그림자 투명도: <span id="shadow-opacity-value">50%</span>
+                                    </label>
+                                    <input type="range" id="shadow-opacity" min="0" max="100" value="50"
+                                           oninput="updateShadowStyle('opacity', this.value)"
+                                           style="width: 100%; cursor: pointer;">
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 3px; color: #b0c4de; font-size: 0.8rem;">그림자 색상</label>
+                                    <input type="color" id="shadow-color" value="#000000"
+                                           oninput="updateShadowStyle('color', this.value)"
+                                           style="width: 100%; height: 30px; cursor: pointer; background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: flex; align-items: center; gap: 8px; color: #b0c4de; font-size: 0.85rem; cursor: pointer;">
+                                <input type="checkbox" id="effect-background-enable" onchange="updateSubtitleEffect('background', this.checked)" style="cursor: pointer;">
+                                배경 박스
+                            </label>
+                            <div id="background-controls" style="display: none; margin-top: 8px; padding-left: 24px;">
+                                <div style="margin-bottom: 8px;">
+                                    <label style="display: block; margin-bottom: 3px; color: #b0c4de; font-size: 0.8rem;">배경 색상</label>
+                                    <input type="color" id="background-color" value="#000000"
+                                           oninput="updateBackgroundStyle('color', this.value)"
+                                           style="width: 100%; height: 30px; cursor: pointer; background: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">
+                                </div>
+                                <div style="margin-bottom: 8px;">
+                                    <label style="display: block; margin-bottom: 3px; color: #b0c4de; font-size: 0.8rem;">
+                                        배경 투명도: <span id="background-opacity-value">70%</span>
+                                    </label>
+                                    <input type="range" id="background-opacity" min="0" max="100" value="70"
+                                           oninput="updateBackgroundStyle('opacity', this.value)"
+                                           style="width: 100%; cursor: pointer;">
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 3px; color: #b0c4de; font-size: 0.8rem;">
+                                        패딩: <span id="background-padding-value">20px</span>
+                                    </label>
+                                    <input type="range" id="background-padding" min="5" max="50" value="20"
+                                           oninput="updateBackgroundStyle('padding', this.value)"
+                                           style="width: 100%; cursor: pointer;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                전체 투명도: <span id="global-opacity-value">100%</span>
+                            </label>
+                            <input type="range" id="global-opacity" min="0" max="100" value="100"
+                                   oninput="updateGlobalOpacity(this.value)"
+                                   style="width: 100%; cursor: pointer;">
+                        </div>
+                    </div>
+
+                    <!-- 동적 효과 -->
+                    <div style="margin-bottom: 20px; padding: 12px; background: rgba(42, 46, 62, 0.5); border-radius: 6px;">
+                        <h5 style="margin: 0 0 12px 0; color: #f0f4f8; font-size: 0.95rem;">🎬 동적 효과 (공통)</h5>
+
+                        <div style="margin-bottom: 12px;">
+                            <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">애니메이션 타입</label>
+                            <select id="animation-type" onchange="updateAnimationType(this.value)"
+                                    style="width: 100%; padding: 8px; background: rgba(26, 30, 46, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; color: #f0f4f8; font-size: 0.9rem; cursor: pointer;">
+                                <option value="none">없음</option>
+                                <option value="fadeIn">페이드 인</option>
+                                <option value="slideUp">아래에서 위로</option>
+                                <option value="slideDown">위에서 아래로</option>
+                                <option value="slideLeft">오른쪽에서 왼쪽으로</option>
+                                <option value="slideRight">왼쪽에서 오른쪽으로</option>
+                                <option value="zoom">줌 인</option>
+                                <option value="bounce">바운스</option>
+                                <option value="typing">타이핑 효과</option>
+                            </select>
+                        </div>
+
+                        <div id="animation-controls" style="display: none;">
+                            <div style="margin-bottom: 10px;">
+                                <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                    애니메이션 속도: <span id="animation-duration-value">0.5초</span>
+                                </label>
+                                <input type="range" id="animation-duration" min="0.1" max="3" value="0.5" step="0.1"
+                                       oninput="updateAnimationDuration(this.value)"
+                                       style="width: 100%; cursor: pointer;">
+                            </div>
+
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; color: #b0c4de; font-size: 0.85rem;">
+                                    시작 지연: <span id="animation-delay-value">0초</span>
+                                </label>
+                                <input type="range" id="animation-delay" min="0" max="2" value="0" step="0.1"
+                                       oninput="updateAnimationDelay(this.value)"
+                                       style="width: 100%; cursor: pointer;">
+                            </div>
+                        </div>
+
+                        <p style="margin: 10px 0 0 0; padding: 6px; background: rgba(139, 92, 246, 0.05); border-left: 2px solid #8b5cf6; border-radius: 3px; color: #b0c4de; font-size: 0.8rem;">
+                            💡 동적 효과는 자막이 나타날 때 적용됩니다.
+                        </p>
+                    </div>
+
+                    <p style="margin: 10px 0 0 0; padding: 8px; background: rgba(255, 159, 67, 0.05); border-left: 3px solid #ff9f43; border-radius: 4px; color: #b0c4de; font-size: 0.85rem;">
+                        💡 팁: 슬라이더를 움직이면 실시간으로 미리보기에 반영됩니다. 드래그로도 자막 위치를 조절할 수 있습니다.
+                    </p>
                 </div>
             </div>
 
@@ -12147,6 +12391,148 @@ function togglePerformancePanel() {
     }
 }
 
+function toggleSubtitleStylePanel() {
+    const content = document.getElementById('subtitle-style-panel');
+    const toggle = document.getElementById('subtitle-style-toggle');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggle.textContent = '▼';
+        toggle.style.transform = 'rotate(0deg)';
+    } else {
+        content.style.display = 'none';
+        toggle.textContent = '▶';
+        toggle.style.transform = 'rotate(-90deg)';
+    }
+}
+
+// ==================== 자막 스타일 조절 ====================
+function updateSubtitlePosition(trackType, value) {
+    // 퍼센트 값으로 표시
+    const percent = parseInt(value);
+    document.getElementById(`${trackType}-position-value`).textContent = `${percent}%`;
+
+    // 0-1 사이의 비율로 변환하여 Canvas에 적용
+    const yPosition = percent / 100;
+
+    if (window.canvasPreview) {
+        window.canvasPreview.updateSubtitlePosition(trackType, yPosition);
+        console.log(`✅ ${trackType} 자막 위치 업데이트: ${percent}%`);
+    } else {
+        console.warn('⚠️ Canvas Preview가 초기화되지 않았습니다.');
+    }
+}
+
+function updateSubtitleStyle(trackType, property, value) {
+    // 값 표시 업데이트
+    if (property === 'fontSize') {
+        document.getElementById(`${trackType}-fontsize-value`).textContent = `${value}px`;
+        value = parseInt(value);
+    } else if (property === 'borderWidth') {
+        document.getElementById(`${trackType}-borderwidth-value`).textContent = `${value}px`;
+        value = parseFloat(value);
+    }
+
+    // Canvas에 적용
+    if (window.canvasPreview) {
+        const styleUpdate = { [property]: value };
+        window.canvasPreview.updateSubtitleStyle(trackType, styleUpdate);
+        console.log(`✅ ${trackType} 자막 ${property} 업데이트:`, value);
+    } else {
+        console.warn('⚠️ Canvas Preview가 초기화되지 않았습니다.');
+    }
+}
+
+// ==================== 정적 효과 제어 ====================
+function updateSubtitleEffect(effectType, enabled) {
+    if (effectType === 'shadow') {
+        const controls = document.getElementById('shadow-controls');
+        controls.style.display = enabled ? 'block' : 'none';
+
+        if (window.canvasPreview) {
+            window.canvasPreview.setEffectEnabled('shadow', enabled);
+        }
+    } else if (effectType === 'background') {
+        const controls = document.getElementById('background-controls');
+        controls.style.display = enabled ? 'block' : 'none';
+
+        if (window.canvasPreview) {
+            window.canvasPreview.setEffectEnabled('background', enabled);
+        }
+    }
+}
+
+function updateShadowStyle(property, value) {
+    if (property === 'blur') {
+        document.getElementById('shadow-blur-value').textContent = `${value}px`;
+        value = parseInt(value);
+    } else if (property === 'opacity') {
+        document.getElementById('shadow-opacity-value').textContent = `${value}%`;
+        value = parseFloat(value) / 100;
+    }
+
+    if (window.canvasPreview) {
+        window.canvasPreview.updateShadowEffect(property, value);
+        console.log(`✅ 그림자 ${property} 업데이트:`, value);
+    }
+}
+
+function updateBackgroundStyle(property, value) {
+    if (property === 'opacity') {
+        document.getElementById('background-opacity-value').textContent = `${value}%`;
+        value = parseFloat(value) / 100;
+    } else if (property === 'padding') {
+        document.getElementById('background-padding-value').textContent = `${value}px`;
+        value = parseInt(value);
+    }
+
+    if (window.canvasPreview) {
+        window.canvasPreview.updateBackgroundEffect(property, value);
+        console.log(`✅ 배경 ${property} 업데이트:`, value);
+    }
+}
+
+function updateGlobalOpacity(value) {
+    document.getElementById('global-opacity-value').textContent = `${value}%`;
+    const opacity = parseFloat(value) / 100;
+
+    if (window.canvasPreview) {
+        window.canvasPreview.setGlobalOpacity(opacity);
+        console.log(`✅ 전체 투명도 업데이트:`, opacity);
+    }
+}
+
+// ==================== 동적 효과 제어 ====================
+function updateAnimationType(animationType) {
+    const controls = document.getElementById('animation-controls');
+    controls.style.display = (animationType !== 'none') ? 'block' : 'none';
+
+    if (window.canvasPreview) {
+        window.canvasPreview.setAnimationType(animationType);
+        console.log(`✅ 애니메이션 타입 설정:`, animationType);
+    }
+}
+
+function updateAnimationDuration(value) {
+    document.getElementById('animation-duration-value').textContent = `${value}초`;
+    const duration = parseFloat(value);
+
+    if (window.canvasPreview) {
+        window.canvasPreview.setAnimationDuration(duration);
+        console.log(`✅ 애니메이션 속도:`, duration);
+    }
+}
+
+function updateAnimationDelay(value) {
+    document.getElementById('animation-delay-value').textContent = `${value}초`;
+    const delay = parseFloat(value);
+
+    if (window.canvasPreview) {
+        window.canvasPreview.setAnimationDelay(delay);
+        console.log(`✅ 애니메이션 지연:`, delay);
+    }
+}
+
 // ==================== 성능 대시보드 ====================
 function showPerformanceReport() {
     const resultsDiv = document.getElementById('performance-dashboard-results');
@@ -12377,6 +12763,7 @@ function toggleCanvasPreview(enabled) {
         // Canvas 미리보기 초기화
         if (!canvasPreview) {
             canvasPreview = new CanvasVideoPreview('video-canvas-preview', 'video-preview-player');
+            window.canvasPreview = canvasPreview; // 전역 접근 가능하게 설정
             console.log('✅ Canvas 미리보기 활성화됨');
         }
     } else {

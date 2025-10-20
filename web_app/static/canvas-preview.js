@@ -70,6 +70,37 @@ class CanvasVideoPreview {
         this.dragOffsetX = 0;
         this.dragOffsetY = 0;
 
+        // 정적 효과 설정
+        this.effects = {
+            shadow: {
+                enabled: false,
+                blur: 4,
+                opacity: 0.5,
+                color: '#000000'
+            },
+            background: {
+                enabled: false,
+                color: '#000000',
+                opacity: 0.7,
+                padding: 20
+            },
+            globalOpacity: 1.0
+        };
+
+        // 동적 효과 설정
+        this.animation = {
+            type: 'none', // 'none', 'fadeIn', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'zoom', 'bounce', 'typing'
+            duration: 0.5,
+            delay: 0
+        };
+
+        // 애니메이션 상태 추적 (각 자막의 시작 시간 기록)
+        this.subtitleAnimationStates = {
+            main: { startTime: null, currentSubtitleId: null },
+            translation: { startTime: null, currentSubtitleId: null },
+            description: { startTime: null, currentSubtitleId: null }
+        };
+
         this.setupEventListeners();
         this.setupDragListeners();
     }
@@ -249,15 +280,15 @@ class CanvasVideoPreview {
     }
 
     /**
-     * 단일 텍스트 렌더링
+     * 단일 텍스트 렌더링 (효과 적용)
      */
-    renderText(overlay) {
+    renderText(overlay, animationProgress = null) {
         const { width, height } = this.canvas;
 
         // FFmpeg와 동일한 좌표계 사용
-        const x = overlay.x || width / 2;
-        const y = overlay.y || height / 2;
-        const text = overlay.text || '';
+        let x = overlay.x || width / 2;
+        let y = overlay.y || height / 2;
+        let text = overlay.text || '';
         const fontSize = overlay.fontSize || 48;
 
         // 텍스트 언어 감지 후 폰트 선택 (일본어 우선 처리)
@@ -268,10 +299,18 @@ class CanvasVideoPreview {
         const borderWidth = overlay.borderWidth !== undefined ? overlay.borderWidth : Math.max(4, Math.floor(fontSize * 0.1));
         const borderColor = overlay.borderColor || '#000000';
 
-        // 배경 설정
-        const hasBackground = overlay.backgroundColor || overlay.showBackground;
-        const backgroundColor = overlay.backgroundColor || 'rgba(0, 0, 0, 0.5)';
-        const padding = overlay.padding || fontSize * 0.3;
+        // 배경 설정 (overlay 자체 배경 또는 전역 효과 배경)
+        const hasOverlayBackground = overlay.backgroundColor || overlay.showBackground;
+        const hasEffectBackground = this.effects.background.enabled && overlay.isSubtitle;
+        const hasBackground = hasOverlayBackground || hasEffectBackground;
+
+        const backgroundColor = hasEffectBackground
+            ? this.hexToRgba(this.effects.background.color, this.effects.background.opacity)
+            : (overlay.backgroundColor || 'rgba(0, 0, 0, 0.5)');
+
+        const padding = hasEffectBackground
+            ? this.effects.background.padding
+            : (overlay.padding || fontSize * 0.3);
 
         // 폰트 설정
         this.ctx.font = `bold ${fontSize}px ${fontFamily}`;
@@ -283,15 +322,89 @@ class CanvasVideoPreview {
         const textWidth = metrics.width;
         const textHeight = fontSize * 1.2; // 대략적인 높이
 
+        // 애니메이션 효과 적용
+        let opacity = this.effects.globalOpacity;
+        let scale = 1.0;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (animationProgress !== null && animationProgress < 1.0) {
+            const easeProgress = this.easeOutCubic(animationProgress);
+
+            switch (this.animation.type) {
+                case 'fadeIn':
+                    opacity *= easeProgress;
+                    break;
+                case 'slideUp':
+                    offsetY = (1 - easeProgress) * 100;
+                    opacity *= easeProgress;
+                    break;
+                case 'slideDown':
+                    offsetY = -(1 - easeProgress) * 100;
+                    opacity *= easeProgress;
+                    break;
+                case 'slideLeft':
+                    offsetX = (1 - easeProgress) * 200;
+                    opacity *= easeProgress;
+                    break;
+                case 'slideRight':
+                    offsetX = -(1 - easeProgress) * 200;
+                    opacity *= easeProgress;
+                    break;
+                case 'zoom':
+                    scale = 0.5 + (easeProgress * 0.5);
+                    opacity *= easeProgress;
+                    break;
+                case 'bounce':
+                    const bounce = Math.abs(Math.sin(easeProgress * Math.PI));
+                    offsetY = -bounce * 30;
+                    break;
+                case 'typing':
+                    // 타이핑 효과: 글자를 점진적으로 표시
+                    const visibleChars = Math.floor(text.length * easeProgress);
+                    text = text.substring(0, visibleChars);
+                    break;
+            }
+        }
+
+        // 위치 조정
+        x += offsetX;
+        y += offsetY;
+
+        // 전역 투명도와 애니메이션 투명도 적용
+        this.ctx.globalAlpha = opacity;
+
+        // 그림자 효과
+        if (this.effects.shadow.enabled && overlay.isSubtitle) {
+            this.ctx.shadowBlur = this.effects.shadow.blur;
+            this.ctx.shadowColor = this.hexToRgba(this.effects.shadow.color, this.effects.shadow.opacity);
+            this.ctx.shadowOffsetX = 2;
+            this.ctx.shadowOffsetY = 2;
+        }
+
+        // 스케일 적용 (zoom 효과)
+        if (scale !== 1.0) {
+            this.ctx.save();
+            this.ctx.translate(x, y);
+            this.ctx.scale(scale, scale);
+            this.ctx.translate(-x, -y);
+        }
+
         // 배경 박스 그리기 (필요한 경우)
-        if (hasBackground) {
+        if (hasBackground && text.length > 0) {
             const boxX = x - textWidth / 2 - padding;
             const boxY = y - textHeight / 2 - padding;
             const boxWidth = textWidth + padding * 2;
             const boxHeight = textHeight + padding * 2;
 
             this.ctx.fillStyle = backgroundColor;
+            this.ctx.shadowBlur = 0; // 배경에는 그림자 제거
             this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+
+            // 그림자 복원
+            if (this.effects.shadow.enabled && overlay.isSubtitle) {
+                this.ctx.shadowBlur = this.effects.shadow.blur;
+            }
         }
 
         // 텍스트 외곽선 (FFmpeg의 borderw와 동기화)
@@ -307,10 +420,40 @@ class CanvasVideoPreview {
         // 텍스트 채우기
         this.ctx.fillStyle = color;
         this.ctx.fillText(text, x, y);
+
+        // 스케일 복원
+        if (scale !== 1.0) {
+            this.ctx.restore();
+        }
+
+        // 그림자 효과 제거
+        this.ctx.shadowBlur = 0;
+        this.ctx.shadowOffsetX = 0;
+        this.ctx.shadowOffsetY = 0;
+
+        // 투명도 복원
+        this.ctx.globalAlpha = 1.0;
     }
 
     /**
-     * 자막 렌더링 (현재 시간에 맞는 자막 표시)
+     * Ease out cubic 함수 (부드러운 애니메이션)
+     */
+    easeOutCubic(t) {
+        return 1 - Math.pow(1 - t, 3);
+    }
+
+    /**
+     * Hex 색상을 RGBA로 변환
+     */
+    hexToRgba(hex, alpha) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    /**
+     * 자막 렌더링 (현재 시간에 맞는 자막 표시, 애니메이션 적용)
      */
     renderSubtitles() {
         const currentTime = this.video.currentTime;
@@ -320,6 +463,7 @@ class CanvasVideoPreview {
         if (this.subtitleEnabled.main && this.timelineSubtitles.main.length > 0) {
             const mainSubtitle = this.findSubtitleAtTime(this.timelineSubtitles.main, currentTime);
             if (mainSubtitle) {
+                const animProgress = this.getAnimationProgress('main', mainSubtitle, currentTime);
                 const style = this.subtitleStyles.main;
                 this.renderText({
                     x: width / 2,
@@ -329,8 +473,12 @@ class CanvasVideoPreview {
                     // fontFamily는 renderText에서 자동 감지되도록 생략
                     color: style.color,
                     borderWidth: style.borderWidth,
-                    borderColor: style.borderColor
-                });
+                    borderColor: style.borderColor,
+                    isSubtitle: true
+                }, animProgress);
+            } else {
+                // 자막이 없으면 애니메이션 상태 초기화
+                this.subtitleAnimationStates.main.currentSubtitleId = null;
             }
         }
 
@@ -338,6 +486,7 @@ class CanvasVideoPreview {
         if (this.subtitleEnabled.translation && this.timelineSubtitles.translation.length > 0) {
             const translationSubtitle = this.findSubtitleAtTime(this.timelineSubtitles.translation, currentTime);
             if (translationSubtitle) {
+                const animProgress = this.getAnimationProgress('translation', translationSubtitle, currentTime);
                 const style = this.subtitleStyles.translation;
                 this.renderText({
                     x: width / 2,
@@ -347,8 +496,11 @@ class CanvasVideoPreview {
                     // fontFamily는 renderText에서 자동 감지되도록 생략
                     color: style.color,
                     borderWidth: style.borderWidth,
-                    borderColor: style.borderColor
-                });
+                    borderColor: style.borderColor,
+                    isSubtitle: true
+                }, animProgress);
+            } else {
+                this.subtitleAnimationStates.translation.currentSubtitleId = null;
             }
         }
 
@@ -356,6 +508,7 @@ class CanvasVideoPreview {
         if (this.subtitleEnabled.description && this.timelineSubtitles.description.length > 0) {
             const descriptionSubtitle = this.findSubtitleAtTime(this.timelineSubtitles.description, currentTime);
             if (descriptionSubtitle) {
+                const animProgress = this.getAnimationProgress('description', descriptionSubtitle, currentTime);
                 const style = this.subtitleStyles.description;
                 this.renderText({
                     x: width / 2,
@@ -365,8 +518,11 @@ class CanvasVideoPreview {
                     // fontFamily는 renderText에서 자동 감지되도록 생략
                     color: style.color,
                     borderWidth: style.borderWidth,
-                    borderColor: style.borderColor
-                });
+                    borderColor: style.borderColor,
+                    isSubtitle: true
+                }, animProgress);
+            } else {
+                this.subtitleAnimationStates.description.currentSubtitleId = null;
             }
         }
 
@@ -399,6 +555,38 @@ class CanvasVideoPreview {
         return subtitles.find(sub => {
             return currentTime >= sub.startTime && currentTime <= sub.endTime;
         });
+    }
+
+    /**
+     * 애니메이션 진행도 계산 (0~1, 1이면 완료)
+     */
+    getAnimationProgress(trackType, subtitle, currentTime) {
+        if (this.animation.type === 'none') {
+            return null; // 애니메이션 없음
+        }
+
+        const state = this.subtitleAnimationStates[trackType];
+        const subtitleId = `${subtitle.startTime}-${subtitle.text}`;
+
+        // 새로운 자막인 경우 시작 시간 기록
+        if (state.currentSubtitleId !== subtitleId) {
+            state.currentSubtitleId = subtitleId;
+            state.startTime = subtitle.startTime;
+        }
+
+        // 애니메이션 지연 적용
+        const effectiveStartTime = state.startTime + this.animation.delay;
+
+        // 현재 시간이 지연 시간 이전이면 애니메이션 안 함
+        if (currentTime < effectiveStartTime) {
+            return 0;
+        }
+
+        // 애니메이션 진행도 계산
+        const elapsed = currentTime - effectiveStartTime;
+        const progress = Math.min(elapsed / this.animation.duration, 1.0);
+
+        return progress;
     }
 
     /**
@@ -808,6 +996,77 @@ class CanvasVideoPreview {
         const bottom = textY + textHeight / 2;
 
         return pointX >= left && pointX <= right && pointY >= top && pointY <= bottom;
+    }
+
+    // ==================== 효과 설정 메서드 ====================
+
+    /**
+     * 효과 활성화/비활성화
+     */
+    setEffectEnabled(effectType, enabled) {
+        if (effectType === 'shadow') {
+            this.effects.shadow.enabled = enabled;
+        } else if (effectType === 'background') {
+            this.effects.background.enabled = enabled;
+        }
+        this.render();
+    }
+
+    /**
+     * 그림자 효과 업데이트
+     */
+    updateShadowEffect(property, value) {
+        if (this.effects.shadow.hasOwnProperty(property)) {
+            this.effects.shadow[property] = value;
+            this.render();
+        }
+    }
+
+    /**
+     * 배경 효과 업데이트
+     */
+    updateBackgroundEffect(property, value) {
+        if (this.effects.background.hasOwnProperty(property)) {
+            this.effects.background[property] = value;
+            this.render();
+        }
+    }
+
+    /**
+     * 전역 투명도 설정
+     */
+    setGlobalOpacity(opacity) {
+        this.effects.globalOpacity = opacity;
+        this.render();
+    }
+
+    /**
+     * 애니메이션 타입 설정
+     */
+    setAnimationType(type) {
+        this.animation.type = type;
+        // 애니메이션 타입이 변경되면 모든 자막의 애니메이션 상태 초기화
+        Object.keys(this.subtitleAnimationStates).forEach(key => {
+            this.subtitleAnimationStates[key].currentSubtitleId = null;
+            this.subtitleAnimationStates[key].startTime = null;
+        });
+        this.render();
+    }
+
+    /**
+     * 애니메이션 속도 설정
+     */
+    setAnimationDuration(duration) {
+        this.animation.duration = duration;
+        this.render();
+    }
+
+    /**
+     * 애니메이션 지연 설정
+     */
+    setAnimationDelay(delay) {
+        this.animation.delay = delay;
+        this.render();
     }
 }
 
