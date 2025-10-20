@@ -754,16 +754,147 @@ class CanvasVideoPreview {
         if (this.isDragging) {
             console.log(`✅ 드래그 완료: ${this.dragTarget.type}`);
 
-            // 위치 정보 출력
+            // 타임라인 자막 위치 동기화
             if (['main', 'translation', 'description'].includes(this.dragTarget.type)) {
                 const yPos = this.subtitleStyles[this.dragTarget.type].yPosition;
-                console.log(`📍 ${this.dragTarget.type} 자막 위치: ${(yPos * 100).toFixed(1)}%`);
+                const yPercent = (yPos * 100).toFixed(1);
+                console.log(`📍 ${this.dragTarget.type} 자막 위치: ${yPercent}%`);
+
+                // HTML 오버레이 및 컨트롤 입력 필드에 동기화
+                this.syncSubtitlePositionToHTML(this.dragTarget.type, yPercent);
+            }
+            // 일반 오버레이(제목/부제목/출처) 위치 동기화
+            else if (this.dragTarget.type === 'overlay') {
+                const overlay = this.overlays[this.dragTarget.index];
+                console.log(`🔍 overlay 객체 확인:`, overlay);
+
+                if (overlay) {
+                    const yPercent = ((overlay.y / this.canvas.height) * 100).toFixed(1);
+                    console.log(`📍 overlay[${this.dragTarget.index}] 위치: ${yPercent}%`);
+                    console.log(`📝 overlay 텍스트: "${overlay.text}"`);
+                    console.log(`🎨 overlay 타입: ${overlay.type || '미지정'}`);
+
+                    // 오버레이 타입별로 HTML 동기화
+                    this.syncOverlayPositionToHTML(overlay, yPercent);
+                } else {
+                    console.warn(`⚠️ overlay[${this.dragTarget.index}] 객체를 찾을 수 없습니다`);
+                }
             }
         }
 
         this.isDragging = false;
         this.dragTarget = null;
         this.canvas.style.cursor = 'default';
+    }
+
+    /**
+     * 타임라인 자막 드래그 위치를 HTML 오버레이 및 컨트롤 입력 필드에 동기화
+     */
+    syncSubtitlePositionToHTML(type, yPercent) {
+        // 타입별 오버레이 및 컨트롤 매핑
+        const overlayMap = {
+            'main': {
+                overlayId: 'japanese-subtitle-overlay',
+                yInputId: 'overlay-japanese-y'
+            },
+            'translation': {
+                overlayId: 'korean-subtitle-overlay',
+                yInputId: 'overlay-korean-y'
+            },
+            'description': {
+                overlayId: 'english-subtitle-overlay',
+                yInputId: 'overlay-english-y'
+            }
+        };
+
+        const mapping = overlayMap[type];
+        if (!mapping) return;
+
+        // HTML 오버레이 위치 업데이트
+        const overlay = document.getElementById(mapping.overlayId);
+        if (overlay) {
+            overlay.style.top = yPercent + '%';
+            console.log(`  🔄 ${mapping.overlayId} 위치 동기화: ${yPercent}%`);
+        }
+
+        // 컨트롤 입력 필드 업데이트
+        const yInput = document.getElementById(mapping.yInputId);
+        if (yInput) {
+            yInput.value = Math.round(parseFloat(yPercent));
+            console.log(`  🎛️ ${mapping.yInputId} 값 업데이트: ${Math.round(parseFloat(yPercent))}`);
+        }
+    }
+
+    /**
+     * 일반 오버레이 드래그 위치를 HTML에 동기화
+     */
+    syncOverlayPositionToHTML(overlay, yPercent) {
+        if (!overlay.type) {
+            console.warn(`  ⚠️ overlay에 type 정보가 없습니다. 동기화 불가.`);
+            return;
+        }
+
+        // overlay.type에 따른 HTML 요소 및 컨트롤 매핑
+        const overlayMap = {
+            'title': {
+                overlayId: 'video-title-overlay',
+                // 제목은 현재 Y 위치 컨트롤이 없음 (transform 사용)
+                updateMethod: 'transform'
+            },
+            'subtitle': {
+                overlayId: 'video-subtitle-overlay',
+                // 부제목도 현재 Y 위치 컨트롤이 없음 (transform 사용)
+                updateMethod: 'transform'
+            },
+            'korean': {
+                overlayId: 'korean-subtitle-overlay',
+                yInputId: 'overlay-korean-y',
+                updateMethod: 'percentage'
+            },
+            'english': {
+                overlayId: 'english-subtitle-overlay',
+                yInputId: 'overlay-english-y',
+                updateMethod: 'percentage'
+            }
+        };
+
+        const mapping = overlayMap[overlay.type];
+        if (!mapping) {
+            console.warn(`  ⚠️ 알 수 없는 overlay 타입: ${overlay.type}`);
+            return;
+        }
+
+        // HTML 오버레이 위치 업데이트
+        const htmlOverlay = document.getElementById(mapping.overlayId);
+        if (!htmlOverlay) {
+            console.warn(`  ⚠️ HTML 요소를 찾을 수 없음: ${mapping.overlayId}`);
+            return;
+        }
+
+        if (mapping.updateMethod === 'percentage') {
+            // 백분율 방식 (korean, english)
+            htmlOverlay.style.top = yPercent + '%';
+            console.log(`  🔄 ${mapping.overlayId} 위치 동기화: ${yPercent}%`);
+
+            // 컨트롤 입력 필드 업데이트
+            if (mapping.yInputId) {
+                const yInput = document.getElementById(mapping.yInputId);
+                if (yInput) {
+                    yInput.value = Math.round(parseFloat(yPercent));
+                    console.log(`  🎛️ ${mapping.yInputId} 값 업데이트: ${Math.round(parseFloat(yPercent))}`);
+                }
+            }
+        } else if (mapping.updateMethod === 'transform') {
+            // transform 방식 (title, subtitle)
+            // 현재 translateX 유지하면서 translateY만 업데이트
+            const currentTransform = htmlOverlay.style.transform || '';
+            const xMatch = currentTransform.match(/translateX\(([^)]+)\)/);
+            const translateX = xMatch ? xMatch[1] : '-50%';
+
+            htmlOverlay.style.top = yPercent + '%';
+            htmlOverlay.style.transform = `translateX(${translateX})`;
+            console.log(`  🔄 ${mapping.overlayId} 위치 동기화: top=${yPercent}%`);
+        }
     }
 
     /**

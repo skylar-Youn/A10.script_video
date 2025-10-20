@@ -8631,8 +8631,87 @@ function clearQuickSubtitle() {
 // 타임라인 자막을 화면 오버레이에 표시하는 함수
 function updateSubtitleOverlaysFromTimeline(currentTime) {
     // 체크박스 상태 확인
+    const mainEnabled = document.getElementById('track-main-subtitle-enable')?.checked;
     const translationEnabled = document.getElementById('track-translation-subtitle-enable')?.checked;
     const descriptionEnabled = document.getElementById('track-description-subtitle-enable')?.checked;
+
+    // 메인 자막 오버레이 업데이트 (main - 일본어)
+    const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+    const japaneseInput = document.getElementById('overlay-japanese-input');
+
+    if (japaneseOverlay) {
+        let subtitleChanged = false;
+        // 타임라인 트랙이 활성화되어 있고 자막 데이터가 있는 경우
+        if (mainEnabled && loadedSubtitles.main && loadedSubtitles.main.length > 0) {
+            const currentSubtitle = findSubtitleAtTime(loadedSubtitles.main, currentTime);
+            if (currentSubtitle) {
+                // 자막 내용이 바뀐 경우에만 업데이트
+                if (japaneseOverlay.textContent !== currentSubtitle.text) {
+                    japaneseOverlay.textContent = currentSubtitle.text;
+                    subtitleChanged = true;
+                }
+
+                // 컨트롤에서 설정된 스타일 적용
+                const size = document.getElementById('overlay-japanese-size')?.value || '30';
+                const color = document.getElementById('overlay-japanese-color')?.value || '#000000';
+                const x = document.getElementById('overlay-japanese-x')?.value || '50';
+                const y = document.getElementById('overlay-japanese-y')?.value || '73';
+                const staticEffect = document.getElementById('overlay-japanese-static-effect')?.value || 'outline';
+                const dynamicEffect = document.getElementById('overlay-japanese-dynamic-effect')?.value || 'none';
+
+                japaneseOverlay.style.display = 'block';
+                japaneseOverlay.style.opacity = '1';
+                japaneseOverlay.style.fontSize = size + 'px';
+                japaneseOverlay.style.color = color;
+                japaneseOverlay.style.left = x + '%';
+                japaneseOverlay.style.top = y + '%';
+                japaneseOverlay.classList.remove('empty');
+
+                // 일본어 폰트 최적화
+                const optimalFont = getFontFamilyForLanguage('ja');
+                japaneseOverlay.style.fontFamily = optimalFont;
+
+                // 효과 제거 후 재적용
+                japaneseOverlay.className = 'custom-subtitle-overlay';
+                japaneseOverlay.setAttribute('data-lang', 'japanese');
+                japaneseOverlay.setAttribute('lang', 'ja');
+
+                // 정적 효과 적용
+                if (staticEffect && staticEffect !== 'none') {
+                    japaneseOverlay.classList.add(`effect-${staticEffect}`);
+                }
+
+                // 동적 효과 적용
+                if (dynamicEffect && dynamicEffect !== 'none') {
+                    japaneseOverlay.classList.add(`effect-${dynamicEffect}`);
+                }
+            } else {
+                // 현재 시간에 자막이 없으면 숨김
+                if (japaneseOverlay.textContent !== '') {
+                    subtitleChanged = true;
+                }
+                japaneseOverlay.textContent = '';
+                japaneseOverlay.style.display = 'none';
+                japaneseOverlay.classList.add('empty');
+            }
+        } else if (!mainEnabled) {
+            // 타임라인 트랙이 비활성화된 경우 - 수동 입력된 텍스트가 있다면 유지, 없으면 숨김
+            if (!japaneseInput || !japaneseInput.value.trim()) {
+                if (japaneseOverlay.textContent !== '') {
+                    subtitleChanged = true;
+                }
+                japaneseOverlay.textContent = '';
+                japaneseOverlay.style.display = 'none';
+                japaneseOverlay.classList.add('empty');
+            }
+            // 수동 입력 텍스트가 있으면 그대로 유지 (applyJapaneseSubtitle로 설정된 상태)
+        }
+
+        // Canvas 동기화 (자막이 변경된 경우에만)
+        if (subtitleChanged && typeof updateCanvasText === 'function') {
+            updateCanvasText();
+        }
+    }
 
     // 주자막 오버레이 업데이트 (translation)
     const koreanOverlay = document.getElementById('korean-subtitle-overlay');
@@ -8649,9 +8728,42 @@ function updateSubtitleOverlaysFromTimeline(currentTime) {
                     koreanOverlay.textContent = currentSubtitle.text;
                     subtitleChanged = true;
                 }
+
+                // 컨트롤에서 설정된 스타일 적용
+                const size = document.getElementById('overlay-korean-size')?.value || '32';
+                const color = document.getElementById('overlay-korean-color')?.value || '#ffffff';
+                const x = document.getElementById('overlay-korean-x')?.value || '50';
+                const y = document.getElementById('overlay-korean-y')?.value || '65';
+                const staticEffect = document.getElementById('overlay-korean-static-effect')?.value || 'outline';
+                const dynamicEffect = document.getElementById('overlay-korean-dynamic-effect')?.value || 'none';
+
                 koreanOverlay.style.display = 'block';
                 koreanOverlay.style.opacity = '1';
+                koreanOverlay.style.fontSize = size + 'px';
+                koreanOverlay.style.color = color;
+                koreanOverlay.style.left = x + '%';
+                koreanOverlay.style.top = y + '%';
                 koreanOverlay.classList.remove('empty');
+
+                // 언어 감지 및 폰트 적용
+                const detectedLang = detectLanguage(currentSubtitle.text);
+                const optimalFont = getFontFamilyForLanguage(detectedLang);
+                koreanOverlay.style.fontFamily = optimalFont;
+
+                // 효과 제거 후 재적용
+                koreanOverlay.className = 'custom-subtitle-overlay';
+                koreanOverlay.setAttribute('data-lang', detectedLang);
+                koreanOverlay.setAttribute('lang', detectedLang);
+
+                // 정적 효과 적용
+                if (staticEffect && staticEffect !== 'none') {
+                    koreanOverlay.classList.add(`effect-${staticEffect}`);
+                }
+
+                // 동적 효과 적용
+                if (dynamicEffect && dynamicEffect !== 'none') {
+                    koreanOverlay.classList.add(`effect-${dynamicEffect}`);
+                }
             } else {
                 // 현재 시간에 자막이 없으면 숨김
                 if (koreanOverlay.textContent !== '') {
@@ -8695,9 +8807,42 @@ function updateSubtitleOverlaysFromTimeline(currentTime) {
                     englishOverlay.textContent = currentSubtitle.text;
                     subtitleChanged = true;
                 }
+
+                // 컨트롤에서 설정된 스타일 적용
+                const size = document.getElementById('overlay-english-size')?.value || '28';
+                const color = document.getElementById('overlay-english-color')?.value || '#ffe14d';
+                const x = document.getElementById('overlay-english-x')?.value || '50';
+                const y = document.getElementById('overlay-english-y')?.value || '95';
+                const staticEffect = document.getElementById('overlay-english-static-effect')?.value || 'outline';
+                const dynamicEffect = document.getElementById('overlay-english-dynamic-effect')?.value || 'none';
+
                 englishOverlay.style.display = 'block';
                 englishOverlay.style.opacity = '1';
+                englishOverlay.style.fontSize = size + 'px';
+                englishOverlay.style.color = color;
+                englishOverlay.style.left = x + '%';
+                englishOverlay.style.top = y + '%';
                 englishOverlay.classList.remove('empty');
+
+                // 언어 감지 및 폰트 적용
+                const detectedLang = detectLanguage(currentSubtitle.text);
+                const optimalFont = getFontFamilyForLanguage(detectedLang);
+                englishOverlay.style.fontFamily = optimalFont;
+
+                // 효과 제거 후 재적용
+                englishOverlay.className = 'custom-subtitle-overlay';
+                englishOverlay.setAttribute('data-lang', detectedLang);
+                englishOverlay.setAttribute('lang', detectedLang);
+
+                // 정적 효과 적용
+                if (staticEffect && staticEffect !== 'none') {
+                    englishOverlay.classList.add(`effect-${staticEffect}`);
+                }
+
+                // 동적 효과 적용
+                if (dynamicEffect && dynamicEffect !== 'none') {
+                    englishOverlay.classList.add(`effect-${dynamicEffect}`);
+                }
             } else {
                 // 현재 시간에 자막이 없으면 숨김
                 if (englishOverlay.textContent !== '') {
@@ -9419,6 +9564,124 @@ document.addEventListener('DOMContentLoaded', function() {
         subtitleDynamicEffect.addEventListener('change', updateTextOverlays);
     }
 
+    // 일본어 자막 크기 슬라이더
+    const japaneseSize = document.getElementById('overlay-japanese-size');
+    if (japaneseSize) {
+        japaneseSize.addEventListener('input', function() {
+            const sizeValue = this.value + 'px';
+            document.getElementById('japanese-size-display').textContent = sizeValue;
+
+            // 메인 자막 오버레이에 실시간 적용
+            const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+            if (japaneseOverlay && !japaneseOverlay.classList.contains('empty')) {
+                japaneseOverlay.style.fontSize = sizeValue;
+            }
+
+            // Canvas에도 동기화
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 일본어 자막 색상
+    const japaneseColor = document.getElementById('overlay-japanese-color');
+    if (japaneseColor) {
+        japaneseColor.addEventListener('input', function() {
+            const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+            if (japaneseOverlay && !japaneseOverlay.classList.contains('empty')) {
+                japaneseOverlay.style.color = this.value;
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 일본어 자막 X 위치
+    const japaneseX = document.getElementById('overlay-japanese-x');
+    if (japaneseX) {
+        japaneseX.addEventListener('input', function() {
+            const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+            if (japaneseOverlay && !japaneseOverlay.classList.contains('empty')) {
+                japaneseOverlay.style.left = this.value + '%';
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 일본어 자막 Y 위치
+    const japaneseY = document.getElementById('overlay-japanese-y');
+    if (japaneseY) {
+        japaneseY.addEventListener('input', function() {
+            const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+            if (japaneseOverlay && !japaneseOverlay.classList.contains('empty')) {
+                japaneseOverlay.style.top = this.value + '%';
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 일본어 자막 정적 효과
+    const japaneseStaticEffect = document.getElementById('overlay-japanese-static-effect');
+    if (japaneseStaticEffect) {
+        japaneseStaticEffect.addEventListener('change', function() {
+            const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+            if (japaneseOverlay && !japaneseOverlay.classList.contains('empty')) {
+                // 기존 효과 제거
+                japaneseOverlay.className = 'custom-subtitle-overlay';
+                japaneseOverlay.setAttribute('data-lang', 'japanese');
+                japaneseOverlay.setAttribute('lang', 'ja');
+
+                // 새 효과 적용
+                if (this.value && this.value !== 'none') {
+                    japaneseOverlay.classList.add(`effect-${this.value}`);
+                }
+
+                // 동적 효과도 다시 추가
+                const dynamicEffect = document.getElementById('overlay-japanese-dynamic-effect')?.value;
+                if (dynamicEffect && dynamicEffect !== 'none') {
+                    japaneseOverlay.classList.add(`effect-${dynamicEffect}`);
+                }
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 일본어 자막 동적 효과
+    const japaneseDynamicEffect = document.getElementById('overlay-japanese-dynamic-effect');
+    if (japaneseDynamicEffect) {
+        japaneseDynamicEffect.addEventListener('change', function() {
+            const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
+            if (japaneseOverlay && !japaneseOverlay.classList.contains('empty')) {
+                // 기존 효과 제거
+                japaneseOverlay.className = 'custom-subtitle-overlay';
+                japaneseOverlay.setAttribute('data-lang', 'japanese');
+                japaneseOverlay.setAttribute('lang', 'ja');
+
+                // 정적 효과 다시 추가
+                const staticEffect = document.getElementById('overlay-japanese-static-effect')?.value;
+                if (staticEffect && staticEffect !== 'none') {
+                    japaneseOverlay.classList.add(`effect-${staticEffect}`);
+                }
+
+                // 새 동적 효과 적용
+                if (this.value && this.value !== 'none') {
+                    japaneseOverlay.classList.add(`effect-${this.value}`);
+                }
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
     // 한글 자막 크기 슬라이더
     const koreanSize = document.getElementById('overlay-korean-size');
     if (koreanSize) {
@@ -9428,11 +9691,109 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // 주자막 오버레이에 실시간 적용
             const koreanOverlay = document.getElementById('korean-subtitle-overlay');
-            if (koreanOverlay) {
+            if (koreanOverlay && !koreanOverlay.classList.contains('empty')) {
                 koreanOverlay.style.fontSize = sizeValue;
             }
 
             // Canvas에도 동기화
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 한글 자막 색상
+    const koreanColor = document.getElementById('overlay-korean-color');
+    if (koreanColor) {
+        koreanColor.addEventListener('input', function() {
+            const koreanOverlay = document.getElementById('korean-subtitle-overlay');
+            if (koreanOverlay && !koreanOverlay.classList.contains('empty')) {
+                koreanOverlay.style.color = this.value;
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 한글 자막 X 위치
+    const koreanX = document.getElementById('overlay-korean-x');
+    if (koreanX) {
+        koreanX.addEventListener('input', function() {
+            const koreanOverlay = document.getElementById('korean-subtitle-overlay');
+            if (koreanOverlay && !koreanOverlay.classList.contains('empty')) {
+                koreanOverlay.style.left = this.value + '%';
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 한글 자막 Y 위치
+    const koreanY = document.getElementById('overlay-korean-y');
+    if (koreanY) {
+        koreanY.addEventListener('input', function() {
+            const koreanOverlay = document.getElementById('korean-subtitle-overlay');
+            if (koreanOverlay && !koreanOverlay.classList.contains('empty')) {
+                koreanOverlay.style.top = this.value + '%';
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 한글 자막 정적 효과
+    const koreanStaticEffect = document.getElementById('overlay-korean-static-effect');
+    if (koreanStaticEffect) {
+        koreanStaticEffect.addEventListener('change', function() {
+            const koreanOverlay = document.getElementById('korean-subtitle-overlay');
+            if (koreanOverlay && !koreanOverlay.classList.contains('empty')) {
+                // 기존 효과 제거
+                koreanOverlay.className = 'custom-subtitle-overlay';
+                const lang = koreanOverlay.getAttribute('data-lang') || 'korean';
+                koreanOverlay.setAttribute('data-lang', lang);
+
+                // 새 효과 적용
+                if (this.value && this.value !== 'none') {
+                    koreanOverlay.classList.add(`effect-${this.value}`);
+                }
+
+                // 동적 효과도 다시 추가
+                const dynamicEffect = document.getElementById('overlay-korean-dynamic-effect')?.value;
+                if (dynamicEffect && dynamicEffect !== 'none') {
+                    koreanOverlay.classList.add(`effect-${dynamicEffect}`);
+                }
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 한글 자막 동적 효과
+    const koreanDynamicEffect = document.getElementById('overlay-korean-dynamic-effect');
+    if (koreanDynamicEffect) {
+        koreanDynamicEffect.addEventListener('change', function() {
+            const koreanOverlay = document.getElementById('korean-subtitle-overlay');
+            if (koreanOverlay && !koreanOverlay.classList.contains('empty')) {
+                // 기존 효과 제거
+                koreanOverlay.className = 'custom-subtitle-overlay';
+                const lang = koreanOverlay.getAttribute('data-lang') || 'korean';
+                koreanOverlay.setAttribute('data-lang', lang);
+
+                // 정적 효과 다시 추가
+                const staticEffect = document.getElementById('overlay-korean-static-effect')?.value;
+                if (staticEffect && staticEffect !== 'none') {
+                    koreanOverlay.classList.add(`effect-${staticEffect}`);
+                }
+
+                // 새 동적 효과 적용
+                if (this.value && this.value !== 'none') {
+                    koreanOverlay.classList.add(`effect-${this.value}`);
+                }
+            }
             if (typeof updateCanvasText === 'function') {
                 updateCanvasText();
             }
@@ -9448,11 +9809,109 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // 보조자막 오버레이에 실시간 적용
             const englishOverlay = document.getElementById('english-subtitle-overlay');
-            if (englishOverlay) {
+            if (englishOverlay && !englishOverlay.classList.contains('empty')) {
                 englishOverlay.style.fontSize = sizeValue;
             }
 
             // Canvas에도 동기화
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 영어 자막 색상
+    const englishColor = document.getElementById('overlay-english-color');
+    if (englishColor) {
+        englishColor.addEventListener('input', function() {
+            const englishOverlay = document.getElementById('english-subtitle-overlay');
+            if (englishOverlay && !englishOverlay.classList.contains('empty')) {
+                englishOverlay.style.color = this.value;
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 영어 자막 X 위치
+    const englishX = document.getElementById('overlay-english-x');
+    if (englishX) {
+        englishX.addEventListener('input', function() {
+            const englishOverlay = document.getElementById('english-subtitle-overlay');
+            if (englishOverlay && !englishOverlay.classList.contains('empty')) {
+                englishOverlay.style.left = this.value + '%';
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 영어 자막 Y 위치
+    const englishY = document.getElementById('overlay-english-y');
+    if (englishY) {
+        englishY.addEventListener('input', function() {
+            const englishOverlay = document.getElementById('english-subtitle-overlay');
+            if (englishOverlay && !englishOverlay.classList.contains('empty')) {
+                englishOverlay.style.top = this.value + '%';
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 영어 자막 정적 효과
+    const englishStaticEffect = document.getElementById('overlay-english-static-effect');
+    if (englishStaticEffect) {
+        englishStaticEffect.addEventListener('change', function() {
+            const englishOverlay = document.getElementById('english-subtitle-overlay');
+            if (englishOverlay && !englishOverlay.classList.contains('empty')) {
+                // 기존 효과 제거
+                englishOverlay.className = 'custom-subtitle-overlay';
+                const lang = englishOverlay.getAttribute('data-lang') || 'english';
+                englishOverlay.setAttribute('data-lang', lang);
+
+                // 새 효과 적용
+                if (this.value && this.value !== 'none') {
+                    englishOverlay.classList.add(`effect-${this.value}`);
+                }
+
+                // 동적 효과도 다시 추가
+                const dynamicEffect = document.getElementById('overlay-english-dynamic-effect')?.value;
+                if (dynamicEffect && dynamicEffect !== 'none') {
+                    englishOverlay.classList.add(`effect-${dynamicEffect}`);
+                }
+            }
+            if (typeof updateCanvasText === 'function') {
+                updateCanvasText();
+            }
+        });
+    }
+
+    // 영어 자막 동적 효과
+    const englishDynamicEffect = document.getElementById('overlay-english-dynamic-effect');
+    if (englishDynamicEffect) {
+        englishDynamicEffect.addEventListener('change', function() {
+            const englishOverlay = document.getElementById('english-subtitle-overlay');
+            if (englishOverlay && !englishOverlay.classList.contains('empty')) {
+                // 기존 효과 제거
+                englishOverlay.className = 'custom-subtitle-overlay';
+                const lang = englishOverlay.getAttribute('data-lang') || 'english';
+                englishOverlay.setAttribute('data-lang', lang);
+
+                // 정적 효과 다시 추가
+                const staticEffect = document.getElementById('overlay-english-static-effect')?.value;
+                if (staticEffect && staticEffect !== 'none') {
+                    englishOverlay.classList.add(`effect-${staticEffect}`);
+                }
+
+                // 새 동적 효과 적용
+                if (this.value && this.value !== 'none') {
+                    englishOverlay.classList.add(`effect-${this.value}`);
+                }
+            }
             if (typeof updateCanvasText === 'function') {
                 updateCanvasText();
             }
@@ -11074,6 +11533,51 @@ function parseSubtitle(content, trackType) {
 
     // TODO: 타임라인에 자막 블록 표시
     displaySubtitlesOnTimeline(subtitles, trackType);
+
+    // 🎯 타임라인 자막 로드 시 제목/부제목 자동 숨김 (중복 방지)
+    autoHideTitleSubtitleOnTimelineLoad(trackType);
+}
+
+// 타임라인 자막 로드 시 제목/부제목 자동 숨김 함수
+function autoHideTitleSubtitleOnTimelineLoad(trackType) {
+    // main, translation, description 트랙 중 하나라도 로드되면 제목/부제목 숨김
+    if (trackType === 'main' || trackType === 'translation' || trackType === 'description') {
+        console.log(`🙈 타임라인 자막(${trackType}) 로드됨 - 제목/부제목 자동 숨김 처리`);
+
+        let needsCanvasUpdate = false;
+
+        // 제목 숨기기 체크박스 자동 체크
+        const hideTitleCheckbox = document.getElementById('hide-title-overlay');
+        if (hideTitleCheckbox && !hideTitleCheckbox.checked) {
+            hideTitleCheckbox.checked = true;
+            // 체크박스 이벤트 수동 트리거
+            const titleOverlay = document.getElementById('video-title-overlay');
+            if (titleOverlay) {
+                titleOverlay.style.display = 'none';
+                console.log('  ✅ 제목 오버레이 숨김');
+                needsCanvasUpdate = true;
+            }
+        }
+
+        // 부제목 숨기기 체크박스 자동 체크
+        const hideSubtitleCheckbox = document.getElementById('hide-subtitle-overlay');
+        if (hideSubtitleCheckbox && !hideSubtitleCheckbox.checked) {
+            hideSubtitleCheckbox.checked = true;
+            // 체크박스 이벤트 수동 트리거
+            const subtitleOverlay = document.getElementById('video-subtitle-overlay');
+            if (subtitleOverlay) {
+                subtitleOverlay.style.display = 'none';
+                console.log('  ✅ 부제목 오버레이 숨김');
+                needsCanvasUpdate = true;
+            }
+        }
+
+        // Canvas 동기화
+        if (needsCanvasUpdate && typeof updateCanvasText === 'function') {
+            updateCanvasText();
+            console.log('  🎨 Canvas 동기화 완료');
+        }
+    }
 }
 
 // SRT 시간 형식을 초 단위로 변환 (00:00:15,461 -> 15.461)
@@ -12444,6 +12948,11 @@ document.addEventListener('DOMContentLoaded', () => {
         mainSubtitleCheckbox.addEventListener('change', (e) => {
             if (canvasPreview) {
                 canvasPreview.setSubtitleEnabled('main', e.target.checked);
+            }
+            // 즉시 오버레이 업데이트
+            const videoPlayer = document.getElementById('video-preview-player');
+            if (videoPlayer && typeof updateSubtitleOverlaysFromTimeline === 'function') {
+                updateSubtitleOverlaysFromTimeline(videoPlayer.currentTime);
             }
         });
     }
