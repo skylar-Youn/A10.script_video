@@ -328,7 +328,8 @@ class CanvasVideoPreview {
         let offsetX = 0;
         let offsetY = 0;
 
-        if (animationProgress !== null && animationProgress < 1.0) {
+        // animationProgress가 null이 아니면 애니메이션 진행 중
+        if (animationProgress !== null) {
             const easeProgress = this.easeOutCubic(animationProgress);
 
             switch (this.animation.type) {
@@ -361,7 +362,7 @@ class CanvasVideoPreview {
                     break;
                 case 'typing':
                     // 타이핑 효과: 글자를 점진적으로 표시
-                    const visibleChars = Math.floor(text.length * easeProgress);
+                    const visibleChars = Math.max(1, Math.floor(text.length * easeProgress));
                     text = text.substring(0, visibleChars);
                     break;
             }
@@ -558,7 +559,7 @@ class CanvasVideoPreview {
     }
 
     /**
-     * 애니메이션 진행도 계산 (0~1, 1이면 완료)
+     * 애니메이션 진행도 계산 (0~1, 1이면 완료, null이면 애니메이션 안 함)
      */
     getAnimationProgress(trackType, subtitle, currentTime) {
         if (this.animation.type === 'none') {
@@ -577,14 +578,19 @@ class CanvasVideoPreview {
         // 애니메이션 지연 적용
         const effectiveStartTime = state.startTime + this.animation.delay;
 
-        // 현재 시간이 지연 시간 이전이면 애니메이션 안 함
+        // 현재 시간이 지연 시간 이전이면 자막을 정상적으로 표시 (애니메이션 없음)
         if (currentTime < effectiveStartTime) {
-            return 0;
+            return null; // 지연 시간 전에는 애니메이션 적용 안 함
         }
 
         // 애니메이션 진행도 계산
         const elapsed = currentTime - effectiveStartTime;
         const progress = Math.min(elapsed / this.animation.duration, 1.0);
+
+        // 애니메이션이 완료되면 null 반환 (더 이상 애니메이션 효과 적용 안 함)
+        if (progress >= 1.0) {
+            return null;
+        }
 
         return progress;
     }

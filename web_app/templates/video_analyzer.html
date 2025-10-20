@@ -1548,52 +1548,6 @@
                 </div>
             </div>
 
-            <!-- 브라우저 기능 진단 패널 -->
-            <div class="browser-diagnostic-panel" style="margin-top: 20px; padding: 15px; background: rgba(26, 30, 46, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; cursor: pointer;" onclick="toggleBrowserPanel()">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span id="browser-panel-toggle" style="color: #f0f4f8; font-size: 1.2rem; transition: transform 0.3s;">▶</span>
-                        <h4 style="margin: 0; color: #f0f4f8; font-size: 1rem;">🔍 브라우저 기능 진단</h4>
-                    </div>
-                    <button onclick="event.stopPropagation(); runBrowserDiagnostics()" class="btn-primary" style="padding: 6px 12px; background: #3b82f6; font-size: 0.9rem;">
-                        진단 실행
-                    </button>
-                </div>
-                <div id="browser-panel-content" style="display: none;">
-                    <div id="browser-diagnostic-results" style="display: none;">
-                        <!-- 진단 결과가 여기에 표시됩니다 -->
-                    </div>
-                    <p style="margin: 10px 0 0 0; padding: 8px; background: rgba(59, 130, 246, 0.05); border-left: 3px solid #3b82f6; border-radius: 4px; color: #b0c4de; font-size: 0.85rem;">
-                        💡 이 진단은 브라우저가 WebCodecs, WebGL2, SharedArrayBuffer 등 최신 기능을 지원하는지 확인합니다.
-                    </p>
-                </div>
-            </div>
-
-            <!-- 성능 대시보드 패널 -->
-            <div class="performance-dashboard-panel" style="margin-top: 20px; padding: 15px; background: rgba(26, 30, 46, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; cursor: pointer;" onclick="togglePerformancePanel()">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span id="performance-panel-toggle" style="color: #f0f4f8; font-size: 1.2rem; transition: transform 0.3s;">▶</span>
-                        <h4 style="margin: 0; color: #f0f4f8; font-size: 1rem;">📊 성능 대시보드</h4>
-                    </div>
-                    <div style="display: flex; gap: 8px;" onclick="event.stopPropagation();">
-                        <button onclick="showPerformanceReport()" class="btn-primary" style="padding: 6px 12px; background: #10b981; font-size: 0.9rem;">
-                            리포트 표시
-                        </button>
-                        <button onclick="clearPerformanceData()" class="btn-secondary" style="padding: 6px 12px; background: #ef4444; font-size: 0.9rem;">
-                            데이터 초기화
-                        </button>
-                    </div>
-                </div>
-                <div id="performance-panel-content" style="display: none;">
-                    <div id="performance-dashboard-results" style="display: none;">
-                        <!-- 성능 리포트가 여기에 표시됩니다 -->
-                    </div>
-                    <p style="margin: 10px 0 0 0; padding: 8px; background: rgba(16, 185, 129, 0.05); border-left: 3px solid #10b981; border-radius: 4px; color: #b0c4de; font-size: 0.85rem;">
-                        💡 API 호출, DOM 렌더링, 메모리 사용량 등 실시간 성능 데이터를 수집합니다. 콘솔에서도 확인 가능합니다.
-                    </p>
-                </div>
-            </div>
 
             <div class="video-preview-actions" style="margin-top: 15px;">
                 <div style="display: flex; gap: 10px; margin-bottom: 10px;">
