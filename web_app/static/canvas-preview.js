@@ -90,7 +90,7 @@ class CanvasVideoPreview {
         // 동적 효과 설정 (복수 선택 가능)
         this.animation = {
             effects: [],  // 선택된 효과 배열 (복수 가능)
-            duration: 0.5,
+            duration: 1.2,  // 효과가 더 잘 보이도록 1.2초로 증가
             delay: 0,
             loop: false  // 반복 재생 여부
         };
@@ -332,8 +332,8 @@ class CanvasVideoPreview {
         const fontFamily = overlay.fontFamily || this.getFontFamilyForText(text);
 
         const color = overlay.color || '#ffffff';
-        // 외곽선을 더 두껍게 (가독성 향상)
-        const borderWidth = overlay.borderWidth !== undefined ? overlay.borderWidth : Math.max(4, Math.floor(fontSize * 0.1));
+        // 외곽선을 FFmpeg와 동일하게 8% 두께로 통일 (선명도 향상)
+        const borderWidth = overlay.borderWidth !== undefined ? overlay.borderWidth : Math.max(2, Math.floor(fontSize * 0.08));
         const borderColor = overlay.borderColor || '#000000';
 
         // 배경 설정 (overlay 자체 배경 또는 전역 효과 배경)
@@ -367,7 +367,7 @@ class CanvasVideoPreview {
 
         // animationProgress가 null이 아니면 애니메이션 진행 중
         if (animationProgress !== null) {
-            const easeProgress = this.easeOutCubic(animationProgress);
+            const easeProgress = this.easeOutQuart(animationProgress);  // 부드럽지만 효과가 잘 보이는 easing
             const rawProgress = animationProgress;
 
             // 오버레이에 effects 배열이 있으면 사용, 없으면 전역 animation.effects 사용
@@ -378,47 +378,53 @@ class CanvasVideoPreview {
                 switch (effectType) {
                     // ========== 2025 트렌드 효과 ==========
                     case 'fire': {
-                        // 불타는 효과: 색상 그라데이션 + 파티클
+                        // 불타는 효과: 색상 그라데이션 + 강력한 파티클
                         const fireProgress = this.animation.loop ? rawProgress : easeProgress;
 
-                        // 불꽃 색상 변화 (빨강 -> 주황 -> 노랑)
-                        const firePhase = (fireProgress * 3) % 3;
+                        // 불꽃 색상 변화 (빨강 -> 주황 -> 노랑) - 더 강렬하게
+                        const firePhase = (fireProgress * 4) % 4; // 더 빠른 변화
                         if (firePhase < 1) {
-                            // 빨강 -> 주황
+                            // 뜨거운 빨강
                             const r = 255;
-                            const g = Math.floor(69 + (165 - 69) * firePhase);
+                            const g = Math.floor(40 + (140 - 40) * firePhase);
                             const b = 0;
                             overlay.fireColor = `rgb(${r}, ${g}, ${b})`;
                         } else if (firePhase < 2) {
-                            // 주황 -> 노랑
+                            // 밝은 주황
                             const r = 255;
-                            const g = Math.floor(165 + (255 - 165) * (firePhase - 1));
-                            const b = 0;
+                            const g = Math.floor(140 + (200 - 140) * (firePhase - 1));
+                            const b = Math.floor((firePhase - 1) * 30);
+                            overlay.fireColor = `rgb(${r}, ${g}, ${b})`;
+                        } else if (firePhase < 3) {
+                            // 밝은 노랑
+                            const r = 255;
+                            const g = Math.floor(200 + (255 - 200) * (firePhase - 2));
+                            const b = Math.floor(30 + (firePhase - 2) * 20);
                             overlay.fireColor = `rgb(${r}, ${g}, ${b})`;
                         } else {
-                            // 노랑 -> 빨강
+                            // 다시 빨강으로
                             const r = 255;
-                            const g = Math.floor(255 - (255 - 69) * (firePhase - 2));
-                            const b = 0;
+                            const g = Math.floor(255 - (255 - 40) * (firePhase - 3));
+                            const b = Math.floor(50 - 50 * (firePhase - 3));
                             overlay.fireColor = `rgb(${r}, ${g}, ${b})`;
                         }
 
-                        // 파티클 효과 정보
+                        // 파티클 효과 정보 - 강도 증가
                         overlay.fireParticles = true;
-                        overlay.fireIntensity = 1.0;
+                        overlay.fireIntensity = 1.5; // 강도 1.5배 증가
 
-                        // 글로우 효과 (기존 neonGlow와 최대값 사용)
-                        overlay.neonGlow = Math.max(overlay.neonGlow || 0, 0.8);
+                        // 강력한 글로우 효과
+                        overlay.neonGlow = Math.max(overlay.neonGlow || 0, 1.2);
 
-                        // 약간의 흔들림 (누적)
+                        // 불꽃 흔들림 효과
                         offsetX += (Math.random() - 0.5) * 2;
-                        offsetY += (Math.random() - 0.5) * 2;
+                        offsetY += (Math.random() - 0.5) * 2 - Math.random() * 1; // 위로 올라가는 느낌
                         break;
                     }
 
                     case 'glitch': {
-                        // 글리치 효과: RGB 분리 + 지터
-                        const glitchIntensity = (1 - easeProgress) * 10;
+                        // 글리치 효과: RGB 분리 + 지터 (눈에 띄는 효과)
+                        const glitchIntensity = (1 - easeProgress) * 8;
                         offsetX += (Math.random() - 0.5) * glitchIntensity;
                         offsetY += (Math.random() - 0.5) * glitchIntensity;
                         opacity *= easeProgress;
@@ -428,19 +434,19 @@ class CanvasVideoPreview {
                     }
 
                     case 'wave': {
-                        // 웨이브 효과: 사인파 움직임
-                        const waveFrequency = 3;
-                        const waveAmplitude = 20 * (1 - easeProgress);
+                        // 웨이브 효과: 사인파 움직임 (눈에 띄는 진폭)
+                        const waveFrequency = 2.5;
+                        const waveAmplitude = 25 * (1 - easeProgress);
                         offsetY += Math.sin(rawProgress * Math.PI * waveFrequency) * waveAmplitude;
                         opacity *= easeProgress;
                         break;
                     }
 
                     case 'elastic': {
-                        // 탄성 바운스: 고무줄처럼 튕김
-                        const elasticScale = this.easeElastic(easeProgress);
+                        // 탄성 바운스: 고무줄처럼 튕김 (더 자연스러운 easing)
+                        const elasticScale = this.easeOutBack(easeProgress);
                         scale *= elasticScale;
-                        opacity *= Math.min(easeProgress * 2, 1);
+                        opacity *= Math.min(easeProgress * 1.5, 1);
                         break;
                     }
 
@@ -453,15 +459,15 @@ class CanvasVideoPreview {
                     }
 
                     case 'split': {
-                        // 스플릿: 글자가 갈라지며 등장
-                        const splitDistance = (1 - easeProgress) * 100;
+                        // 스플릿: 글자가 갈라지며 등장 (눈에 띄게)
+                        const splitDistance = (1 - easeProgress) * 120;
                         overlay.splitEffect = splitDistance;
                         opacity *= easeProgress;
                         break;
                     }
 
                     case 'rotateIn': {
-                        // 회전 진입: 360도 회전하며 등장
+                        // 회전 진입: 360도 회전하며 등장 (한 바퀴 돌며 등장)
                         const rotationAngle = (1 - easeProgress) * 360;
                         overlay.rotationAngle = rotationAngle;
                         scale *= easeProgress;
@@ -470,39 +476,63 @@ class CanvasVideoPreview {
                     }
 
                     case 'scalePulse': {
-                        // 스케일 펄스: 맥박치듯 커졌다 작아짐
-                        const pulseScale = 1 + Math.sin(rawProgress * Math.PI * 4) * 0.1 * (1 - easeProgress);
+                        // 스케일 펄스: 맥박치듯 커졌다 작아짐 (뚜렷한 펄스)
+                        const pulseScale = 1 + Math.sin(rawProgress * Math.PI * 3) * 0.15 * (1 - easeProgress);
                         scale *= easeProgress * pulseScale;
                         opacity *= Math.min(easeProgress * 1.5, 1);
                         break;
                     }
 
                     case 'blurFade': {
-                        // 블러 페이드: 흐릿하게 시작해서 선명해짐
-                        const blurAmount = (1 - easeProgress) * 15;
+                        // 블러 페이드: 흐릿하게 시작해서 선명해짐 (눈에 띄는 blur)
+                        const blurAmount = (1 - easeProgress) * 12;
                         overlay.blurAmount = blurAmount;
                         opacity *= easeProgress;
                         break;
                     }
 
-                    // ========== 클래식 효과 ==========
+                    // ========== 클래식 효과 - In (나타나기) ==========
                     case 'fadeIn': {
                         opacity *= easeProgress;
                         break;
                     }
 
                     case 'slideUp': {
-                        offsetY += (1 - easeProgress) * 100;
+                        offsetY += (1 - easeProgress) * 150;
                         opacity *= easeProgress;
+                        break;
+                    }
+
+                    case 'zoomIn':
+                    case 'zoom': {
+                        // 눈에 잘 띄는 줌 (0.3부터 시작)
+                        scale *= 0.3 + (easeProgress * 0.7);
+                        opacity *= easeProgress;
+                        break;
+                    }
+
+                    // ========== 클래식 효과 - Out (사라지기) ==========
+                    case 'fadeOut': {
+                        // 불투명 → 투명 (역방향)
+                        opacity *= (1 - easeProgress);
                         break;
                     }
 
                     case 'slideDown': {
-                        offsetY += -(1 - easeProgress) * 100;
-                        opacity *= easeProgress;
+                        // 현재 위치 → 아래로 슬라이드하며 사라짐
+                        offsetY -= easeProgress * 150;
+                        opacity *= (1 - easeProgress);
                         break;
                     }
 
+                    case 'zoomOut': {
+                        // 정상 크기 → 작아지며 사라짐 (1.0 → 0.3)
+                        scale *= 1.0 - (easeProgress * 0.7);
+                        opacity *= (1 - easeProgress);
+                        break;
+                    }
+
+                    // ========== 기타 슬라이드 효과 (미리보기 전용) ==========
                     case 'slideLeft': {
                         offsetX += (1 - easeProgress) * 200;
                         opacity *= easeProgress;
@@ -515,15 +545,57 @@ class CanvasVideoPreview {
                         break;
                     }
 
-                    case 'zoom': {
-                        scale *= 0.5 + (easeProgress * 0.5);
+                    case 'zoomWave': {
+                        // 작게 시작 → 크게 → 정상 → 작게 끝
+                        // 사인 곡선을 사용하여 부드러운 크기 변화
+                        let scaleValue;
+                        if (easeProgress < 0.3) {
+                            // 0-30%: 작은 크기에서 빠르게 커짐
+                            scaleValue = 0.2 + (easeProgress / 0.3) * 1.3; // 0.2 → 1.5
+                        } else if (easeProgress < 0.6) {
+                            // 30-60%: 크게 커진 후 정상 크기로
+                            const t = (easeProgress - 0.3) / 0.3;
+                            scaleValue = 1.5 - t * 0.5; // 1.5 → 1.0
+                        } else {
+                            // 60-100%: 정상에서 다시 작아짐
+                            const t = (easeProgress - 0.6) / 0.4;
+                            scaleValue = 1.0 - t * 0.7; // 1.0 → 0.3
+                        }
+                        scale *= scaleValue;
+                        opacity *= Math.min(easeProgress * 2, 1.0); // 빠르게 나타남
+                        break;
+                    }
+
+                    case 'breathe': {
+                        // 숨쉬듯이 커졌다 작아졌다 반복
+                        const breatheScale = 1 + Math.sin(rawProgress * Math.PI * 2) * 0.2;
+                        scale *= breatheScale * easeProgress;
+                        opacity *= easeProgress;
+                        break;
+                    }
+
+                    case 'heartbeat': {
+                        // 심장박동처럼 두 번 두근거림
+                        let heartScale;
+                        const beat = rawProgress * 4 % 1; // 4번 반복
+                        if (beat < 0.15) {
+                            // 첫 번째 박동
+                            heartScale = 1 + Math.sin(beat / 0.15 * Math.PI) * 0.3;
+                        } else if (beat < 0.35 && beat >= 0.2) {
+                            // 두 번째 박동
+                            heartScale = 1 + Math.sin((beat - 0.2) / 0.15 * Math.PI) * 0.25;
+                        } else {
+                            heartScale = 1;
+                        }
+                        scale *= heartScale * easeProgress;
                         opacity *= easeProgress;
                         break;
                     }
 
                     case 'bounce': {
+                        // 눈에 띄는 바운스
                         const bounce = Math.abs(Math.sin(easeProgress * Math.PI));
-                        offsetY += -bounce * 30;
+                        offsetY += -bounce * 40;
                         break;
                     }
 
@@ -556,7 +628,8 @@ class CanvasVideoPreview {
         if (overlay.neonGlow && overlay.neonGlow > 0) {
             const glowSize = 20 * overlay.neonGlow;
             this.ctx.shadowBlur = glowSize;
-            this.ctx.shadowColor = color;
+            // 불꽃 효과가 있으면 불꽃 색상으로 글로우, 아니면 기본 색상
+            this.ctx.shadowColor = overlay.fireColor || color;
         }
 
         // 블러 효과
@@ -576,6 +649,15 @@ class CanvasVideoPreview {
                 this.ctx.scale(scale, scale);
             }
             this.ctx.translate(-x, -y);
+        }
+
+        // 불 파티클 효과 (텍스트 뒤에 먼저 그리기)
+        if (overlay.fireParticles && overlay.fireIntensity > 0) {
+            // 파티클은 transform 영향을 받지 않도록 미리 그림
+            const savedAlpha = this.ctx.globalAlpha;
+            this.ctx.globalAlpha = opacity * 0.9; // 파티클 투명도
+            this.renderFireParticles(x, y, textWidth, textHeight, overlay.fireIntensity);
+            this.ctx.globalAlpha = savedAlpha;
         }
 
         // 배경 박스 그리기 (필요한 경우)
@@ -649,11 +731,6 @@ class CanvasVideoPreview {
             this.ctx.fillText(text, x, y);
         }
 
-        // 불 파티클 효과
-        if (overlay.fireParticles && overlay.fireIntensity > 0) {
-            this.renderFireParticles(x, y, textWidth, textHeight, overlay.fireIntensity);
-        }
-
         // 트랜스폼 복원
         if (needsTransform) {
             this.ctx.restore();
@@ -679,6 +756,51 @@ class CanvasVideoPreview {
     }
 
     /**
+     * InOutQuart - 매우 부드러운 시작과 끝 (권장)
+     */
+    easeInOutQuart(t) {
+        return t < 0.5
+            ? 8 * t * t * t * t
+            : 1 - Math.pow(-2 * t + 2, 4) / 2;
+    }
+
+    /**
+     * OutQuart - 부드러운 감속
+     */
+    easeOutQuart(t) {
+        return 1 - Math.pow(1 - t, 4);
+    }
+
+    /**
+     * InOutQuint - 매우 부드럽고 자연스러운 (가장 부드러움)
+     */
+    easeInOutQuint(t) {
+        return t < 0.5
+            ? 16 * t * t * t * t * t
+            : 1 - Math.pow(-2 * t + 2, 5) / 2;
+    }
+
+    /**
+     * OutBack - 살짝 오버슈팅 후 안착 (자연스러운 물리감)
+     */
+    easeOutBack(t) {
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    }
+
+    /**
+     * InOutBack - 시작과 끝에서 살짝 오버슈팅
+     */
+    easeInOutBack(t) {
+        const c1 = 1.70158;
+        const c2 = c1 * 1.525;
+        return t < 0.5
+            ? (Math.pow(2 * t, 2) * ((c2 + 1) * 2 * t - c2)) / 2
+            : (Math.pow(2 * t - 2, 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2;
+    }
+
+    /**
      * Elastic easing 함수 (탄성 효과)
      */
     easeElastic(t) {
@@ -701,41 +823,76 @@ class CanvasVideoPreview {
     }
 
     /**
-     * 불 파티클 렌더링
+     * 불 파티클 렌더링 (실제 불꽃처럼!)
      */
     renderFireParticles(centerX, centerY, textWidth, textHeight, intensity) {
-        const numParticles = Math.floor(20 * intensity);
+        const numParticles = Math.floor(60 * intensity); // 파티클 수 3배 증가
         const time = Date.now() / 1000; // 시간 기반 애니메이션
 
         for (let i = 0; i < numParticles; i++) {
-            // 랜덤 파티클 위치 (텍스트 영역 내)
-            const particleX = centerX + (Math.random() - 0.5) * textWidth;
-            const particleY = centerY + textHeight / 2 - Math.random() * textHeight * 1.5;
+            // 파티클 라이프 사이클 (각 파티클마다 다른 타이밍)
+            const particleLife = (time * 3 + i * 0.05) % 1.0; // 0~1 사이 반복, 더 빠르게
 
-            // 파티클 애니메이션 (위로 올라감)
-            const particleLife = (time * 2 + i * 0.1) % 1.0; // 0~1 사이 반복
-            const offsetY = -particleLife * 50; // 위로 올라감
+            // 텍스트 하단에서 시작하여 위로 올라감
+            const baseX = centerX + (Math.random() - 0.5) * textWidth * 0.8;
+            const baseY = centerY + textHeight / 2;
 
-            // 파티클 크기와 투명도
-            const size = (1 - particleLife) * 6 + 2;
-            const alpha = (1 - particleLife) * 0.8;
+            // 불꽃이 위로 올라가면서 좌우로 흔들림
+            const wobble = Math.sin(particleLife * Math.PI * 4 + i) * 15;
+            const offsetX = wobble + (Math.random() - 0.5) * 10;
+            const offsetY = -particleLife * (80 + Math.random() * 40); // 위로 올라감 (더 높이)
 
-            // 불꽃 색상 (빨강 -> 주황 -> 노랑)
+            const particleX = baseX + offsetX;
+            const particleY = baseY + offsetY;
+
+            // 파티클 크기 (아래에서 크고 위로 갈수록 작아짐)
+            const size = (1 - particleLife * 0.7) * (8 + Math.random() * 6);
+
+            // 투명도 (위로 갈수록 사라짐)
+            const alpha = (1 - particleLife) * (0.9 - Math.random() * 0.2);
+
+            // 불꽃 색상 변화 (아래: 빨강 → 중간: 주황 → 위: 노랑 → 최상단: 연기)
             let particleColor;
-            if (particleLife < 0.3) {
-                particleColor = `rgba(255, 69, 0, ${alpha})`; // 빨강
-            } else if (particleLife < 0.6) {
-                particleColor = `rgba(255, 165, 0, ${alpha})`; // 주황
+            if (particleLife < 0.2) {
+                // 뜨거운 빨간 불꽃 (아래)
+                particleColor = `rgba(255, ${Math.floor(30 + Math.random() * 20)}, 0, ${alpha})`;
+            } else if (particleLife < 0.4) {
+                // 밝은 주황색 불꽃
+                particleColor = `rgba(255, ${Math.floor(120 + Math.random() * 60)}, 0, ${alpha})`;
+            } else if (particleLife < 0.7) {
+                // 노란 불꽃
+                particleColor = `rgba(255, ${Math.floor(200 + Math.random() * 55)}, ${Math.floor(Math.random() * 50)}, ${alpha})`;
             } else {
-                particleColor = `rgba(255, 255, 0, ${alpha})`; // 노랑
+                // 연기 (회색)
+                const gray = Math.floor(100 + Math.random() * 50);
+                particleColor = `rgba(${gray}, ${gray}, ${gray}, ${alpha * 0.4})`;
             }
 
-            // 파티클 그리기
+            // 글로우 효과 추가
+            if (particleLife < 0.5) {
+                this.ctx.shadowBlur = 15 + Math.random() * 10;
+                this.ctx.shadowColor = particleColor;
+            } else {
+                this.ctx.shadowBlur = 0;
+            }
+
+            // 파티클 그리기 (원형)
             this.ctx.beginPath();
-            this.ctx.arc(particleX, particleY + offsetY, size, 0, Math.PI * 2);
+            this.ctx.arc(particleX, particleY, size, 0, Math.PI * 2);
             this.ctx.fillStyle = particleColor;
             this.ctx.fill();
+
+            // 추가 내부 코어 (더 밝은 중심)
+            if (particleLife < 0.4 && size > 4) {
+                this.ctx.beginPath();
+                this.ctx.arc(particleX, particleY, size * 0.4, 0, Math.PI * 2);
+                this.ctx.fillStyle = `rgba(255, 255, 200, ${alpha * 1.2})`;
+                this.ctx.fill();
+            }
         }
+
+        // 그림자 효과 리셋
+        this.ctx.shadowBlur = 0;
     }
 
     /**
@@ -900,13 +1057,12 @@ class CanvasVideoPreview {
     }
 
     /**
-     * 텍스트 내용에 맞춰 폰트 패밀리를 반환한다.
+     * 통일된 폰트 패밀리를 반환한다 (모든 언어 지원).
+     * 언어 자동 감지를 비활성화하고 항상 동일한 폰트 스택 사용.
      */
     getFontFamilyForText(text = '') {
-        if (this.japaneseRegex.test(text)) {
-            return '"Noto Sans JP Local", "Noto Sans CJK JP", "Noto Sans KR Local", "맑은 고딕", Arial, sans-serif';
-        }
-        return '"Noto Sans KR Local", "Noto Sans JP Local", "맑은 고딕", Arial, sans-serif';
+        // 통일된 폰트 스택: 한국어 우선, 일본어 지원, 영어 fallback, 이모지
+        return '"Noto Sans CJK KR", "Noto Sans KR Local", "Noto Sans KR", "맑은 고딕", "Noto Sans JP Local", "Noto Sans JP", "Noto Sans CJK JP", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
     }
 
     /**
@@ -1375,6 +1531,16 @@ class CanvasVideoPreview {
      */
     setAnimationDuration(duration) {
         this.animation.duration = duration;
+        // 오버레이 애니메이션 리셋 (즉각 반영)
+        this.overlays.forEach(overlay => {
+            if (overlay.startTime) {
+                overlay.startTime = performance.now() / 1000;
+            }
+        });
+        // 자막 애니메이션 상태 리셋
+        Object.keys(this.subtitleAnimationStates).forEach(key => {
+            this.subtitleAnimationStates[key].startTime = null;
+        });
         this.render();
     }
 
@@ -1383,6 +1549,16 @@ class CanvasVideoPreview {
      */
     setAnimationDelay(delay) {
         this.animation.delay = delay;
+        // 오버레이 애니메이션 리셋 (즉각 반영)
+        this.overlays.forEach(overlay => {
+            if (overlay.startTime) {
+                overlay.startTime = performance.now() / 1000;
+            }
+        });
+        // 자막 애니메이션 상태 리셋
+        Object.keys(this.subtitleAnimationStates).forEach(key => {
+            this.subtitleAnimationStates[key].startTime = null;
+        });
         this.render();
     }
 

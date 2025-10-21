@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Literal, Tuple
+from typing import Any, Dict, List, Optional, Literal, Tuple, Union
 from uuid import uuid4
 
 try:
@@ -543,6 +543,7 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
             if "jp" in normalized_family or "japanese" in normalized_family:
                 if prefer_bold:
                     add_candidate("notosansjp-bold.ttf")
+                    add_candidate("notosanscjk-bold.ttc")
                     add_candidate("notosanscjk-regular.ttc")  # CJK 통합 폰트
                 add_candidate("notosansjp-regular.ttf")
                 add_candidate("notosanscjk-regular.ttc")
@@ -551,6 +552,7 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
                 if prefer_bold:
                     add_candidate("notosanskr-bold.ttf")
                     add_candidate("notosans-bold.ttf")
+                    add_candidate("notosanscjk-bold.ttc")
                     add_candidate("notosanscjkkr-bold.otf")
                 add_candidate("notosanskr-regular.ttf")
                 add_candidate("notosans-regular.ttf")
@@ -559,6 +561,7 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
             else:
                 if prefer_bold:
                     add_candidate("notosans-bold.ttf")
+                    add_candidate("notosanscjk-bold.ttc")
                     add_candidate("notosanscjkk-bold.otf")
                     add_candidate("notosanscjkkr-bold.otf")
                     add_candidate("notosanskr-bold.ttf")
@@ -584,6 +587,7 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
         add_candidate("nanumsquareb.ttf")
         add_candidate("nanumbarungothicbold.ttf")
         add_candidate("notosans-bold.ttf")
+        add_candidate("notosanscjk-bold.ttc")
         add_candidate("arialbd.ttf")
 
     add_candidate("pretendard-regular.ttf")
@@ -853,9 +857,9 @@ async def _create_overlay_png_filter(
     except Exception:
         font_color = "#FFFFFF"
 
-    # 외곽선 색상 (기본값: 검은색)
+    # 외곽선 색상 및 두께 (FFmpeg drawtext와 동일하게 8% 적용)
     outline_color = "#000000"
-    outline_width = 3
+    outline_width = max(2, int(round(font_size * 0.08)))
 
     # 위치 계산
     def _coerce_position(value: Any, fallback: float) -> float:
@@ -954,9 +958,12 @@ def _build_drawtext_filter(
     overlay_type = (overlay.get("type") or "").lower()
 
     try:
-        font_size = max(12, int(round(float(overlay.get("fontSize", 48)))))
+        font_size_base = max(12, int(round(float(overlay.get("fontSize", 48)))))
     except (TypeError, ValueError):
-        font_size = 48
+        font_size_base = 48
+
+    # zoom 효과는 나중에 처리 (effects를 읽은 후)
+    font_size = font_size_base
 
     # ⚠️ 주의: 웹 미리보기와 동기화를 위해 폰트 크기 축소를 제거함
     # if overlay_type in {"korean", "english"}:
@@ -989,6 +996,18 @@ def _build_drawtext_filter(
         if anchor_fallback and anchor_fallback.get("y") is not None:
             y_value = anchor_fallback["y"]
 
+    # 동적 효과 처리 (fadeIn/Out, slideUp/Down, zoomIn/Out)
+    effects = overlay.get("effects", [])
+    animation_duration = 1.2  # 애니메이션 지속 시간 (초)
+
+    # 효과별 플래그
+    has_fade_in = "fadeIn" in effects
+    has_fade_out = "fadeOut" in effects
+    has_slide_up = "slideUp" in effects
+    has_slide_down = "slideDown" in effects
+    has_zoom_in = "zoomIn" in effects or "zoom" in effects  # 하위 호환성
+    has_zoom_out = "zoomOut" in effects
+
     # drawtext 좌표는 텍스트 상단/좌측 기준으로 다루며, CSS의 translateX(-50%) 효과를 모사한다.
     x_expr = f"clip({x_value}-text_w/2,0,{video_width}-text_w)"
 
@@ -997,7 +1016,20 @@ def _build_drawtext_filter(
     # FFmpeg도 동일하게 y 좌표를 텍스트 중앙으로 처리
     y_expr_base = f"{y_value}-text_h/2"
 
-    y_expr = f"clip({y_expr_base},0,{video_height}-text_h)"
+    # slideUp/slideDown 효과 처리
+    slide_distance = 150  # 슬라이드 거리 (픽셀)
+
+    if has_slide_up and has_slide_down:
+        # 둘 다 선택: slideUp 우선 (아래에서 위로 슬라이드 후 위에서 아래로)
+        y_expr = f"clip(if(lt(t,{animation_duration}),{y_expr_base}+{slide_distance}*(1-t/{animation_duration}),{y_expr_base}),0,{video_height}-text_h)"
+    elif has_slide_up:
+        # slideUp: 아래에서 위로 슬라이드
+        y_expr = f"clip(if(lt(t,{animation_duration}),{y_expr_base}+{slide_distance}*(1-t/{animation_duration}),{y_expr_base}),0,{video_height}-text_h)"
+    elif has_slide_down:
+        # slideDown: 위에서 아래로 슬라이드 (시작 위치에서 점점 아래로)
+        y_expr = f"clip(if(lt(t,{animation_duration}),{y_expr_base}-{slide_distance}*(1-t/{animation_duration}),{y_expr_base}),0,{video_height}-text_h)"
+    else:
+        y_expr = f"clip({y_expr_base},0,{video_height}-text_h)"
 
     font_family = overlay.get("fontFamily")
     font_weight = overlay.get("fontWeight")
@@ -1086,7 +1118,11 @@ def _build_drawtext_filter(
     )
     outline_color = _format_color_for_ffmpeg(outline_hex, outline_alpha)
 
+    # 모든 타입에 동일한 외곽선 두께 적용 (선명도 통일)
     if overlay_type in {"korean", "english"}:
+        border_width = max(2, int(round(font_size * 0.08)))
+    elif overlay_type in {"title", "subtitle"}:
+        # 제목/부제목도 자막과 동일한 두께 적용
         border_width = max(2, int(round(font_size * 0.08)))
     else:
         border_width = max(1, int(round(font_size * 0.06)))
@@ -1115,14 +1151,39 @@ def _build_drawtext_filter(
         padding_pixels = [font_size * 0.25]
     padding_amount = int(round(max(padding_pixels))) if padding_pixels else 0
 
+    # zoomIn/zoomOut 효과 처리
+    if has_zoom_in and has_zoom_out:
+        # 둘 다 선택: zoomIn 우선 (작게 → 크게 → 작게)
+        font_size_expr = f"if(lt(t,{animation_duration}),{int(font_size * 0.3)}+t*{int(font_size * 0.7)}/{animation_duration},{font_size})"
+    elif has_zoom_in:
+        # zoomIn: 폰트 크기를 0.3배에서 1.0배로 증가
+        font_size_expr = f"if(lt(t,{animation_duration}),{int(font_size * 0.3)}+t*{int(font_size * 0.7)}/{animation_duration},{font_size})"
+    elif has_zoom_out:
+        # zoomOut: 폰트 크기를 1.0배에서 0.3배로 감소
+        font_size_expr = f"if(lt(t,{animation_duration}),{font_size}-t*{int(font_size * 0.7)}/{animation_duration},{int(font_size * 0.3)})"
+    else:
+        font_size_expr = str(font_size)
+
     drawtext_params = [
         f"text='{text}'",
         f"x='{x_expr}'",
         f"y='{y_expr}'",
-        f"fontsize={font_size}",
+        f"fontsize='{font_size_expr}'",
         "text_shaping=1",
         f"fontcolor={font_color}",
     ]
+
+    # fadeIn/fadeOut 효과:
+    # ⚠️ FFmpeg drawtext는 alpha를 동적으로 제어할 수 없어 완벽한 페이드 구현 불가
+    # 대신 Canvas 미리보기에서 완벽하게 구현됨
+    # 향후 FFmpeg fade 필터 또는 blend 필터를 사용한 개선 가능
+    #
+    # 현재는 주석 처리 (Canvas에서만 동작)
+    # if has_fade_in:
+    #     drawtext_params.append(f"enable='gte(t,0)'")
+    # if has_fade_out:
+    #     # overlay의 endTime이 필요하지만 현재 구조에서는 접근 불가
+    #     pass
 
     # 이모지 감지 (일반적인 이모지 유니코드 범위)
     has_emoji = any(
@@ -5194,7 +5255,8 @@ async def api_create_final_video(
                 font_size = 60
                 font_color = "white"
                 border_width = 3
-                font_file = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+                font_family_hint = None
+                font_weight_hint: Optional[Union[str, int]] = None
 
                 # Canvas 위치 정보 가져오기
                 canvas_style = canvas_positions_data.get(sub_type, {}) if canvas_positions_data else {}
@@ -5212,6 +5274,28 @@ async def api_create_final_video(
                             font_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
 
                     border_width = canvas_style.get("borderWidth", border_width)
+                    font_family_hint = canvas_style.get("fontFamily", font_family_hint)
+                    font_weight_hint = canvas_style.get("fontWeight", font_weight_hint)
+
+                if not font_family_hint:
+                    # 캔버스 프리뷰에서 사용한 기본 폰트 스택과 동일하게 설정
+                    font_family_hint = "Noto Sans CJK KR"
+                if not font_weight_hint:
+                    font_weight_hint = "700"
+
+                # FFmpeg와 프리뷰의 시각적 일치를 위해 가능한 경우 굵은 CJK 폰트를 우선 사용
+                font_file = _resolve_font_file(str(font_family_hint), str(font_weight_hint))
+                if not font_file or not Path(font_file).exists():
+                    for fallback in (
+                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                    ):
+                        if Path(fallback).exists():
+                            font_file = fallback
+                            break
+                if not font_file:
+                    font_file = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
 
                 # Canvas yPosition이 있으면 우선 사용, 없으면 수직 스택 위치 사용
                 if canvas_style and "yPosition" in canvas_style:
