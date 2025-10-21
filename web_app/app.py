@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Literal, Tuple, Union
+from typing import Any, Dict, List, Optional, Literal, Tuple
 from uuid import uuid4
 
 try:
@@ -543,7 +543,6 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
             if "jp" in normalized_family or "japanese" in normalized_family:
                 if prefer_bold:
                     add_candidate("notosansjp-bold.ttf")
-                    add_candidate("notosanscjk-bold.ttc")
                     add_candidate("notosanscjk-regular.ttc")  # CJK 통합 폰트
                 add_candidate("notosansjp-regular.ttf")
                 add_candidate("notosanscjk-regular.ttc")
@@ -552,7 +551,6 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
                 if prefer_bold:
                     add_candidate("notosanskr-bold.ttf")
                     add_candidate("notosans-bold.ttf")
-                    add_candidate("notosanscjk-bold.ttc")
                     add_candidate("notosanscjkkr-bold.otf")
                 add_candidate("notosanskr-regular.ttf")
                 add_candidate("notosans-regular.ttf")
@@ -561,7 +559,6 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
             else:
                 if prefer_bold:
                     add_candidate("notosans-bold.ttf")
-                    add_candidate("notosanscjk-bold.ttc")
                     add_candidate("notosanscjkk-bold.otf")
                     add_candidate("notosanscjkkr-bold.otf")
                     add_candidate("notosanskr-bold.ttf")
@@ -587,7 +584,6 @@ def _resolve_font_file(font_family: Optional[str], font_weight: Optional[str]) -
         add_candidate("nanumsquareb.ttf")
         add_candidate("nanumbarungothicbold.ttf")
         add_candidate("notosans-bold.ttf")
-        add_candidate("notosanscjk-bold.ttc")
         add_candidate("arialbd.ttf")
 
     add_candidate("pretendard-regular.ttf")
@@ -5255,8 +5251,7 @@ async def api_create_final_video(
                 font_size = 60
                 font_color = "white"
                 border_width = 3
-                font_family_hint = None
-                font_weight_hint: Optional[Union[str, int]] = None
+                font_file = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 
                 # Canvas 위치 정보 가져오기
                 canvas_style = canvas_positions_data.get(sub_type, {}) if canvas_positions_data else {}
@@ -5274,28 +5269,6 @@ async def api_create_final_video(
                             font_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
 
                     border_width = canvas_style.get("borderWidth", border_width)
-                    font_family_hint = canvas_style.get("fontFamily", font_family_hint)
-                    font_weight_hint = canvas_style.get("fontWeight", font_weight_hint)
-
-                if not font_family_hint:
-                    # 캔버스 프리뷰에서 사용한 기본 폰트 스택과 동일하게 설정
-                    font_family_hint = "Noto Sans CJK KR"
-                if not font_weight_hint:
-                    font_weight_hint = "700"
-
-                # FFmpeg와 프리뷰의 시각적 일치를 위해 가능한 경우 굵은 CJK 폰트를 우선 사용
-                font_file = _resolve_font_file(str(font_family_hint), str(font_weight_hint))
-                if not font_file or not Path(font_file).exists():
-                    for fallback in (
-                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-                        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                    ):
-                        if Path(fallback).exists():
-                            font_file = fallback
-                            break
-                if not font_file:
-                    font_file = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
 
                 # Canvas yPosition이 있으면 우선 사용, 없으면 수직 스택 위치 사용
                 if canvas_style and "yPosition" in canvas_style:
