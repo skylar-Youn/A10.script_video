@@ -8592,7 +8592,7 @@ function loadTextOverlaySettings() {
 
 // 텍스트 오버레이 지우기
 function clearTextOverlay() {
-    if (confirm('🗑️ 모든 텍스트 오버레이를 지우시겠습니까?')) {
+    if (confirm('🗑️ 모든 텍스트 오버레이를 지우시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) {
         // 입력 필드 초기화
         document.getElementById('overlay-title-input').value = '';
         document.getElementById('overlay-subtitle-input').value = '';
@@ -8601,36 +8601,46 @@ function clearTextOverlay() {
         document.getElementById('overlay-english-input').value = '';
         document.getElementById('overlay-source-input').value = '';
 
-        // 오버레이를 예시 텍스트로 복원
+        // 오버레이 완전히 숨김 (예시 텍스트 표시 안함)
         const titleOverlay = document.getElementById('video-title-overlay');
-        titleOverlay.textContent = '영상 제목을 입력하세요';
-        titleOverlay.style.display = 'block';
-        titleOverlay.style.opacity = '0.5';
+        if (titleOverlay) {
+            titleOverlay.textContent = '';
+            titleOverlay.style.display = 'none';
+        }
 
         const subtitleOverlay = document.getElementById('video-subtitle-overlay');
-        subtitleOverlay.textContent = '부제목을 입력하세요';
-        subtitleOverlay.style.display = 'block';
-        subtitleOverlay.style.opacity = '0.5';
+        if (subtitleOverlay) {
+            subtitleOverlay.textContent = '';
+            subtitleOverlay.style.display = 'none';
+        }
 
         const koreanOverlay = document.getElementById('korean-subtitle-overlay');
-        koreanOverlay.textContent = '주 자막을 입력하세요';
-        koreanOverlay.style.display = 'block';
-        koreanOverlay.style.opacity = '0.5';
+        if (koreanOverlay) {
+            koreanOverlay.textContent = '';
+            koreanOverlay.style.display = 'none';
+        }
 
         const japaneseOverlay = document.getElementById('japanese-subtitle-overlay');
-        japaneseOverlay.textContent = '日本語字幕を入力してください';
-        japaneseOverlay.style.display = 'block';
-        japaneseOverlay.style.opacity = '0.5';
+        if (japaneseOverlay) {
+            japaneseOverlay.textContent = '';
+            japaneseOverlay.style.display = 'none';
+        }
 
         const englishOverlay = document.getElementById('english-subtitle-overlay');
-        englishOverlay.textContent = '보조 자막을 입력하세요';
-        englishOverlay.style.display = 'block';
-        englishOverlay.style.opacity = '0.5';
+        if (englishOverlay) {
+            englishOverlay.textContent = '';
+            englishOverlay.style.display = 'none';
+        }
 
         const sourceOverlay = document.getElementById('source-overlay');
-        sourceOverlay.textContent = '출처를 입력하세요';
-        sourceOverlay.style.display = 'block';
-        sourceOverlay.style.opacity = '0.5';
+        if (sourceOverlay) {
+            sourceOverlay.textContent = '';
+            sourceOverlay.style.display = 'none';
+        }
+
+        // localStorage에서도 텍스트 오버레이 설정 삭제
+        localStorage.removeItem('videoAnalyzerTextOverlay');
+        console.log('✅ localStorage에서 텍스트 오버레이 설정 삭제됨');
 
         console.log('🗑️ 텍스트 오버레이 지움');
     }
@@ -10529,6 +10539,30 @@ function loadFileFromIndexedDB(id) {
 
         request.onerror = () => {
             console.error('파일 불러오기 실패:', request.error);
+            reject(request.error);
+        };
+    });
+}
+
+// IndexedDB에서 파일 삭제
+function deleteFileFromIndexedDB(id) {
+    return new Promise((resolve, reject) => {
+        if (!db) {
+            reject('IndexedDB가 초기화되지 않았습니다.');
+            return;
+        }
+
+        const transaction = db.transaction([STORE_NAME], 'readwrite');
+        const objectStore = transaction.objectStore(STORE_NAME);
+        const request = objectStore.delete(id);
+
+        request.onsuccess = () => {
+            console.log(`파일 삭제 완료: ${id}`);
+            resolve();
+        };
+
+        request.onerror = () => {
+            console.error('파일 삭제 실패:', request.error);
             reject(request.error);
         };
     });
@@ -12531,7 +12565,7 @@ function convertToSRT(subtitles) {
 }
 
 // 트랙 비우기 기능
-function clearTrack(trackType) {
+async function clearTrack(trackType) {
     console.log(`🗑️ 트랙 비우기: ${trackType}`);
 
     const trackNames = {
@@ -12560,11 +12594,76 @@ function clearTrack(trackType) {
         // 파일명도 초기화 및 표시 업데이트
         loadedSubtitleFiles[trackType] = null;
         updateSubtitleFileDisplay();
+
+        // 비디오 미리보기의 자막 오버레이도 지우기
+        const overlayMapping = {
+            main: 'japanese-subtitle-overlay',
+            translation: 'korean-subtitle-overlay'
+        };
+
+        const overlayId = overlayMapping[trackType];
+        if (overlayId) {
+            const overlay = document.getElementById(overlayId);
+            if (overlay) {
+                overlay.textContent = '';
+                overlay.style.display = 'none';
+                console.log(`✅ 비디오 미리보기 오버레이 지움: ${overlayId}`);
+            }
+        }
+
+        // 제목과 부제목 오버레이도 함께 지우기
+        const titleOverlay = document.getElementById('video-title-overlay');
+        if (titleOverlay) {
+            titleOverlay.textContent = '';
+            titleOverlay.style.display = 'none';
+        }
+
+        const subtitleOverlay = document.getElementById('video-subtitle-overlay');
+        if (subtitleOverlay) {
+            subtitleOverlay.textContent = '';
+            subtitleOverlay.style.display = 'none';
+        }
+
+        // 기타 오버레이들도 지우기
+        const englishOverlay = document.getElementById('english-subtitle-overlay');
+        if (englishOverlay) {
+            englishOverlay.textContent = '';
+            englishOverlay.style.display = 'none';
+        }
+
+        const sourceOverlay = document.getElementById('source-overlay');
+        if (sourceOverlay) {
+            sourceOverlay.textContent = '';
+            sourceOverlay.style.display = 'none';
+        }
+
+        console.log('✅ 모든 텍스트 오버레이 지움');
+
+        // localStorage에서도 텍스트 오버레이 설정 삭제
+        localStorage.removeItem('videoAnalyzerTextOverlay');
+        console.log('✅ localStorage에서 텍스트 오버레이 설정 삭제됨');
+
+        // IndexedDB에서도 삭제
+        const indexedDBKeys = {
+            main: 'main-subtitle',
+            translation: 'translation-subtitle',
+            description: 'description-subtitle'
+        };
+
+        const dbKey = indexedDBKeys[trackType];
+        if (dbKey) {
+            try {
+                await deleteFileFromIndexedDB(dbKey);
+                console.log(`✅ IndexedDB에서 ${trackNames[trackType]} 삭제 완료`);
+            } catch (error) {
+                console.error(`❌ IndexedDB에서 ${trackNames[trackType]} 삭제 실패:`, error);
+            }
+        }
     }
 }
 
 // 미디어 트랙 비우기 기능
-function clearMediaTrack(trackType) {
+async function clearMediaTrack(trackType) {
     console.log(`🗑️ 미디어 트랙 비우기: ${trackType}`);
 
     const trackNames = {
@@ -12632,6 +12731,14 @@ function clearMediaTrack(trackType) {
             }
         }
         pauseAllAudioTracks();
+    }
+
+    // IndexedDB에서도 삭제
+    try {
+        await deleteFileFromIndexedDB(trackType);
+        console.log(`✅ IndexedDB에서 ${trackNames[trackType]} 삭제 완료`);
+    } catch (error) {
+        console.error(`❌ IndexedDB에서 ${trackNames[trackType]} 삭제 실패:`, error);
     }
 
     console.log(`✅ ${trackNames[trackType]} 트랙이 비워졌습니다.`);
