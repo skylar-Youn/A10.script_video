@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TVideoEditor - 비디오 편집기</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0f0f0f;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Header */
+        header {
+            background: #1a1a1a;
+            padding: 12px 20px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        header .controls button {
+            background: #3a7fcc;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 8px;
+            font-size: 14px;
+        }
+
+        header .controls button:hover {
+            background: #4a9eff;
+        }
+
+        /* Main Layout */
+        #main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        #sidebar {
+            width: 250px;
+            background: #1a1a1a;
+            border-right: 1px solid #333;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        #sidebar h3 {
+            font-size: 14px;
+            margin-bottom: 12px;
+            color: #aaa;
+            text-transform: uppercase;
+        }
+
+        #sidebar button {
+            width: 100%;
+            padding: 10px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 8px;
+            text-align: left;
+        }
+
+        #sidebar button:hover {
+            background: #333;
+        }
+
+        /* Preview Area */
+        #preview-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #0f0f0f;
+        }
+
+        #preview-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+        }
+
+        #video-wrapper {
+            position: relative;
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        #preview-video {
+            display: none;
+        }
+
+        #preview-canvas {
+            max-width: 100%;
+            max-height: 100%;
+            background: #000;
+            border: 1px solid #333;
+        }
+
+        /* Player Controls */
+        #player-controls {
+            background: #1a1a1a;
+            padding: 16px 20px;
+            border-top: 1px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        #player-controls button {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #player-controls button:hover {
+            background: #333;
+        }
+
+        #time-display {
+            font-family: monospace;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        /* Timeline Panel */
+        #timeline-panel {
+            height: 300px;
+            background: #1a1a1a;
+            border-top: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #timeline-toolbar {
+            padding: 8px 16px;
+            background: #2a2a2a;
+            border-bottom: 1px solid #333;
+            display: flex;
+            gap: 8px;
+        }
+
+        #timeline-toolbar button {
+            background: #3a3a3a;
+            border: 1px solid #555;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        #timeline-toolbar button:hover {
+            background: #444;
+        }
+
+        #timeline-container {
+            flex: 1;
+            overflow: auto;
+        }
+
+        #timeline-canvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        /* Subtitle Panel */
+        #subtitle-panel {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            background: rgba(26, 26, 26, 0.95);
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 16px;
+            min-width: 300px;
+            max-height: 80vh;
+            overflow-y: auto;
+            display: none;
+        }
+
+        #subtitle-panel.active {
+            display: block;
+        }
+
+        #subtitle-panel h3 {
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+
+        .subtitle-track {
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #2a2a2a;
+            border-radius: 4px;
+        }
+
+        .subtitle-track h4 {
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #4a9eff;
+        }
+
+        .subtitle-track label {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .subtitle-track input[type="checkbox"] {
+            margin-right: 8px;
+        }
+
+        .subtitle-track input[type="range"] {
+            width: 100%;
+            margin-top: 4px;
+        }
+
+        .subtitle-track input[type="number"] {
+            width: 60px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            color: white;
+            padding: 4px;
+            border-radius: 3px;
+        }
+
+        /* Properties Panel */
+        #properties-panel {
+            width: 300px;
+            background: #1a1a1a;
+            border-left: 1px solid #333;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        #properties-panel h3 {
+            font-size: 14px;
+            margin-bottom: 12px;
+            color: #aaa;
+            text-transform: uppercase;
+        }
+
+        .property-group {
+            margin-bottom: 20px;
+        }
+
+        .property-group label {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 6px;
+            color: #ccc;
+        }
+
+        .property-group input,
+        .property-group select {
+            width: 100%;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .property-group button {
+            width: 100%;
+            padding: 8px;
+            background: #3a7fcc;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+
+        .property-group button:hover {
+            background: #4a9eff;
+        }
+
+        /* Upload Area */
+        #upload-area {
+            border: 2px dashed #444;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        #upload-area:hover {
+            border-color: #4a9eff;
+            background: #1a1a1a;
+        }
+
+        #upload-area.dragover {
+            border-color: #4a9eff;
+            background: #2a2a2a;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header>
+            <h1>🎬 TVideoEditor</h1>
+            <div class="controls">
+                <button onclick="exportVideo()">내보내기</button>
+                <button onclick="saveProject()">저장</button>
+                <button onclick="toggleSubtitlePanel()">자막 설정</button>
+            </div>
+        </header>
+
+        <!-- Main Layout -->
+        <div id="main-layout">
+            <!-- Sidebar -->
+            <div id="sidebar">
+                <h3>트랙 추가</h3>
+                <button onclick="addTrack('video')">📹 비디오 트랙</button>
+                <button onclick="addTrack('subtitle')">💬 자막 트랙</button>
+                <button onclick="addTrack('audio')">🔊 오디오 트랙</button>
+                <button onclick="addTrack('effect')">✨ 효과 트랙</button>
+
+                <h3 style="margin-top: 24px;">미디어 파일</h3>
+                <div id="upload-area" onclick="document.getElementById('file-input').click()">
+                    <p>클릭하여 파일 업로드</p>
+                    <input type="file" id="file-input" accept="video/*" style="display: none;" onchange="handleFileUpload(event)">
+                </div>
+                <div id="media-list"></div>
+            </div>
+
+            <!-- Preview Area -->
+            <div id="preview-area">
+                <div id="preview-container">
+                    <div id="video-wrapper">
+                        <video id="preview-video" crossorigin="anonymous"></video>
+                        <canvas id="preview-canvas" width="1920" height="1080"></canvas>
+                    </div>
+
+                    <!-- Subtitle Panel (Floating) -->
+                    <div id="subtitle-panel">
+                        <h3>자막 설정</h3>
+                        <div id="subtitle-tracks"></div>
+                    </div>
+                </div>
+
+                <!-- Player Controls -->
+                <div id="player-controls">
+                    <button onclick="togglePlay()">▶️</button>
+                    <button onclick="seekBackward()">⏪</button>
+                    <button onclick="seekForward()">⏩</button>
+                    <span id="time-display">00:00 / 00:00</span>
+                </div>
+            </div>
+
+            <!-- Properties Panel -->
+            <div id="properties-panel">
+                <h3>속성</h3>
+                <div id="property-content">
+                    <p style="color: #666; font-size: 13px;">선택된 항목이 없습니다.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Timeline Panel -->
+        <div id="timeline-panel">
+            <div id="timeline-toolbar">
+                <button onclick="timeline.zoom *= 1.2; timeline.render()">🔍+</button>
+                <button onclick="timeline.zoom *= 0.8; timeline.render()">🔍-</button>
+                <button onclick="deleteSelectedClip()">🗑️ 삭제</button>
+            </div>
+            <div id="timeline-container">
+                <canvas id="timeline-canvas" width="2000" height="400"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/canvas-preview.js"></script>
+    <script src="/static/timeline.js"></script>
+    <script>
+        // 전역 변수
+        let videoPreview = null;
+        let timeline = null;
+        let currentProject = null;
+
+        // 초기화
+        window.addEventListener('DOMContentLoaded', () => {
+            // Canvas Video Preview 초기화
+            videoPreview = new CanvasVideoPreview('preview-canvas', 'preview-video');
+
+            // Timeline 초기화
+            timeline = new TimelineManager('timeline-canvas');
+
+            // Timeline seek 이벤트 리스너
+            document.getElementById('timeline-canvas').addEventListener('seek', (e) => {
+                videoPreview.seekToTime(e.detail.time);
+                updateTimeDisplay();
+            });
+
+            // 비디오 시간 업데이트
+            document.getElementById('preview-video').addEventListener('timeupdate', () => {
+                timeline.currentTime = videoPreview.video.currentTime;
+                timeline.render();
+                updateTimeDisplay();
+            });
+
+            // 기본 트랙 생성
+            timeline.addTrack('video');
+            timeline.addTrack('subtitle');
+        });
+
+        // 파일 업로드
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/upload-video', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    // 비디오 로드
+                    await videoPreview.loadVideo(data.url);
+
+                    // 타임라인에 클립 추가
+                    const videoTrack = timeline.tracks.find(t => t.type === 'video');
+                    if (videoTrack) {
+                        timeline.addClip(videoTrack.id, {
+                            name: data.filename,
+                            startTime: 0,
+                            duration: videoPreview.video.duration,
+                            type: 'video',
+                            source: data.url
+                        });
+                    }
+
+                    alert('비디오가 업로드되었습니다!');
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                alert('업로드 실패: ' + error.message);
+            }
+        }
+
+        // 트랙 추가
+        function addTrack(type) {
+            const track = timeline.addTrack(type);
+            console.log('트랙 추가:', track);
+        }
+
+        // 재생/일시정지
+        function togglePlay() {
+            if (videoPreview.video.paused) {
+                videoPreview.video.play();
+            } else {
+                videoPreview.video.pause();
+            }
+        }
+
+        // 뒤로 이동
+        function seekBackward() {
+            videoPreview.video.currentTime = Math.max(0, videoPreview.video.currentTime - 1);
+        }
+
+        // 앞으로 이동
+        function seekForward() {
+            videoPreview.video.currentTime = Math.min(
+                videoPreview.video.duration,
+                videoPreview.video.currentTime + 1
+            );
+        }
+
+        // 시간 표시 업데이트
+        function updateTimeDisplay() {
+            const current = formatTime(videoPreview.video.currentTime);
+            const duration = formatTime(videoPreview.video.duration || 0);
+            document.getElementById('time-display').textContent = `${current} / ${duration}`;
+        }
+
+        // 시간 포맷
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // 선택된 클립 삭제
+        function deleteSelectedClip() {
+            if (timeline.selectedClip && timeline.selectedTrack) {
+                timeline.removeClip(timeline.selectedTrack.id, timeline.selectedClip.id);
+                timeline.selectedClip = null;
+                timeline.selectedTrack = null;
+            }
+        }
+
+        // 자막 패널 토글
+        function toggleSubtitlePanel() {
+            const panel = document.getElementById('subtitle-panel');
+            panel.classList.toggle('active');
+        }
+
+        // 프로젝트 저장
+        async function saveProject() {
+            const projectData = {
+                name: 'My Project',
+                timeline: timeline.export(),
+                videoSettings: {
+                    width: videoPreview.canvas.width,
+                    height: videoPreview.canvas.height
+                }
+            };
+
+            try {
+                const response = await fetch('/api/projects/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(projectData)
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    currentProject = data.project;
+                    alert('프로젝트가 저장되었습니다!');
+                }
+            } catch (error) {
+                console.error('Save error:', error);
+                alert('저장 실패: ' + error.message);
+            }
+        }
+
+        // 비디오 내보내기
+        function exportVideo() {
+            alert('비디오 내보내기 기능은 구현 중입니다.');
+        }
+    </script>
+</body>
+</html>

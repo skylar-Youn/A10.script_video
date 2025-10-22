@@ -457,6 +457,33 @@
             </label>
           </div>
 
+          <div class="form-controls" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+            <label>파트 선택
+              <select name="part_number" id="part-number-select">
+                <option value="1">1부</option>
+                <option value="2">2부</option>
+                <option value="3">3부</option>
+                <option value="4">4부</option>
+                <option value="5">5부</option>
+              </select>
+            </label>
+            <label>파트 길이
+              <select name="part_duration" id="part-duration-select">
+                <option value="1">1분</option>
+                <option value="2" selected>2분</option>
+                <option value="3">3분</option>
+                <option value="5">5분</option>
+                <option value="10">10분</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="form-actions" style="margin-bottom: 1rem;">
+            <button type="button" class="contrast" data-generate-part-all style="font-size: 1.1rem; font-weight: 600;">
+              🎬 선택한 파트 생성 (대본 + 영상 + 이미지)
+            </button>
+          </div>
+
           <div class="editor-section">
             <label>대본 편집 공간
               <textarea id="long-script-editor" name="script_body" rows="16" placeholder="여기에 대본을 작성하거나 붙여넣으세요. 필요하면 직접 편집하면서 사용할 수 있습니다."></textarea>
@@ -464,9 +491,7 @@
           </div>
 
           <div class="form-actions">
-            <button type="button" class="contrast" data-generate-long-script>유튜브 ChatGPT 열기</button>
             <button type="submit" class="secondary">대본 업데이트</button>
-            <button type="button" class="secondary" data-gpt-script-button>GPT창에서 '유튜브 대본생성' 열기</button>
             <button type="button" class="secondary" data-copy-long-script>대본 복사</button>
             <button type="button" class="outline" data-generate-media-prompts>🎨 이미지/영상 프롬프트 생성</button>
             <button type="button" data-save="long_script" class="outline">결과 저장</button>

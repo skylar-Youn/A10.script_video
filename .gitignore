@@ -43,8 +43,4 @@ youtube/saved_results/*
 meta.json
 old/*
 gitignore
-*.html
 *.csv
-
-*.json 
-ytdl_history.json 

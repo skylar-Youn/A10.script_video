@@ -1120,6 +1120,7 @@ def _build_drawtext_filter(
     elif overlay_type in {"title", "subtitle"}:
         # 제목/부제목도 자막과 동일한 두께 적용
         border_width = max(2, int(round(font_size * 0.08)))
+        logging.info(f"🖊️ {overlay_type} borderWidth 계산: font_size={font_size} → {font_size}*0.08={font_size*0.08} → border_width={border_width}")
     else:
         border_width = max(1, int(round(font_size * 0.06)))
 

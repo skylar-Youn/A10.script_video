@@ -1,0 +1,6 @@
+{
+  "remote.autoForwardPorts": false,
+  "portsAttributes": {
+    "8001": { "onAutoForward": "ignore" }
+  }
+}

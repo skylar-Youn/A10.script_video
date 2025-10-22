@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>일본어 폰트 테스트</title>
+    <style>
+        @font-face {
+            font-family: 'Noto Sans JP Local';
+            src: url('/static/fonts/NotoSansJP-Regular.ttf') format('truetype');
+            font-weight: 400;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        body {
+            padding: 20px;
+            background: #1a1a2e;
+            color: white;
+        }
+
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #2d3748;
+            border-radius: 8px;
+        }
+
+        .test-text {
+            font-size: 36px;
+            margin: 10px 0;
+        }
+
+        #canvas-test {
+            border: 2px solid #4a5568;
+            margin-top: 20px;
+            background: white;
+        }
+
+        .font-list {
+            background: #16213e;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>일본어 폰트 테스트</h1>
+
+    <div class="test-section">
+        <h2>1. HTML 텍스트 렌더링</h2>
+        <div class="test-text" style="font-family: 'Noto Sans JP Local', sans-serif;">
+            "面白い猫と犬大バトル！"<br>
+            🐱 猫と犬の戦争! 😱<br>
+            笑いと驚きに満ちた映像
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Canvas 텍스트 렌더링</h2>
+        <canvas id="canvas-test" width="800" height="200"></canvas>
+    </div>
+
+    <div class="test-section">
+        <h2>3. 로드된 폰트 확인</h2>
+        <div class="font-list" id="font-list">로딩 중...</div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. 폰트 파일 직접 테스트</h2>
+        <button onclick="testFontFile()">폰트 파일 다운로드 테스트</button>
+        <div id="font-file-result"></div>
+    </div>
+
+    <script>
+        // Canvas 테스트
+        async function testCanvas() {
+            console.log('Canvas 테스트 시작...');
+
+            // 폰트 로딩 대기
+            await document.fonts.ready;
+            console.log('✅ document.fonts.ready 완료');
+
+            const canvas = document.getElementById('canvas-test');
+            const ctx = canvas.getContext('2d');
+
+            // 배경
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, 800, 200);
+
+            // 일본어 텍스트 렌더링
+            const testTexts = [
+                { text: '"面白い猫と犬大バトル！"', y: 50, font: '"Noto Sans JP Local", sans-serif' },
+                { text: '🐱 猫と犬の戦争! 😱', y: 100, font: '"Noto Sans JP Local", sans-serif' },
+                { text: '笑いと驚きに満ちた映像', y: 150, font: '"Noto Sans JP Local", sans-serif' }
+            ];
+
+            testTexts.forEach(({ text, y, font }) => {
+                ctx.font = `bold 36px ${font}`;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+
+                // 외곽선
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 4;
+                ctx.strokeText(text, 20, y);
+
+                // 채우기
+                ctx.fillStyle = '#000000';
+                ctx.fillText(text, 20, y);
+
+                console.log(`렌더링 완료: ${text}`);
+            });
+        }
+
+        // 로드된 폰트 목록 표시
+        async function listLoadedFonts() {
+            await document.fonts.ready;
+
+            const loadedFonts = [];
+            for (const font of document.fonts) {
+                loadedFonts.push(`${font.family} (${font.style}, ${font.weight}) - ${font.status}`);
+            }
+
+            const fontListDiv = document.getElementById('font-list');
+            if (loadedFonts.length > 0) {
+                fontListDiv.innerHTML = loadedFonts.join('<br>');
+            } else {
+                fontListDiv.innerHTML = '로드된 커스텀 폰트 없음';
+            }
+
+            console.log('로드된 폰트:', loadedFonts);
+        }
+
+        // 폰트 파일 직접 테스트
+        async function testFontFile() {
+            const resultDiv = document.getElementById('font-file-result');
+            resultDiv.innerHTML = '테스트 중...';
+
+            try {
+                const response = await fetch('/static/fonts/NotoSansJP-Regular.ttf');
+                const blob = await response.blob();
+
+                resultDiv.innerHTML = `
+                    ✅ 폰트 파일 다운로드 성공!<br>
+                    - 상태: ${response.status} ${response.statusText}<br>
+                    - 크기: ${(blob.size / 1024 / 1024).toFixed(2)} MB<br>
+                    - 타입: ${blob.type}
+                `;
+
+                console.log('폰트 파일 정보:', {
+                    status: response.status,
+                    size: blob.size,
+                    type: blob.type
+                });
+            } catch (error) {
+                resultDiv.innerHTML = `❌ 오류: ${error.message}`;
+                console.error('폰트 파일 다운로드 실패:', error);
+            }
+        }
+
+        // 페이지 로드 시 실행
+        window.addEventListener('load', async () => {
+            console.log('페이지 로드 완료');
+            await testCanvas();
+            await listLoadedFonts();
+        });
+
+        // 폰트 로드 상태 모니터링
+        document.fonts.addEventListener('loadingdone', (event) => {
+            console.log('폰트 로딩 완료:', event);
+            event.fontfaces.forEach(font => {
+                console.log(`- ${font.family}: ${font.status}`);
+            });
+        });
+
+        document.fonts.addEventListener('loadingerror', (event) => {
+            console.error('폰트 로딩 실패:', event);
+        });
+    </script>
+</body>
+</html>

@@ -6666,7 +6666,13 @@ function initLongScriptTool() {
   const topicInput = form ? form.querySelector("input[name='script_topic']") : null;
   const languageSelect = form ? form.querySelector("select[name='script_language']") : null;
   const modeSelect = form ? form.querySelector("select[name='mode']") : null;
-  const generateButton = form ? form.querySelector("[data-generate-long-script]") : null;
+  const partNumberSelect = document.getElementById("part-number-select");
+  const partDurationSelect = document.getElementById("part-duration-select");
+  const generatePartAllButton = form ? form.querySelector("[data-generate-part-all]") : null;
+  const generateVideoPromptButton = form ? form.querySelector("[data-generate-video-prompt]") : null;
+  const generateScriptOnlyButton = form ? form.querySelector("[data-generate-script-only]") : null;
+  const generateScenePromptsButton = form ? form.querySelector("[data-generate-scene-prompts]") : null;
+  const generateInlineButton = form ? form.querySelector("[data-generate-long-script-inline]") : null;
   const gptButton = form ? form.querySelector("[data-gpt-script-button]") : null;
   const copyButton = form ? form.querySelector("[data-copy-long-script]") : null;
   const chatgptSection = document.querySelector("[data-chatgpt-import-section]");
@@ -6707,9 +6713,7 @@ function initLongScriptTool() {
     if (gptButton) {
       gptButton.style.display = isChatgpt ? "" : "none";
     }
-    if (generateButton) {
-      generateButton.textContent = isChatgpt ? "유튜브 ChatGPT 열기" : "대본 생성";
-    }
+    // 3개의 버튼은 항상 같은 텍스트 유지
   };
 
   const updateStateFromForm = ({ notify = false } = {}) => {
@@ -6757,7 +6761,8 @@ function initLongScriptTool() {
     return true;
   };
 
-  const handleChatgptLaunch = () => {
+  // 1번: 영상 프롬프트 생성 (ChatGPT 모드)
+  const handleChatgptVideoPrompt = () => {
     const topicValue = topicInput ? topicInput.value.trim() : "";
 
     if (!topicValue) {
@@ -6766,87 +6771,486 @@ function initLongScriptTool() {
       return;
     }
 
-    const promptTemplate = `당신은 영상 프롬프트 및 대본 제작 전문가입니다.
-입력받은 "제목" 하나만으로 **YouTube 영상 제작 전체 구성(5~10분 길이)**을 자동으로 생성하세요.
-출력은 아래 세 파트를 포함해야 합니다:
+    const prompt = `"${topicValue}" 주제로 Sora/Kling AI 영상 생성 도구에 넣을 영어 프롬프트를 작성해주세요.
 
----
+시네마틱한 비주얼 묘사를 1-2문단으로 작성하되, 분위기/색감/조명/카메라 앵글/배경을 구체적으로 포함해주세요.
 
-### ① 🎬 영상 프롬프트 (Sora / Kling용)
-- Sora 또는 Kling에 바로 입력할 수 있도록, **영어로 한 문단의 시네마틱 비주얼 묘사**를 작성하세요.
-- 영상의 전체적인 분위기, 색감, 조명, 카메라 앵글, 배경, 인물의 감정 등을 상세히 기술하세요.
-- 다큐멘터리, SF, 명상, 감성 등 주제에 따라 자연스럽게 조정합니다.
-- 이 프롬프트만으로 오프닝 장면을 영상 생성 모델이 만들 수 있을 만큼 구체적으로 작성하세요.
+예: "A cinematic 5-minute video exploring... Shot in moody style with deep blue lighting. Camera slowly pans..."`;
 
----
-
-### ② 💬 유튜브 영상 대본 (5~10분 기준)
-- 영상 전체를 구성하는 완성형 대본을 작성하세요.
-- **구조는 3부 구성**으로 합니다:
-
-#### 1부. 인트로 (Hook)
-- 시청자의 시선을 첫 10초 안에 끌어당길 수 있는 문장으로 시작합니다.
-- "상상해보세요", "믿기 어렵겠지만" 등의 호기심 유발 문장을 사용하세요.
-
-#### 2부. 본문 (Main Body)
-- 주제를 3~5개의 섹션으로 나누어 깊이 있게 설명하세요.
-- 각 섹션은 짧은 스토리텔링, 비유, 또는 사례로 구성합니다.
-- 전문적인 내용일 경우, 쉬운 예시를 들어 대중적으로 풀어 설명하세요.
-- 영상 흐름에 맞게 **시각적 장면 전환 포인트(예: 컷, 슬로우, 줌 등)**를 함께 서술해 주세요.
-
-#### 3부. 클로징 (Outro)
-- 주제의 핵심 메시지를 요약하며, 시청자에게 여운이나 질문을 남깁니다.
-- "이제 당신의 생각은 어떤가요?", "우주는 당신을 바라보고 있을지도 모릅니다."처럼 사유를 유도하세요.
-
----
-
-### ③ 🖼️ 이미지 시퀀스 프롬프트
-- \`[Scene 1]\` 부터 \`[Scene N]\` 까지, 영상의 주요 장면별로 **영어 비주얼 프롬프트**를 작성합니다.
-- 각 프롬프트는 1~2문장으로 구성하며, 다음 요소를 포함합니다:
-  - 분위기 (감성적, 철학적, SF 등)
-  - 인물 / 배경 / 조명 / 카메라 앵글 / 색감
-- Sora 또는 Kling에서 장면 단위로 생성 가능한 수준의 구체성과 일관된 색조를 유지합니다.
-
----
-
-### 🎨 전체 출력 예시
-
-**입력:**
-> 제목: "양자 관찰자와 기"
-
-**출력:**
-① 영상 프롬프트
-② 유튜브 영상 대본 (인트로 → 본문 → 클로징)
-③ 이미지 시퀀스 프롬프트
-
----
-
-### ⚙️ 추가 지침
-- 모든 묘사는 **시네마틱하고 AI 영상 모델(Sora, Kling)에 적합한 시각 언어**로 작성합니다.
-- 대사는 내레이션이나 진행자의 음성으로 바로 사용할 수 있을 정도로 자연스럽게 작성합니다.
-- 시청자 몰입을 위해 리듬감 있는 문장, 간결한 비유, 감정적 흐름을 적절히 섞습니다.
-- 사용자가 "스타일"을 지정할 경우 (예: 다큐멘터리 / SF / 감성 / 철학 / 코믹), 그에 맞는 어조로 자동 전환합니다.
-- 요청 언어(한국어/영어)에 따라 대본 언어를 자동 조정합니다.
-- 영상 프롬프트와 장면 프롬프트는 대본의 흐름과 일관성을 유지해야 합니다.
-
----
-
-💡 즉, 입력 예시:
-> 제목: "의식이 현실을 바꾼다"
-
-출력:
-> 🎬 영상 프롬프트
-> 💬 유튜브 대본 (인트로 → 본문 → 클로징)
-> 🖼️ 장면별 프롬프트
-
-모두 자동 생성.`;
-
-    const query = `${promptTemplate}\n\n제목: "${topicValue}"`;
-
-    const gptUrl = `https://chatgpt.com/?q=${encodeURIComponent(query)}`;
+    const gptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
     window.open(gptUrl, "_blank", "width=1200,height=800");
     showChatgptArea(true);
-    showNotification("ChatGPT 창에서 영상 전체 구성을 생성한 뒤 결과를 붙여넣어 주세요.", "info");
+    showNotification("ChatGPT 창이 열리면 엔터를 눌러 실행한 후, 결과를 붙여넣어 주세요.", "info");
+  };
+
+  // 1번: 영상 프롬프트 생성 (API 모드)
+  const handleApiVideoPrompt = async () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+    if (!topicValue) {
+      alert("콘텐츠 주제를 입력하세요.");
+      if (topicInput) topicInput.focus();
+      return;
+    }
+    const languageValue = languageSelect ? languageSelect.value : "ko";
+    const endpoint = GENERATION_ENDPOINTS[TOOL_KEYS.LONG_SCRIPT];
+    if (!endpoint) {
+      showNotification("이 기능은 현재 사용할 수 없습니다.", "error");
+      return;
+    }
+
+    const videoPrompt = `"${topicValue}" 주제로 Sora/Kling AI 영상 생성 도구에 넣을 영어 프롬프트를 작성해주세요.
+
+시네마틱한 비주얼 묘사를 1-2문단으로 작성하되, 분위기/색감/조명/카메라 앵글/배경을 구체적으로 포함해주세요.`;
+
+    setButtonBusy(generateVideoPromptButton, true);
+    try {
+      const requestBody = {
+        topic: topicValue,
+        keyword: topicValue,
+        language: languageValue,
+        prompt: videoPrompt
+      };
+      const data = await api(endpoint.url, {
+        method: "POST",
+        body: JSON.stringify(requestBody)
+      });
+      const enriched = {
+        topic: data?.topic || topicValue,
+        keyword: data?.keyword || topicValue,
+        language: data?.language || languageValue,
+        content: typeof data?.content === "string" ? data.content : "",
+        subtitles: Array.isArray(data?.subtitles) ? data.subtitles : [],
+        images: Array.isArray(data?.images) ? data.images : [],
+        updated_at: new Date().toISOString(),
+        generated_at: new Date().toISOString()
+      };
+      state.latestResults[TOOL_KEYS.LONG_SCRIPT] = enriched;
+      state.activeRecords[TOOL_KEYS.LONG_SCRIPT] = null;
+      state.lastRequests[TOOL_KEYS.LONG_SCRIPT] = {
+        topic: enriched.topic,
+        keyword: enriched.keyword,
+        language: enriched.language
+      };
+      allowLongScriptFormSync = false;
+      renderLongScriptResults(enriched);
+      allowLongScriptFormSync = true;
+      renderSavedRecords(TOOL_KEYS.LONG_SCRIPT);
+      showNotification("영상 프롬프트를 생성했습니다.", "success");
+    } catch (error) {
+      console.error("Failed to generate video prompt:", error);
+      showNotification(error.message || "영상 프롬프트 생성에 실패했습니다.", "error");
+    } finally {
+      setButtonBusy(generateVideoPromptButton, false);
+    }
+  };
+
+  // 2번: 유튜브 대본 생성 (ChatGPT 모드)
+  const handleChatgptScriptOnly = () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+
+    if (!topicValue) {
+      alert("콘텐츠 주제를 입력하세요.");
+      if (topicInput) topicInput.focus();
+      return;
+    }
+
+    const prompt = `"${topicValue}" 제목으로 5-10분 분량의 유튜브 영상 대본을 작성해주세요.
+
+다음 구조로 완성형 대본을 만들어주세요:
+
+1부. 인트로 (Hook) - 첫 10초 안에 시청자 시선을 사로잡는 호기심 유발 문장으로 시작
+
+2부. 본문 (3-5개 섹션) - 주제를 깊이 있게 전개, 스토리텔링/비유/사례 포함
+
+3부. 클로징 (Outro) - 핵심 메시지 요약 + 여운
+
+톤은 주제에 맞게 자연스럽게 조정하고, 바로 녹음 가능한 나레이션 스타일로 작성해주세요.`;
+
+    const gptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+    window.open(gptUrl, "_blank", "width=1200,height=800");
+    showChatgptArea(true);
+    showNotification("ChatGPT 창이 열리면 엔터를 눌러 실행한 후, 결과를 붙여넣어 주세요.", "info");
+  };
+
+  // 2번: 유튜브 대본 생성 (API 모드)
+  const handleApiScriptOnly = async () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+    if (!topicValue) {
+      alert("콘텐츠 주제를 입력하세요.");
+      if (topicInput) topicInput.focus();
+      return;
+    }
+    const languageValue = languageSelect ? languageSelect.value : "ko";
+    const endpoint = GENERATION_ENDPOINTS[TOOL_KEYS.LONG_SCRIPT];
+    if (!endpoint) {
+      showNotification("이 기능은 현재 사용할 수 없습니다.", "error");
+      return;
+    }
+
+    const scriptPrompt = `"${topicValue}" 제목으로 5-10분 분량의 유튜브 영상 대본을 작성해주세요.
+
+구조: 1부. 인트로(Hook) → 2부. 본문(3-5섹션) → 3부. 클로징(Outro)
+톤은 주제에 맞게 자연스럽게 조정하고, 바로 녹음 가능한 나레이션 스타일로 작성해주세요.`;
+
+    setButtonBusy(generateScriptOnlyButton, true);
+    try {
+      const requestBody = {
+        topic: topicValue,
+        keyword: topicValue,
+        language: languageValue,
+        prompt: scriptPrompt
+      };
+      const data = await api(endpoint.url, {
+        method: "POST",
+        body: JSON.stringify(requestBody)
+      });
+      const enriched = {
+        topic: data?.topic || topicValue,
+        keyword: data?.keyword || topicValue,
+        language: data?.language || languageValue,
+        content: typeof data?.content === "string" ? data.content : "",
+        subtitles: Array.isArray(data?.subtitles) ? data.subtitles : [],
+        images: Array.isArray(data?.images) ? data.images : [],
+        updated_at: new Date().toISOString(),
+        generated_at: new Date().toISOString()
+      };
+      state.latestResults[TOOL_KEYS.LONG_SCRIPT] = enriched;
+      state.activeRecords[TOOL_KEYS.LONG_SCRIPT] = null;
+      state.lastRequests[TOOL_KEYS.LONG_SCRIPT] = {
+        topic: enriched.topic,
+        keyword: enriched.keyword,
+        language: enriched.language
+      };
+      allowLongScriptFormSync = false;
+      renderLongScriptResults(enriched);
+      allowLongScriptFormSync = true;
+      renderSavedRecords(TOOL_KEYS.LONG_SCRIPT);
+      showNotification("유튜브 대본을 생성했습니다.", "success");
+    } catch (error) {
+      console.error("Failed to generate script:", error);
+      showNotification(error.message || "대본 생성에 실패했습니다.", "error");
+    } finally {
+      setButtonBusy(generateScriptOnlyButton, false);
+    }
+  };
+
+  // 3번: 이미지 시퀀스 프롬프트 생성 (ChatGPT 모드)
+  const handleChatgptScenePrompts = () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+
+    if (!topicValue) {
+      alert("콘텐츠 주제를 입력하세요.");
+      if (topicInput) topicInput.focus();
+      return;
+    }
+
+    const prompt = `"${topicValue}" 영상을 장면별로 나누어 각 장면마다 Sora/Kling용 영어 이미지 프롬프트를 작성해주세요.
+
+다음 형식으로 5-15개 장면을 만들어주세요:
+
+[Scene 1: 인트로]
+프롬프트: "A wide shot of... (영어로 구체적인 비주얼)"
+
+[Scene 2: 본문 - 첫 번째]
+프롬프트: "Close-up of... (영어로 구체적인 비주얼)"
+
+각 프롬프트는 분위기, 조명, 배경, 카메라 앵글을 포함하고 일관된 색조를 유지해주세요.`;
+
+    const gptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+    window.open(gptUrl, "_blank", "width=1200,height=800");
+    showChatgptArea(true);
+    showNotification("ChatGPT 창이 열리면 엔터를 눌러 실행한 후, 결과를 붙여넣어 주세요.", "info");
+  };
+
+  // 3번: 이미지 시퀀스 프롬프트 생성 (API 모드)
+  const handleApiScenePrompts = async () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+    if (!topicValue) {
+      alert("콘텐츠 주제를 입력하세요.");
+      if (topicInput) topicInput.focus();
+      return;
+    }
+    const languageValue = languageSelect ? languageSelect.value : "ko";
+    const endpoint = GENERATION_ENDPOINTS[TOOL_KEYS.LONG_SCRIPT];
+    if (!endpoint) {
+      showNotification("이 기능은 현재 사용할 수 없습니다.", "error");
+      return;
+    }
+
+    const scenePrompt = `"${topicValue}" 영상을 장면별로 나누어 각 장면마다 Sora/Kling용 영어 이미지 프롬프트를 작성해주세요.
+
+형식: [Scene 1: 인트로] 프롬프트: "..."
+5-15개 장면, 각 프롬프트는 분위기/조명/배경/카메라 앵글 포함`;
+
+    setButtonBusy(generateScenePromptsButton, true);
+    try {
+      const requestBody = {
+        topic: topicValue,
+        keyword: topicValue,
+        language: languageValue,
+        prompt: scenePrompt
+      };
+      const data = await api(endpoint.url, {
+        method: "POST",
+        body: JSON.stringify(requestBody)
+      });
+      const enriched = {
+        topic: data?.topic || topicValue,
+        keyword: data?.keyword || topicValue,
+        language: data?.language || languageValue,
+        content: typeof data?.content === "string" ? data.content : "",
+        subtitles: Array.isArray(data?.subtitles) ? data.subtitles : [],
+        images: Array.isArray(data?.images) ? data.images : [],
+        updated_at: new Date().toISOString(),
+        generated_at: new Date().toISOString()
+      };
+      state.latestResults[TOOL_KEYS.LONG_SCRIPT] = enriched;
+      state.activeRecords[TOOL_KEYS.LONG_SCRIPT] = null;
+      state.lastRequests[TOOL_KEYS.LONG_SCRIPT] = {
+        topic: enriched.topic,
+        keyword: enriched.keyword,
+        language: enriched.language
+      };
+      allowLongScriptFormSync = false;
+      renderLongScriptResults(enriched);
+      allowLongScriptFormSync = true;
+      renderSavedRecords(TOOL_KEYS.LONG_SCRIPT);
+      showNotification("이미지 시퀀스 프롬프트를 생성했습니다.", "success");
+    } catch (error) {
+      console.error("Failed to generate scene prompts:", error);
+      showNotification(error.message || "이미지 시퀀스 생성에 실패했습니다.", "error");
+    } finally {
+      setButtonBusy(generateScenePromptsButton, false);
+    }
+  };
+
+  // 파트 통합 생성 핸들러 (ChatGPT 모드)
+  const handleChatgptPartAll = () => {
+    // editor에서 대본 가져오기
+    const fullScript = editor ? editor.value.trim() : "";
+    if (!fullScript) {
+      alert("대본 편집 공간에 대본을 작성하세요.");
+      if (editor) editor.focus();
+      return;
+    }
+
+    const partNumber = partNumberSelect ? partNumberSelect.value : "1";
+    const partDuration = partDurationSelect ? partDurationSelect.value : "2";
+
+    // 파트별 대본 추출
+    const partScript = extractPartScript(fullScript, partNumber);
+    if (!partScript) {
+      alert(`${partNumber}부에 해당하는 대본을 찾을 수 없습니다.\n\n마크다운 헤딩으로 파트를 구분하세요 (예: ## 1부, ## 2부)`);
+      return;
+    }
+
+    // Quantum × Qi GPT 프롬프트 형식
+    const prompt = `🎬 대본:
+${partScript}
+
+---
+
+당신은 영상 대본 및 시각화 전문가입니다. 위의 대본을 입력으로 받아 아래 세 가지 출력을 항상 생성하세요.
+
+① [나레이션 & 대사 (KR)]
+- 대본을 리듬감 있고 감정적인 나레이션으로 다시 써주세요.
+- 각 줄은 6~16자로, 총 5~10줄 정도.
+- 문체: 철학적·명상적 톤 유지.
+- [대사1], [대사2] 형태로 출력.
+
+② [Video Prompt for Sora/Kling (EN)]
+- 입력 내용을 영어로 시네마틱하게 묘사하세요 (3~6문장).
+- 반드시 포함:
+  - 인물/공간/조명/색감/질감/카메라 동작
+  - 감정 톤 (introspective, surreal, mysterious 등)
+- 영상 생성 모델(Sora, Kling)에 바로 입력 가능한 수준.
+
+③ [Image Prompts (EN)]
+- 동일 장면을 정지 이미지로 표현할 3~6컷 작성.
+- 각 항목은 [Image #]로 시작하고, 1줄로 구도·색감·무드·피사체 묘사.
+- 썸네일용 컷 1개에는 (🔥 Thumbnail-ready) 표시.
+
+---
+
+출력 형식:
+
+### ① 나레이션 & 대사 (KR)
+- [대사1] ...
+- [대사2] ...
+
+### ② Video Prompt for Sora/Kling (EN)
+A cinematic ...
+
+### ③ Image Prompts (EN)
+- [Image 1] ...
+- [Image 2] ... (🔥 Thumbnail-ready)
+
+---
+
+금지:
+- 'ultra realistic', 'best quality' 같은 품질 태그 사용 금지.
+- 폭력·선정·정치적 내용 금지.
+
+톤 가이드:
+- '양자와 기'는 과학과 영성이 교차하는 테마이므로, 시각적으로는 '빛, 파동, 호흡, 진동, 공명' 등의 상징을 사용하세요.
+- 색조는 gold-blue contrast, moonlight, subtle haze를 중심으로 유지하세요.`;
+
+    const gptUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+    window.open(gptUrl, "_blank", "width=1200,height=900");
+    showChatgptArea(true);
+    showNotification(`ChatGPT 창이 열리면 엔터를 눌러 실행한 후, ${partNumber}부 전체 결과를 붙여넣어 주세요.`, "info");
+  };
+
+  // 파트별 대본 추출 함수
+  const extractPartScript = (fullScript, partNumber) => {
+    if (!fullScript) return "";
+
+    // 마크다운 헤딩으로 파트 구분 (예: ## 1부, ## Part 1, # 1부 등)
+    const partPattern = new RegExp(`^#+\\s*${partNumber}부.*$`, "im");
+    const nextPartPattern = new RegExp(`^#+\\s*${parseInt(partNumber) + 1}부.*$`, "im");
+
+    const partMatch = fullScript.match(partPattern);
+    if (!partMatch) {
+      // 파트 헤딩이 없으면 전체 텍스트를 줄 수로 균등 분할
+      const lines = fullScript.split("\n").filter(line => line.trim());
+      const linesPerPart = Math.ceil(lines.length / 5); // 최대 5개 파트 가정
+      const startIdx = (parseInt(partNumber) - 1) * linesPerPart;
+      const endIdx = startIdx + linesPerPart;
+      return lines.slice(startIdx, endIdx).join("\n");
+    }
+
+    const startIdx = partMatch.index + partMatch[0].length;
+    const nextPartMatch = fullScript.substring(startIdx).match(nextPartPattern);
+
+    if (nextPartMatch) {
+      return fullScript.substring(startIdx, startIdx + nextPartMatch.index).trim();
+    } else {
+      return fullScript.substring(startIdx).trim();
+    }
+  };
+
+  // 파트 통합 생성 핸들러 (API 모드)
+  const handleApiPartAll = async () => {
+    // editor에서 대본 가져오기
+    const fullScript = editor ? editor.value.trim() : "";
+    if (!fullScript) {
+      alert("대본 편집 공간에 대본을 작성하세요.");
+      if (editor) editor.focus();
+      return;
+    }
+
+    const partNumber = partNumberSelect ? partNumberSelect.value : "1";
+    const partDuration = partDurationSelect ? partDurationSelect.value : "2";
+    const languageValue = languageSelect ? languageSelect.value : "ko";
+    const endpoint = GENERATION_ENDPOINTS[TOOL_KEYS.LONG_SCRIPT];
+
+    if (!endpoint) {
+      showNotification("이 기능은 현재 사용할 수 없습니다.", "error");
+      return;
+    }
+
+    // 파트별 대본 추출
+    const partScript = extractPartScript(fullScript, partNumber);
+    if (!partScript) {
+      alert(`${partNumber}부에 해당하는 대본을 찾을 수 없습니다.\n\n마크다운 헤딩으로 파트를 구분하세요 (예: ## 1부, ## 2부)`);
+      return;
+    }
+
+    // Quantum × Qi GPT 프롬프트 형식
+    const quantumQiPrompt = `🎬 대본:
+${partScript}
+
+---
+
+당신은 영상 대본 및 시각화 전문가입니다. 위의 대본을 입력으로 받아 아래 세 가지 출력을 항상 생성하세요.
+
+① [나레이션 & 대사 (KR)]
+- 대본을 리듬감 있고 감정적인 나레이션으로 다시 써주세요.
+- 각 줄은 6~16자로, 총 5~10줄 정도.
+- 문체: 철학적·명상적 톤 유지.
+- [대사1], [대사2] 형태로 출력.
+
+② [Video Prompt for Sora/Kling (EN)]
+- 입력 내용을 영어로 시네마틱하게 묘사하세요 (3~6문장).
+- 반드시 포함:
+  - 인물/공간/조명/색감/질감/카메라 동작
+  - 감정 톤 (introspective, surreal, mysterious 등)
+- 영상 생성 모델(Sora, Kling)에 바로 입력 가능한 수준.
+
+③ [Image Prompts (EN)]
+- 동일 장면을 정지 이미지로 표현할 3~6컷 작성.
+- 각 항목은 [Image #]로 시작하고, 1줄로 구도·색감·무드·피사체 묘사.
+- 썸네일용 컷 1개에는 (🔥 Thumbnail-ready) 표시.
+
+---
+
+출력 형식:
+
+### ① 나레이션 & 대사 (KR)
+- [대사1] ...
+- [대사2] ...
+
+### ② Video Prompt for Sora/Kling (EN)
+A cinematic ...
+
+### ③ Image Prompts (EN)
+- [Image 1] ...
+- [Image 2] ... (🔥 Thumbnail-ready)
+
+---
+
+금지:
+- 'ultra realistic', 'best quality' 같은 품질 태그 사용 금지.
+- 폭력·선정·정치적 내용 금지.
+
+톤 가이드:
+- '양자와 기'는 과학과 영성이 교차하는 테마이므로, 시각적으로는 '빛, 파동, 호흡, 진동, 공명' 등의 상징을 사용하세요.
+- 색조는 gold-blue contrast, moonlight, subtle haze를 중심으로 유지하세요.`;
+
+    setButtonBusy(generatePartAllButton, true);
+    try {
+      const requestBody = {
+        topic: `Part ${partNumber} (${partDuration}분)`,
+        keyword: partScript.substring(0, 100),
+        language: languageValue,
+        prompt: quantumQiPrompt
+      };
+      const data = await api(endpoint.url, {
+        method: "POST",
+        body: JSON.stringify(requestBody)
+      });
+      const enriched = {
+        topic: data?.topic || `Part ${partNumber}`,
+        keyword: data?.keyword || partScript.substring(0, 100),
+        language: data?.language || languageValue,
+        content: typeof data?.content === "string" ? data.content : "",
+        subtitles: Array.isArray(data?.subtitles) ? data.subtitles : [],
+        images: Array.isArray(data?.images) ? data.images : [],
+        updated_at: new Date().toISOString(),
+        generated_at: new Date().toISOString()
+      };
+      state.latestResults[TOOL_KEYS.LONG_SCRIPT] = enriched;
+      state.activeRecords[TOOL_KEYS.LONG_SCRIPT] = null;
+      state.lastRequests[TOOL_KEYS.LONG_SCRIPT] = {
+        topic: enriched.topic,
+        keyword: enriched.keyword,
+        language: enriched.language
+      };
+      allowLongScriptFormSync = false;
+      renderLongScriptResults(enriched);
+      allowLongScriptFormSync = true;
+      renderSavedRecords(TOOL_KEYS.LONG_SCRIPT);
+      showNotification(`${partNumber}부 (${partDuration}분) 콘텐츠를 생성했습니다.`, "success");
+      if (chatgptTextarea && getMode() !== "chatgpt") {
+        chatgptTextarea.value = "";
+        showChatgptArea(false, { focus: false });
+      }
+    } catch (error) {
+      console.error("Failed to generate part content:", error);
+      showNotification(error.message || `${partNumber}부 콘텐츠 생성에 실패했습니다.`, "error");
+    } finally {
+      setButtonBusy(generatePartAllButton, false);
+    }
   };
 
   const handleApiGeneration = async () => {
@@ -6907,6 +7311,106 @@ function initLongScriptTool() {
     }
   };
 
+  // Inline 버튼 - 유튜브 대본만 생성 (ChatGPT 모드)
+  const handleChatgptLaunchForYouTubeScript = () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+
+    if (!topicValue) {
+      alert("콘텐츠 주제를 입력하세요.");
+      if (topicInput) topicInput.focus();
+      return;
+    }
+
+    const promptTemplate = `전문 유튜브 대본 제작자로서 제목만으로 10분 영상 대본을 작성하세요.
+
+구성: 인트로(Hook) → 본문(3-5섹션, 스토리텔링) → 클로징(여운)
+톤: 주제에 맞게 자동 조정 (철학/다큐/SF/감성/코믹)
+요구: 자연스러운 나레이션, 시청자 몰입
+
+제목: "${topicValue}"`;
+
+    const gptUrl = `https://chatgpt.com/?q=${encodeURIComponent(promptTemplate)}`;
+    window.open(gptUrl, "_blank", "width=1200,height=800");
+    showChatgptArea(true);
+    showNotification("ChatGPT 창에서 유튜브 대본을 생성한 뒤 결과를 붙여넣어 주세요.", "info");
+  };
+
+  // Inline 버튼 - 유튜브 대본만 생성 (API 모드)
+  const handleApiGenerationForYouTubeScript = async () => {
+    const topicValue = topicInput ? topicInput.value.trim() : "";
+    if (!topicValue) {
+      alert("콘텐츠 주제를 입력하세요.");
+      if (topicInput) topicInput.focus();
+      return;
+    }
+    const languageValue = languageSelect ? languageSelect.value : "ko";
+    const endpoint = GENERATION_ENDPOINTS[TOOL_KEYS.LONG_SCRIPT];
+    if (!endpoint) {
+      showNotification("이 기능은 현재 사용할 수 없습니다.", "error");
+      return;
+    }
+
+    const youtubeScriptPrompt = `당신은 전문 유튜브 영상 대본 제작자이자 콘텐츠 감독입니다.
+사용자가 입력한 "제목" 하나만으로, 완성도 높은 유튜브 영상 대본을 자동으로 작성하세요.
+
+### 🎯 생성 목표
+- 입력: 영상의 **제목 한 줄**
+- 출력: **유튜브 영상용 완성 대본 (10분 이하 또는 요청 길이에 맞게)**
+- 대본은 바로 녹음 및 영상 제작에 사용할 수 있을 만큼 자연스럽고, 시청자 몰입도를 높이는 내레이션 중심으로 작성합니다.
+
+### 🧱 대본 구성 규칙
+1. **인트로 (Hook)** - 첫 10초 안에 시청자의 시선을 잡아야 합니다.
+2. **본문 (Main Body)** - 주제를 3~5개의 섹션으로 나누어 전개합니다.
+3. **클로징 (Outro)** - 핵심 메시지를 요약하며 시청자에게 생각할 여지를 줍니다.
+
+제목: "${topicValue}"`;
+
+    setButtonBusy(generateInlineButton, true);
+    try {
+      const requestBody = {
+        topic: topicValue,
+        keyword: topicValue,
+        language: languageValue,
+        prompt: youtubeScriptPrompt
+      };
+      const data = await api(endpoint.url, {
+        method: "POST",
+        body: JSON.stringify(requestBody)
+      });
+      const enriched = {
+        topic: data?.topic || topicValue,
+        keyword: data?.keyword || topicValue,
+        language: data?.language || languageValue,
+        content: typeof data?.content === "string" ? data.content : "",
+        subtitles: Array.isArray(data?.subtitles) ? data.subtitles : [],
+        images: Array.isArray(data?.images) ? data.images : [],
+        updated_at: new Date().toISOString(),
+        generated_at: new Date().toISOString()
+      };
+      state.latestResults[TOOL_KEYS.LONG_SCRIPT] = enriched;
+      state.activeRecords[TOOL_KEYS.LONG_SCRIPT] = null;
+      state.lastRequests[TOOL_KEYS.LONG_SCRIPT] = {
+        topic: enriched.topic,
+        keyword: enriched.keyword,
+        language: enriched.language
+      };
+      allowLongScriptFormSync = false;
+      renderLongScriptResults(enriched);
+      allowLongScriptFormSync = true;
+      renderSavedRecords(TOOL_KEYS.LONG_SCRIPT);
+      showNotification("유튜브 대본을 생성했습니다.", "success");
+      if (chatgptTextarea && getMode() !== "chatgpt") {
+        chatgptTextarea.value = "";
+        showChatgptArea(false, { focus: false });
+      }
+    } catch (error) {
+      console.error("Failed to generate YouTube script:", error);
+      showNotification(error.message || "대본 생성에 실패했습니다.", "error");
+    } finally {
+      setButtonBusy(generateInlineButton, false);
+    }
+  };
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     updateStateFromForm({ notify: true });
@@ -6934,19 +7438,63 @@ function initLongScriptTool() {
     });
   }
 
-  if (generateButton) {
-    generateButton.addEventListener("click", async () => {
+  // 파트 통합 생성 버튼
+  if (generatePartAllButton) {
+    generatePartAllButton.addEventListener("click", async () => {
       if (getMode() === "chatgpt") {
-        handleChatgptLaunch();
+        handleChatgptPartAll();
       } else {
-        await handleApiGeneration();
+        await handleApiPartAll();
+      }
+    });
+  }
+
+  // 1번: 영상 프롬프트 생성 버튼
+  if (generateVideoPromptButton) {
+    generateVideoPromptButton.addEventListener("click", async () => {
+      if (getMode() === "chatgpt") {
+        handleChatgptVideoPrompt();
+      } else {
+        await handleApiVideoPrompt();
+      }
+    });
+  }
+
+  // 2번: 유튜브 대본 생성 버튼
+  if (generateScriptOnlyButton) {
+    generateScriptOnlyButton.addEventListener("click", async () => {
+      if (getMode() === "chatgpt") {
+        handleChatgptScriptOnly();
+      } else {
+        await handleApiScriptOnly();
+      }
+    });
+  }
+
+  // 3번: 이미지 시퀀스 생성 버튼
+  if (generateScenePromptsButton) {
+    generateScenePromptsButton.addEventListener("click", async () => {
+      if (getMode() === "chatgpt") {
+        handleChatgptScenePrompts();
+      } else {
+        await handleApiScenePrompts();
       }
     });
   }
 
   if (gptButton) {
     gptButton.addEventListener("click", () => {
-      handleChatgptLaunch();
+      handleChatgptScriptOnly();
+    });
+  }
+
+  if (generateInlineButton) {
+    generateInlineButton.addEventListener("click", async () => {
+      if (getMode() === "chatgpt") {
+        handleChatgptLaunchForYouTubeScript();
+      } else {
+        await handleApiGenerationForYouTubeScript();
+      }
     });
   }
 
@@ -8385,15 +8933,13 @@ function restoreTimelineState(timelineData) {
 
 // 타임라인 버튼 이벤트 리스너 설정
 function setupTimelineButtons() {
-  console.log('타임라인 버튼 설정 시작...');
+  // 타임라인 버튼 이벤트 리스너 설정 (있는 경우에만)
 
   // 전체 재생 버튼 이벤트 리스너 추가
   const playAllButton = document.getElementById('play-all-audio');
   if (playAllButton) {
     playAllButton.addEventListener('click', playAllAudioClips);
     console.log('전체 재생 버튼 연결됨');
-  } else {
-    console.warn('전체 재생 버튼을 찾을 수 없음');
   }
 
   // 전체 저장 버튼 이벤트 리스너 추가
@@ -8401,8 +8947,6 @@ function setupTimelineButtons() {
   if (saveAllButton) {
     saveAllButton.addEventListener('click', saveAllTimelineChanges);
     console.log('전체 저장 버튼 연결됨');
-  } else {
-    console.warn('전체 저장 버튼을 찾을 수 없음');
   }
 
   // 다른 이름으로 저장 버튼 이벤트 리스너 추가
@@ -8410,8 +8954,6 @@ function setupTimelineButtons() {
   if (saveAsButton) {
     saveAsButton.addEventListener('click', saveAsTimeline);
     console.log('다른 이름 저장 버튼 연결됨');
-  } else {
-    console.warn('다른 이름 저장 버튼을 찾을 수 없음');
   }
 
   // 불러오기 버튼 이벤트 리스너 추가
@@ -8419,8 +8961,6 @@ function setupTimelineButtons() {
   if (loadButton) {
     loadButton.addEventListener('click', loadTimeline);
     console.log('불러오기 버튼 연결됨');
-  } else {
-    console.warn('불러오기 버튼을 찾을 수 없음');
   }
 
   // 삭제 버튼 이벤트 리스너 추가
@@ -8428,8 +8968,6 @@ function setupTimelineButtons() {
   if (deleteButton) {
     deleteButton.addEventListener('click', deleteTimeline);
     console.log('삭제 버튼 연결됨');
-  } else {
-    console.warn('삭제 버튼을 찾을 수 없음');
   }
 
   // 전체 AI 변환 버튼들 이벤트 리스너 추가
@@ -8456,8 +8994,6 @@ function setupTimelineButtons() {
     bulkTtsAllButton.addEventListener('click', () => startBulkAIConversion('tts'));
     console.log('전체 음성 버튼 연결됨');
   }
-
-  console.log('타임라인 버튼 설정 완료');
 
   // AI 버튼들도 함께 설정
   setupAIButtons();
@@ -8494,22 +9030,13 @@ function setupAIButtons() {
 
 // 전체 AI 변환 기능 설정
 function setupBulkAIFeature() {
-  console.log('전체 AI 변환 기능 설정 시작...');
-
   // 요소들이 없으면 나중에 다시 시도
   setTimeout(() => {
     const bulkAiType = document.getElementById('bulk-ai-type');
     const bulkAiStart = document.getElementById('bulk-ai-start');
     const bulkAiCancel = document.getElementById('bulk-ai-cancel');
 
-    console.log('전체 AI 변환 요소 확인:', {
-      bulkAiType: !!bulkAiType,
-      bulkAiStart: !!bulkAiStart,
-      bulkAiCancel: !!bulkAiCancel
-    });
-
     if (!bulkAiType || !bulkAiStart || !bulkAiCancel) {
-      console.warn('전체 AI 변환 요소들을 찾을 수 없음 - DOM이 아직 준비되지 않음');
       return;
     }
 

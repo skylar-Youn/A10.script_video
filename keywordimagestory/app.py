@@ -321,6 +321,28 @@ async def api_generate_long_script(payload: dict[str, Any] = Body(...)) -> dict[
         raise HTTPException(status_code=400, detail="topic is required")
 
     language = str(payload.get("language", settings.default_language) or settings.default_language)
+
+    # Custom prompt 처리 (Quantum × Qi GPT 프롬프트 형식)
+    custom_prompt = payload.get("prompt")
+    if custom_prompt:
+        from keywordimagestory.openai_client import client
+
+        # OpenAI API를 직접 호출하여 custom prompt 처리
+        result_text = client.generate_structured(
+            instructions="당신은 영상 프롬프트 및 대본 제작 전문가입니다. 사용자의 요청에 따라 정확한 형식으로 응답하세요.",
+            content=custom_prompt
+        )
+
+        return {
+            "topic": topic,
+            "keyword": topic,
+            "language": language,
+            "content": result_text,
+            "subtitles": [],
+            "images": [],
+        }
+
+    # 기존 로직: custom prompt가 없으면 ShortsScriptGenerator 사용
     context = GenerationContext(keyword=topic, language=language, duration=settings.default_story_duration)
     subtitles, images = ShortsScriptGenerator().generate(context)
 

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL 2.0 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .result {
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            font-size: 18px;
+        }
+        .success {
+            background: #d4edda;
+            border: 2px solid #28a745;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 2px solid #dc3545;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 2px solid #17a2b8;
+            color: #0c5460;
+        }
+        canvas {
+            border: 2px solid #333;
+            margin: 20px 0;
+        }
+        pre {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎮 WebGL 2.0 지원 테스트</h1>
+    
+    <div id="webgl-support"></div>
+    <div id="webgl-info"></div>
+    
+    <canvas id="testCanvas" width="400" height="300"></canvas>
+    
+    <div id="gpu-info"></div>
+    
+    <script>
+        // WebGL 2.0 지원 확인
+        const canvas = document.getElementById('testCanvas');
+        const gl = canvas.getContext('webgl2');
+        const supportDiv = document.getElementById('webgl-support');
+        const infoDiv = document.getElementById('webgl-info');
+        const gpuDiv = document.getElementById('gpu-info');
+        
+        if (gl) {
+            supportDiv.className = 'result success';
+            supportDiv.innerHTML = '<h2>✅ WebGL 2.0 지원됨!</h2>';
+            
+            // WebGL 정보 수집
+            const vendor = gl.getParameter(gl.VENDOR);
+            const renderer = gl.getParameter(gl.RENDERER);
+            const version = gl.getParameter(gl.VERSION);
+            const glslVersion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+            const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+            const maxViewportDims = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+            
+            infoDiv.className = 'result info';
+            infoDiv.innerHTML = `
+                <h3>📊 WebGL 정보</h3>
+                <pre>
+Vendor: ${vendor}
+Renderer: ${renderer}
+Version: ${version}
+GLSL Version: ${glslVersion}
+Max Texture Size: ${maxTextureSize}
+Max Viewport: ${maxViewportDims[0]} x ${maxViewportDims[1]}
+                </pre>
+            `;
+            
+            // 간단한 WebGL 렌더링 테스트
+            gl.clearColor(0.0, 0.5, 0.8, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            
+            // GPU 정보
+            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            if (debugInfo) {
+                const unmaskedVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                const unmaskedRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                
+                gpuDiv.className = 'result info';
+                gpuDiv.innerHTML = `
+                    <h3>🎨 GPU 정보</h3>
+                    <pre>
+GPU Vendor: ${unmaskedVendor}
+GPU Renderer: ${unmaskedRenderer}
+                    </pre>
+                `;
+            }
+            
+        } else {
+            supportDiv.className = 'result error';
+            supportDiv.innerHTML = `
+                <h2>❌ WebGL 2.0 지원되지 않음</h2>
+                <p>WebGL 1.0 확인 중...</p>
+            `;
+            
+            // WebGL 1.0 확인
+            const gl1 = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if (gl1) {
+                infoDiv.className = 'result info';
+                infoDiv.innerHTML = `
+                    <h3>⚠️ WebGL 1.0만 지원됨</h3>
+                    <p>브라우저가 WebGL 1.0만 지원하고 있습니다.</p>
+                    <h4>해결 방법:</h4>
+                    <ul>
+                        <li>브라우저를 최신 버전으로 업데이트</li>
+                        <li>Chrome/Firefox/Edge 사용 권장</li>
+                        <li>GPU 드라이버 업데이트</li>
+                    </ul>
+                `;
+            } else {
+                infoDiv.className = 'result error';
+                infoDiv.innerHTML = `
+                    <h3>❌ WebGL 완전히 지원 안됨</h3>
+                    <h4>가능한 원인:</h4>
+                    <ul>
+                        <li>브라우저에서 WebGL이 비활성화됨</li>
+                        <li>GPU 드라이버 문제</li>
+                        <li>오래된 브라우저 버전</li>
+                        <li>하드웨어 가속 비활성화됨</li>
+                    </ul>
+                    <h4>해결 방법:</h4>
+                    <ol>
+                        <li>Chrome: chrome://flags 에서 WebGL 활성화</li>
+                        <li>Firefox: about:config 에서 webgl.force-enabled = true</li>
+                        <li>하드웨어 가속 활성화 확인</li>
+                        <li>GPU 드라이버 최신 버전으로 업데이트</li>
+                    </ol>
+                `;
+            }
+        }
+        
+        // 브라우저 정보
+        const browserInfo = document.createElement('div');
+        browserInfo.className = 'result info';
+        browserInfo.innerHTML = `
+            <h3>🌐 브라우저 정보</h3>
+            <pre>
+User Agent: ${navigator.userAgent}
+Platform: ${navigator.platform}
+            </pre>
+        `;
+        document.body.appendChild(browserInfo);
+    </script>
+</body>
+</html>

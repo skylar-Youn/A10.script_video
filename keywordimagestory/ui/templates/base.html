@@ -13,6 +13,6 @@
     </main>
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.10"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-    <script src="{{ url_for('static', path='js/app.js') }}" type="module"></script>
+    <script src="{{ url_for('static', path='js/app.js') }}?v={{ cache_buster or '20251022095553' }}" type="module"></script>
   </body>
 </html>
