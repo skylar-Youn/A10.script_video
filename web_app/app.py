@@ -5678,17 +5678,28 @@ async def api_create_final_video(
                 if subtitle_drawtext_filters:
                     # drawtext 필터들을 콤마로 연결하여 순차 적용
                     subtitle_chain = ",".join(subtitle_drawtext_filters)
-                    filter_parts.append(f"{current_input}{subtitle_chain}[vout]")
+                    # 입력과 필터 사이에 쉼표를 추가해야 함
+                    if current_input.endswith(']'):
+                        # 입력이 레이블이면 쉼표 없이 필터 연결
+                        filter_parts.append(f"{current_input}{subtitle_chain}[vout]")
+                    else:
+                        # 입력이 다른 형태면 쉼표로 구분
+                        filter_parts.append(f"{current_input},{subtitle_chain}[vout]")
                     video_filter_output_label = "[vout]"
                     logging.info(f"🎬 drawtext 자막 필터 {len(subtitle_drawtext_filters)}개 적용됨")
                 else:
-                    # 자막이 없으면 마지막 PNG 오버레이 출력을 vout으로 변경
-                    if png_overlays:
-                        last_overlay_idx = len(png_overlays)
-                        filter_parts[-1] = filter_parts[-1].replace(f"[v{last_overlay_idx}]", "[vout]")
+                    # 자막이 없으면 마지막 출력을 vout으로 변경
+                    if filter_parts:
+                        # 마지막 필터의 마지막 출력 레이블만 [vout]으로 변경 (입력 레이블은 유지)
+                        # 정규식으로 문자열 끝의 [...] 레이블을 찾아서 바꾸기
+                        filter_parts[-1] = re.sub(r'\[[^\]]+\]$', '[vout]', filter_parts[-1])
+                        logging.info(f"🎬 마지막 필터 출력을 [vout]으로 변경: {filter_parts[-1]}")
                     else:
                         # PNG도 없고 자막도 없으면 현재 입력을 vout으로
-                        filter_parts.append(f"{current_input}[vout]")
+                        if current_input:
+                            filter_parts.append(f"{current_input}copy[vout]")
+                        else:
+                            filter_parts.append("[0:v]copy[vout]")
                     video_filter_output_label = "[vout]"
 
                 video_filter_complex = ";".join(filter_parts)
