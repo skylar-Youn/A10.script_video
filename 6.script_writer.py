@@ -19,7 +19,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QLineEdit, QPushButton,
                              QTextEdit, QComboBox, QSpinBox, QGroupBox,
                              QGridLayout, QMessageBox, QProgressBar, QTabWidget,
-                             QRadioButton, QButtonGroup, QListWidget, QListWidgetItem)
+                             QRadioButton, QButtonGroup, QListWidget, QListWidgetItem,
+                             QScrollArea)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
@@ -301,6 +302,7 @@ class ScriptWriter(QMainWindow):
         self.create_script_tab()
         self.create_prompts_tab()
         self.create_saved_tab()
+        self.create_script_tab2()  # 대본 작성2
         self.create_settings_tab()
 
         # 상태바
@@ -480,7 +482,7 @@ class ScriptWriter(QMainWindow):
         editor_group.setLayout(editor_layout)
         layout.addWidget(editor_group)
 
-        self.tabs.addTab(tab, "대본 작성")
+        self.tabs.addTab(tab, "대본 작성1")
 
         # 모드 변경 시 UI 업데이트
         self.chatgpt_radio.toggled.connect(self.update_mode_ui)
@@ -876,7 +878,7 @@ class ScriptWriter(QMainWindow):
         saved_prompts_group.setLayout(saved_prompts_layout)
         layout.addWidget(saved_prompts_group)
 
-        self.tabs.addTab(tab, "프롬프트 생성")
+        self.tabs.addTab(tab, "프롬프트 생성1")
 
         # 초기 프롬프트 목록 로드
         self.refresh_saved_prompts()
@@ -1221,7 +1223,7 @@ class ScriptWriter(QMainWindow):
 
         layout.addLayout(btn_layout)
 
-        self.tabs.addTab(tab, "저장된 대본")
+        self.tabs.addTab(tab, "저장된 대본1")
 
         # 파일 선택 시 미리보기 표시
         self.saved_scripts_list.itemClicked.connect(self.preview_script)
@@ -1345,6 +1347,223 @@ class ScriptWriter(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "경고", f"폴더를 열 수 없습니다:\n{str(e)}")
 
+    def create_script_tab2(self):
+        """대본 작성2 - ChatGPT, Claude, Google FX 워크플로우"""
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+
+        # 스크롤 영역 추가
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+
+        # === 1. ChatGPT 대본 분석 섹션 ===
+        analysis_group = QGroupBox("📝 1단계: ChatGPT에게 대본 분석 요청")
+        analysis_layout = QVBoxLayout()
+
+        # 입력 영역
+        analysis_layout.addWidget(QLabel("대본 입력:"))
+        self.analysis_input = QTextEdit()
+        self.analysis_input.setPlaceholderText("분석할 대본을 입력하거나 붙여넣으세요...")
+        self.analysis_input.setMaximumHeight(150)
+        analysis_layout.addWidget(self.analysis_input)
+
+        # 버튼
+        analysis_btn_layout = QHBoxLayout()
+        analysis_generate_btn = QPushButton("🔄 ChatGPT 프롬프트 생성")
+        analysis_generate_btn.clicked.connect(self.generate_analysis_prompt)
+        analysis_generate_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px;")
+        analysis_btn_layout.addWidget(analysis_generate_btn)
+
+        analysis_open_btn = QPushButton("🌐 ChatGPT 열기")
+        analysis_open_btn.clicked.connect(self.open_chatgpt_for_analysis)
+        analysis_open_btn.setStyleSheet("background-color: #00A67E; color: white; padding: 8px;")
+        analysis_btn_layout.addWidget(analysis_open_btn)
+
+        analysis_copy_btn = QPushButton("📋 프롬프트 복사")
+        analysis_copy_btn.clicked.connect(lambda: self.copy_to_clipboard(self.analysis_prompt.toPlainText()))
+        analysis_copy_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px;")
+        analysis_btn_layout.addWidget(analysis_copy_btn)
+
+        analysis_layout.addLayout(analysis_btn_layout)
+
+        # 생성된 프롬프트
+        analysis_layout.addWidget(QLabel("생성된 ChatGPT 프롬프트:"))
+        self.analysis_prompt = QTextEdit()
+        self.analysis_prompt.setPlaceholderText("프롬프트가 여기에 생성됩니다...")
+        self.analysis_prompt.setMaximumHeight(120)
+        analysis_layout.addWidget(self.analysis_prompt)
+
+        # 결과 붙여넣기
+        analysis_layout.addWidget(QLabel("ChatGPT 분석 결과:"))
+        self.analysis_result = QTextEdit()
+        self.analysis_result.setPlaceholderText("ChatGPT의 분석 결과를 여기에 붙여넣으세요...")
+        self.analysis_result.setMaximumHeight(150)
+        analysis_layout.addWidget(self.analysis_result)
+
+        analysis_group.setLayout(analysis_layout)
+        layout.addWidget(analysis_group)
+
+        # === 2. ChatGPT 창작 섹션 ===
+        creative_group = QGroupBox("✨ 2단계: ChatGPT에게 새롭게 창작 요청")
+        creative_layout = QVBoxLayout()
+
+        # 입력 영역
+        creative_layout.addWidget(QLabel("창작 주제 및 요구사항:"))
+        self.creative_input = QTextEdit()
+        self.creative_input.setPlaceholderText("창작할 주제나 아이디어를 입력하세요...\n예: '미래 도시의 하루', '감동적인 가족 이야기' 등")
+        self.creative_input.setMaximumHeight(120)
+        creative_layout.addWidget(self.creative_input)
+
+        # 버튼
+        creative_btn_layout = QHBoxLayout()
+        creative_generate_btn = QPushButton("🔄 ChatGPT 프롬프트 생성")
+        creative_generate_btn.clicked.connect(self.generate_creative_prompt)
+        creative_generate_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px;")
+        creative_btn_layout.addWidget(creative_generate_btn)
+
+        creative_open_btn = QPushButton("🌐 ChatGPT 열기")
+        creative_open_btn.clicked.connect(self.open_chatgpt_for_creative)
+        creative_open_btn.setStyleSheet("background-color: #00A67E; color: white; padding: 8px;")
+        creative_btn_layout.addWidget(creative_open_btn)
+
+        creative_copy_btn = QPushButton("📋 프롬프트 복사")
+        creative_copy_btn.clicked.connect(lambda: self.copy_to_clipboard(self.creative_prompt.toPlainText()))
+        creative_copy_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px;")
+        creative_btn_layout.addWidget(creative_copy_btn)
+
+        creative_layout.addLayout(creative_btn_layout)
+
+        # 생성된 프롬프트
+        creative_layout.addWidget(QLabel("생성된 ChatGPT 프롬프트:"))
+        self.creative_prompt = QTextEdit()
+        self.creative_prompt.setPlaceholderText("프롬프트가 여기에 생성됩니다...")
+        self.creative_prompt.setMaximumHeight(120)
+        creative_layout.addWidget(self.creative_prompt)
+
+        # 결과 붙여넣기
+        creative_layout.addWidget(QLabel("ChatGPT 창작 결과:"))
+        self.creative_result = QTextEdit()
+        self.creative_result.setPlaceholderText("ChatGPT의 창작 결과를 여기에 붙여넣으세요...")
+        self.creative_result.setMaximumHeight(150)
+        creative_layout.addWidget(self.creative_result)
+
+        creative_group.setLayout(creative_layout)
+        layout.addWidget(creative_group)
+
+        # === 3. Claude 유튜브 대본 섹션 ===
+        claude_group = QGroupBox("🤖 3단계: Claude에게 유튜브 대본 작성 요청")
+        claude_layout = QVBoxLayout()
+
+        # 자동 전달 버튼
+        claude_auto_btn = QPushButton("⬇️ 위 창작 결과를 Claude 입력으로 전달")
+        claude_auto_btn.clicked.connect(self.transfer_creative_to_claude)
+        claude_auto_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 8px;")
+        claude_layout.addWidget(claude_auto_btn)
+
+        # 입력 영역
+        claude_layout.addWidget(QLabel("Claude에게 전달할 창작물:"))
+        self.claude_input = QTextEdit()
+        self.claude_input.setPlaceholderText("ChatGPT의 창작 결과를 여기에 입력하세요...\n또는 위 버튼을 클릭하여 자동으로 전달하세요.")
+        self.claude_input.setMaximumHeight(120)
+        claude_layout.addWidget(self.claude_input)
+
+        # 버튼
+        claude_btn_layout = QHBoxLayout()
+        claude_generate_btn = QPushButton("🔄 Claude 프롬프트 생성")
+        claude_generate_btn.clicked.connect(self.generate_claude_prompt)
+        claude_generate_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px;")
+        claude_btn_layout.addWidget(claude_generate_btn)
+
+        claude_open_btn = QPushButton("🌐 Claude 열기")
+        claude_open_btn.clicked.connect(self.open_claude)
+        claude_open_btn.setStyleSheet("background-color: #D97757; color: white; padding: 8px;")
+        claude_btn_layout.addWidget(claude_open_btn)
+
+        claude_copy_btn = QPushButton("📋 프롬프트 복사")
+        claude_copy_btn.clicked.connect(lambda: self.copy_to_clipboard(self.claude_prompt.toPlainText()))
+        claude_copy_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px;")
+        claude_btn_layout.addWidget(claude_copy_btn)
+
+        claude_layout.addLayout(claude_btn_layout)
+
+        # 생성된 프롬프트
+        claude_layout.addWidget(QLabel("생성된 Claude 프롬프트:"))
+        self.claude_prompt = QTextEdit()
+        self.claude_prompt.setPlaceholderText("프롬프트가 여기에 생성됩니다...")
+        self.claude_prompt.setMaximumHeight(120)
+        claude_layout.addWidget(self.claude_prompt)
+
+        # 결과 붙여넣기
+        claude_layout.addWidget(QLabel("Claude 대본 작성 결과:"))
+        self.claude_result = QTextEdit()
+        self.claude_result.setPlaceholderText("Claude의 유튜브 대본을 여기에 붙여넣으세요...")
+        self.claude_result.setMaximumHeight(150)
+        claude_layout.addWidget(self.claude_result)
+
+        claude_group.setLayout(claude_layout)
+        layout.addWidget(claude_group)
+
+        # === 4. Google FX 이미지 생성 섹션 ===
+        googlefx_group = QGroupBox("🎨 4단계: Google FX로 대표 이미지 생성")
+        googlefx_layout = QVBoxLayout()
+
+        # 자동 전달 버튼
+        googlefx_auto_btn = QPushButton("⬇️ Claude 대본을 Google FX 입력으로 전달")
+        googlefx_auto_btn.clicked.connect(self.transfer_claude_to_googlefx)
+        googlefx_auto_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 8px;")
+        googlefx_layout.addWidget(googlefx_auto_btn)
+
+        # 입력 영역
+        googlefx_layout.addWidget(QLabel("이미지 생성을 위한 대본:"))
+        self.googlefx_input = QTextEdit()
+        self.googlefx_input.setPlaceholderText("Claude의 대본을 여기에 입력하세요...\n또는 위 버튼을 클릭하여 자동으로 전달하세요.")
+        self.googlefx_input.setMaximumHeight(120)
+        googlefx_layout.addWidget(self.googlefx_input)
+
+        # 버튼
+        googlefx_btn_layout = QHBoxLayout()
+        googlefx_generate_btn = QPushButton("🔄 이미지 프롬프트 생성")
+        googlefx_generate_btn.clicked.connect(self.generate_googlefx_prompt)
+        googlefx_generate_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px;")
+        googlefx_btn_layout.addWidget(googlefx_generate_btn)
+
+        googlefx_open_btn = QPushButton("🌐 Google FX 열기")
+        googlefx_open_btn.clicked.connect(self.open_google_fx)
+        googlefx_open_btn.setStyleSheet("background-color: #4285F4; color: white; padding: 8px;")
+        googlefx_btn_layout.addWidget(googlefx_open_btn)
+
+        googlefx_copy_btn = QPushButton("📋 프롬프트 복사")
+        googlefx_copy_btn.clicked.connect(lambda: self.copy_to_clipboard(self.googlefx_prompt.toPlainText()))
+        googlefx_copy_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px;")
+        googlefx_btn_layout.addWidget(googlefx_copy_btn)
+
+        googlefx_layout.addLayout(googlefx_btn_layout)
+
+        # 생성된 프롬프트
+        googlefx_layout.addWidget(QLabel("생성된 이미지 프롬프트:"))
+        self.googlefx_prompt = QTextEdit()
+        self.googlefx_prompt.setPlaceholderText("이미지 생성 프롬프트가 여기에 생성됩니다...")
+        self.googlefx_prompt.setMaximumHeight(120)
+        googlefx_layout.addWidget(self.googlefx_prompt)
+
+        googlefx_group.setLayout(googlefx_layout)
+        layout.addWidget(googlefx_group)
+
+        # 최종 저장 버튼
+        save_workflow_btn = QPushButton("💾 전체 워크플로우 저장")
+        save_workflow_btn.clicked.connect(self.save_workflow)
+        save_workflow_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 10px; font-weight: bold;")
+        layout.addWidget(save_workflow_btn)
+
+        layout.addStretch()
+
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
+
+        self.tabs.addTab(tab, "대본 작성2")
+
     def create_settings_tab(self):
         """설정 탭"""
         tab = QWidget()
@@ -1432,6 +1651,269 @@ class ScriptWriter(QMainWindow):
         self.save_config()
         QMessageBox.information(self, "알림", "설정이 저장되었습니다")
         self.statusBar().showMessage("설정 저장 완료")
+
+    # ========== 대본 작성2 탭 관련 함수들 ==========
+
+    def generate_analysis_prompt(self):
+        """ChatGPT 대본 분석 프롬프트 생성"""
+        script_content = self.analysis_input.toPlainText().strip()
+        if not script_content:
+            QMessageBox.warning(self, "경고", "분석할 대본을 입력하세요")
+            return
+
+        prompt = f"""다음 대본을 상세하게 분석해주세요.
+
+대본:
+{script_content}
+
+분석 항목:
+1. 전체 구조 및 흐름
+2. 주요 메시지 및 핵심 포인트
+3. 대상 시청자층
+4. 감정적 톤 및 분위기
+5. 강점과 개선점
+6. 시청자 참여도를 높이기 위한 제안
+
+각 항목별로 구체적이고 실용적인 분석을 제공해주세요."""
+
+        self.analysis_prompt.setPlainText(prompt)
+        self.statusBar().showMessage("ChatGPT 대본 분석 프롬프트가 생성되었습니다")
+
+    def open_chatgpt_for_analysis(self):
+        """ChatGPT를 열어서 분석 프롬프트 사용"""
+        prompt = self.analysis_prompt.toPlainText().strip()
+        if not prompt:
+            QMessageBox.warning(self, "경고", "먼저 프롬프트를 생성하세요")
+            return
+
+        # ChatGPT URL에 프롬프트 포함
+        encoded_prompt = urllib.parse.quote(prompt)
+        url = f"https://chat.openai.com/?q={encoded_prompt}"
+
+        webbrowser.open(url)
+        self.statusBar().showMessage("ChatGPT가 열렸습니다. 프롬프트를 확인하고 결과를 붙여넣으세요")
+        QMessageBox.information(self, "안내", "ChatGPT가 브라우저에서 열렸습니다.\n\n1. 프롬프트를 확인하세요\n2. 결과를 복사하세요\n3. '분석 결과' 영역에 붙여넣으세요")
+
+    def copy_to_clipboard(self, text):
+        """클립보드에 텍스트 복사"""
+        if not text:
+            QMessageBox.warning(self, "경고", "복사할 내용이 없습니다")
+            return
+
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.statusBar().showMessage("클립보드에 복사되었습니다")
+        QMessageBox.information(self, "완료", "클립보드에 복사되었습니다!")
+
+    def generate_creative_prompt(self):
+        """ChatGPT 창작 프롬프트 생성"""
+        topic = self.creative_input.toPlainText().strip()
+        if not topic:
+            QMessageBox.warning(self, "경고", "창작 주제를 입력하세요")
+            return
+
+        prompt = f"""다음 주제로 창의적이고 매력적인 콘텐츠를 창작해주세요.
+
+주제/요구사항:
+{topic}
+
+창작 요구사항:
+1. 독창적이고 흥미로운 스토리 또는 콘텐츠
+2. 시청자의 감정을 자극하는 요소 포함
+3. 명확한 메시지 전달
+4. 시각적으로 표현 가능한 장면들
+5. 약 5-10분 분량의 콘텐츠
+
+자유롭게 창작하되, 위 요구사항을 충족하는 콘텐츠를 만들어주세요."""
+
+        self.creative_prompt.setPlainText(prompt)
+        self.statusBar().showMessage("ChatGPT 창작 프롬프트가 생성되었습니다")
+
+    def open_chatgpt_for_creative(self):
+        """ChatGPT를 열어서 창작 프롬프트 사용"""
+        prompt = self.creative_prompt.toPlainText().strip()
+        if not prompt:
+            QMessageBox.warning(self, "경고", "먼저 프롬프트를 생성하세요")
+            return
+
+        encoded_prompt = urllib.parse.quote(prompt)
+        url = f"https://chat.openai.com/?q={encoded_prompt}"
+
+        webbrowser.open(url)
+        self.statusBar().showMessage("ChatGPT가 열렸습니다. 프롬프트를 확인하고 결과를 붙여넣으세요")
+        QMessageBox.information(self, "안내", "ChatGPT가 브라우저에서 열렸습니다.\n\n1. 프롬프트를 확인하세요\n2. 창작 결과를 복사하세요\n3. '창작 결과' 영역에 붙여넣으세요")
+
+    def transfer_creative_to_claude(self):
+        """ChatGPT 창작 결과를 Claude 입력으로 자동 전달"""
+        creative_result = self.creative_result.toPlainText().strip()
+        if not creative_result:
+            QMessageBox.warning(self, "경고", "먼저 ChatGPT 창작 결과를 입력하세요")
+            return
+
+        self.claude_input.setPlainText(creative_result)
+        self.statusBar().showMessage("창작 결과가 Claude 입력으로 전달되었습니다")
+        QMessageBox.information(self, "완료", "창작 결과가 Claude 입력 영역으로 전달되었습니다!")
+
+    def generate_claude_prompt(self):
+        """Claude 유튜브 대본 프롬프트 생성"""
+        creative_content = self.claude_input.toPlainText().strip()
+        if not creative_content:
+            QMessageBox.warning(self, "경고", "Claude에게 전달할 창작물을 입력하세요")
+            return
+
+        prompt = f"""다음 창작물을 바탕으로 유튜브 쇼츠/릴스용 대본을 작성해주세요.
+
+창작물:
+{creative_content[:1000]}{"..." if len(creative_content) > 1000 else ""}
+
+유튜브 대본 작성 요구사항:
+1. 시청 시간: 30초 ~ 60초 분량
+2. 구성:
+   - 오프닝 (처음 3초): 시청자의 주의를 끄는 강력한 후크
+   - 본문: 핵심 메시지를 명확하게 전달
+   - 엔딩: 행동 유도 (좋아요, 구독, 댓글 등)
+3. 각 장면마다 이모지로 시작 (🎬, ⚡, 💡 등)
+4. 자막용 대본 형식으로 작성
+5. 시각적 요소 설명 포함
+
+매력적이고 바이럴 가능성이 높은 유튜브 대본을 작성해주세요."""
+
+        self.claude_prompt.setPlainText(prompt)
+        self.statusBar().showMessage("Claude 프롬프트가 생성되었습니다")
+
+    def open_claude(self):
+        """Claude를 열어서 대본 작성 프롬프트 사용"""
+        prompt = self.claude_prompt.toPlainText().strip()
+        if not prompt:
+            QMessageBox.warning(self, "경고", "먼저 프롬프트를 생성하세요")
+            return
+
+        # Claude URL 열기
+        url = "https://claude.ai/new"
+        webbrowser.open(url)
+
+        # 프롬프트를 클립보드에 복사
+        clipboard = QApplication.clipboard()
+        clipboard.setText(prompt)
+
+        self.statusBar().showMessage("Claude가 열렸습니다. 프롬프트가 클립보드에 복사되었습니다")
+        QMessageBox.information(self, "안내", "Claude가 브라우저에서 열렸습니다.\n\n프롬프트가 클립보드에 복사되었습니다.\n\n1. Claude에 프롬프트를 붙여넣으세요 (Ctrl+V)\n2. 결과를 복사하세요\n3. '대본 작성 결과' 영역에 붙여넣으세요")
+
+    def transfer_claude_to_googlefx(self):
+        """Claude 대본을 Google FX 입력으로 자동 전달"""
+        claude_result = self.claude_result.toPlainText().strip()
+        if not claude_result:
+            QMessageBox.warning(self, "경고", "먼저 Claude 대본 작성 결과를 입력하세요")
+            return
+
+        self.googlefx_input.setPlainText(claude_result)
+        self.statusBar().showMessage("Claude 대본이 Google FX 입력으로 전달되었습니다")
+        QMessageBox.information(self, "완료", "Claude 대본이 Google FX 입력 영역으로 전달되었습니다!")
+
+    def generate_googlefx_prompt(self):
+        """Google FX 이미지 생성 프롬프트 생성"""
+        script_content = self.googlefx_input.toPlainText().strip()
+        if not script_content:
+            QMessageBox.warning(self, "경고", "이미지 생성을 위한 대본을 입력하세요")
+            return
+
+        # 대본의 핵심 내용 추출 (처음 500자)
+        summary = script_content[:500]
+
+        prompt = f"""Based on this YouTube script, create a compelling thumbnail image:
+
+Script excerpt:
+{summary}...
+
+Image requirements:
+1. Eye-catching and vibrant colors
+2. Clear focal point that represents the main theme
+3. High contrast for mobile viewing
+4. Emotions: engaging, intriguing
+5. Style: modern, cinematic
+6. Aspect ratio: 16:9 or 9:16 for shorts
+
+Create a visually stunning thumbnail that will make viewers want to click and watch."""
+
+        self.googlefx_prompt.setPlainText(prompt)
+        self.statusBar().showMessage("Google FX 이미지 프롬프트가 생성되었습니다")
+
+    def open_google_fx(self):
+        """Google FX를 열어서 이미지 생성"""
+        prompt = self.googlefx_prompt.toPlainText().strip()
+        if not prompt:
+            QMessageBox.warning(self, "경고", "먼저 이미지 프롬프트를 생성하세요")
+            return
+
+        # Google FX URL 열기
+        url = "https://labs.google/fx/ko"
+        webbrowser.open(url)
+
+        # 프롬프트를 클립보드에 복사
+        clipboard = QApplication.clipboard()
+        clipboard.setText(prompt)
+
+        self.statusBar().showMessage("Google FX가 열렸습니다. 프롬프트가 클립보드에 복사되었습니다")
+        QMessageBox.information(self, "안내", "Google FX가 브라우저에서 열렸습니다.\n\n프롬프트가 클립보드에 복사되었습니다.\n\n1. ImageFX를 선택하세요\n2. 프롬프트를 붙여넣으세요 (Ctrl+V)\n3. 이미지를 생성하세요\n4. 마음에 드는 이미지를 다운로드하세요")
+
+    def save_workflow(self):
+        """전체 워크플로우 저장"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"workflow_{timestamp}.txt"
+        filepath = os.path.join(self.scripts_dir, filename)
+
+        content = f"""=== 대본 작성 워크플로우 ===
+생성 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+=== 1. ChatGPT 대본 분석 ===
+
+[입력 대본]
+{self.analysis_input.toPlainText()}
+
+[분석 프롬프트]
+{self.analysis_prompt.toPlainText()}
+
+[분석 결과]
+{self.analysis_result.toPlainText()}
+
+=== 2. ChatGPT 창작 ===
+
+[창작 주제]
+{self.creative_input.toPlainText()}
+
+[창작 프롬프트]
+{self.creative_prompt.toPlainText()}
+
+[창작 결과]
+{self.creative_result.toPlainText()}
+
+=== 3. Claude 유튜브 대본 ===
+
+[Claude 입력]
+{self.claude_input.toPlainText()}
+
+[Claude 프롬프트]
+{self.claude_prompt.toPlainText()}
+
+[Claude 대본 결과]
+{self.claude_result.toPlainText()}
+
+=== 4. Google FX 이미지 프롬프트 ===
+
+[이미지 프롬프트]
+{self.googlefx_prompt.toPlainText()}
+
+=== 워크플로우 완료 ===
+"""
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            self.statusBar().showMessage(f"워크플로우 저장 완료: {filename}")
+            QMessageBox.information(self, "완료", f"전체 워크플로우가 저장되었습니다!\n\n파일: {filename}\n경로: {self.scripts_dir}")
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"저장 중 오류 발생:\n{str(e)}")
 
 
 def main():
