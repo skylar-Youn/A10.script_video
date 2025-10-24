@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>9.PyMaker Video Player</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        #video-container {
+            width: 100%;
+            max-width: 1200px;
+            position: relative;
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            background-color: #000;
+            outline: none;
+        }
+
+        #info-panel {
+            background-color: #1a1a1a;
+            color: #fff;
+            padding: 12px 20px;
+            margin-top: 10px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #info-panel .info-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        #info-panel .info-item .label {
+            color: #666;
+        }
+
+        #info-panel .info-item .value {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        #placeholder {
+            width: 100%;
+            min-height: 480px;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 12px;
+            border: 2px dashed #444;
+        }
+
+        #placeholder .icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        #placeholder .text {
+            color: #666;
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* 커스텀 컨트롤 (옵션) */
+        video::-webkit-media-controls-panel {
+            background-color: rgba(0, 0, 0, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="video-container">
+        <!-- 비디오 플레이어 -->
+        <video
+            id="video-player"
+            class="hidden"
+            controls
+            preload="metadata"
+            controlsList="nodownload"
+        >
+            <!-- 비디오 소스는 JavaScript로 동적 로드 -->
+        </video>
+
+        <!-- 플레이스홀더 -->
+        <div id="placeholder">
+            <div class="icon">📹</div>
+            <div class="text">비디오를 선택하세요</div>
+        </div>
+
+        <!-- 정보 패널 -->
+        <div id="info-panel" class="hidden">
+            <div class="info-item">
+                <span class="label">해상도:</span>
+                <span class="value" id="resolution">-</span>
+            </div>
+            <div class="info-item">
+                <span class="label">길이:</span>
+                <span class="value" id="duration">-</span>
+            </div>
+            <div class="info-item">
+                <span class="label">재생 위치:</span>
+                <span class="value" id="current-time">00:00</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video-player');
+        const placeholder = document.getElementById('placeholder');
+        const infoPanel = document.getElementById('info-panel');
+        const resolutionEl = document.getElementById('resolution');
+        const durationEl = document.getElementById('duration');
+        const currentTimeEl = document.getElementById('current-time');
+
+        // 시간 포맷 함수 (초 → MM:SS)
+        function formatTime(seconds) {
+            if (isNaN(seconds) || seconds === Infinity) return '00:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // 비디오 로드 함수
+        window.loadVideo = function(videoUrl) {
+            console.log('Loading video:', videoUrl);
+
+            // 비디오 소스 설정
+            video.src = videoUrl;
+
+            // UI 업데이트
+            placeholder.classList.add('hidden');
+            video.classList.remove('hidden');
+            infoPanel.classList.remove('hidden');
+
+            // 메타데이터 로드 완료 시
+            video.addEventListener('loadedmetadata', function() {
+                const width = video.videoWidth;
+                const height = video.videoHeight;
+                const duration = video.duration;
+
+                resolutionEl.textContent = `${width}×${height}`;
+                durationEl.textContent = formatTime(duration);
+
+                console.log(`Video loaded: ${width}×${height}, ${duration}s`);
+            });
+
+            // 재생 위치 업데이트
+            video.addEventListener('timeupdate', function() {
+                currentTimeEl.textContent = formatTime(video.currentTime);
+            });
+
+            // 에러 핸들링
+            video.addEventListener('error', function(e) {
+                console.error('Video error:', e);
+                alert('비디오 로드 실패: ' + (video.error ? video.error.message : 'Unknown error'));
+            });
+        };
+
+        // Python에서 호출할 수 있도록 전역 함수로 노출
+        window.playVideo = function() {
+            video.play();
+        };
+
+        window.pauseVideo = function() {
+            video.pause();
+        };
+
+        window.stopVideo = function() {
+            video.pause();
+            video.currentTime = 0;
+        };
+
+        window.seekVideo = function(timeInSeconds) {
+            video.currentTime = timeInSeconds;
+        };
+    </script>
+</body>
+</html>

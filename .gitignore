@@ -44,3 +44,6 @@ meta.json
 old/*
 gitignore
 *.csv
+
+# 8.Ymaker 프로젝트 (별도 관리)
+8_ymaker/
