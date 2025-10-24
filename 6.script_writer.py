@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTextEdit, QComboBox, QSpinBox, QGroupBox,
                              QGridLayout, QMessageBox, QProgressBar, QTabWidget,
                              QRadioButton, QButtonGroup, QListWidget, QListWidgetItem,
-                             QScrollArea)
+                             QScrollArea, QDialog, QDialogButtonBox, QFileDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
@@ -30,6 +30,28 @@ try:
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
+
+# Anthropic Claude 라이브러리 가용성 확인
+try:
+    from anthropic import Anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
+# 자막 추출 기능 임포트
+SUBTITLE_EXTRACTOR_AVAILABLE = False
+try:
+    # 현재 스크립트의 디렉토리 경로를 sys.path에 추가
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    subtitle_module_path = os.path.join(current_dir, '5_youtubefinder_unified')
+    if os.path.exists(subtitle_module_path):
+        sys.path.insert(0, subtitle_module_path)
+        from api.subtitle_extractor import SubtitleExtractor
+        from utils.helpers import convert_shorts_to_watch_url, remove_timestamps_from_subtitle
+        SUBTITLE_EXTRACTOR_AVAILABLE = True
+except ImportError as e:
+    print(f"자막 추출 모듈 로드 실패: {e}")
+    SUBTITLE_EXTRACTOR_AVAILABLE = False
 
 
 class ScriptGeneratorWorker(QThread):
@@ -303,6 +325,7 @@ class ScriptWriter(QMainWindow):
         self.create_prompts_tab()
         self.create_saved_tab()
         self.create_script_tab2()  # 대본 작성2
+        self.create_script_tab3()  # 대본 작성3 - Claude
         self.create_settings_tab()
 
         # 상태바
@@ -1363,7 +1386,19 @@ class ScriptWriter(QMainWindow):
         analysis_layout = QVBoxLayout()
 
         # 입력 영역
-        analysis_layout.addWidget(QLabel("대본 입력:"))
+        input_label_layout = QHBoxLayout()
+        input_label_layout.addWidget(QLabel("대본 입력:"))
+
+        # 자막 불러오기 버튼
+        find_subtitle_btn = QPushButton("📂 자막 불러오기")
+        find_subtitle_btn.clicked.connect(self.load_subtitle_file)
+        find_subtitle_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 4px 12px;")
+        find_subtitle_btn.setMaximumWidth(140)
+        input_label_layout.addWidget(find_subtitle_btn)
+        input_label_layout.addStretch()
+
+        analysis_layout.addLayout(input_label_layout)
+
         self.analysis_input = QTextEdit()
         self.analysis_input.setPlaceholderText("분석할 대본을 입력하거나 붙여넣으세요...")
         self.analysis_input.setMaximumHeight(150)
@@ -1564,6 +1599,133 @@ class ScriptWriter(QMainWindow):
 
         self.tabs.addTab(tab, "대본 작성2")
 
+    def create_script_tab3(self):
+        """대본 작성3 - Claude API를 활용한 자막 개선"""
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+
+        # 스크롤 영역
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+
+        # === 1. 자막 불러오기 섹션 ===
+        subtitle_group = QGroupBox("📂 1단계: 자막 파일 불러오기")
+        subtitle_layout = QVBoxLayout()
+
+        # 자막 불러오기 버튼
+        load_btn_layout = QHBoxLayout()
+        load_subtitle_btn = QPushButton("📂 자막 파일 선택")
+        load_subtitle_btn.clicked.connect(self.load_subtitle_for_claude)
+        load_subtitle_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 10px; font-weight: bold;")
+        load_btn_layout.addWidget(load_subtitle_btn)
+
+        clear_btn = QPushButton("🗑️ 지우기")
+        clear_btn.clicked.connect(lambda: self.claude_subtitle_input.clear())
+        clear_btn.setStyleSheet("background-color: #757575; color: white; padding: 10px;")
+        load_btn_layout.addWidget(clear_btn)
+
+        subtitle_layout.addLayout(load_btn_layout)
+
+        # 불러온 자막 표시
+        subtitle_layout.addWidget(QLabel("불러온 자막:"))
+        self.claude_subtitle_input = QTextEdit()
+        self.claude_subtitle_input.setPlaceholderText("자막 파일을 불러오거나 직접 입력하세요...")
+        self.claude_subtitle_input.setMinimumHeight(200)
+        subtitle_layout.addWidget(self.claude_subtitle_input)
+
+        subtitle_group.setLayout(subtitle_layout)
+        layout.addWidget(subtitle_group)
+
+        # === 2. Claude에게 재요청 섹션 ===
+        claude_group = QGroupBox("🤖 2단계: Claude에게 대본 개선 요청")
+        claude_layout = QVBoxLayout()
+
+        # 요청 옵션
+        option_layout = QGridLayout()
+
+        option_layout.addWidget(QLabel("개선 방향:"), 0, 0)
+        self.claude_improvement_type = QComboBox()
+        self.claude_improvement_type.addItems([
+            "전체적으로 다듬기",
+            "문법 및 맞춤법 교정",
+            "가독성 향상",
+            "전문적인 톤으로 변경",
+            "친근한 톤으로 변경",
+            "요약하기",
+            "확장하기",
+            "커스텀 (직접 입력)"
+        ])
+        option_layout.addWidget(self.claude_improvement_type, 0, 1)
+
+        option_layout.addWidget(QLabel("목표 언어:"), 0, 2)
+        self.claude_target_language = QComboBox()
+        self.claude_target_language.addItems(["원문 유지", "한국어", "영어", "일본어", "중국어", "스페인어"])
+        option_layout.addWidget(self.claude_target_language, 0, 3)
+
+        claude_layout.addLayout(option_layout)
+
+        # 커스텀 요청사항
+        claude_layout.addWidget(QLabel("추가 요청사항 (선택):"))
+        self.claude_custom_request = QTextEdit()
+        self.claude_custom_request.setPlaceholderText("예: '영상 자막으로 사용하기 좋게 짧고 명확하게 만들어주세요'\n또는 '유튜브 쇼츠용으로 각 문장을 2초 분량으로 나눠주세요'")
+        self.claude_custom_request.setMaximumHeight(80)
+        claude_layout.addWidget(self.claude_custom_request)
+
+        # Claude 요청 버튼
+        claude_btn_layout = QHBoxLayout()
+
+        request_btn = QPushButton("🚀 Claude에게 요청하기")
+        request_btn.clicked.connect(self.request_claude_improvement)
+        request_btn.setStyleSheet("background-color: #10A37F; color: white; padding: 10px; font-weight: bold;")
+        claude_btn_layout.addWidget(request_btn)
+
+        claude_layout.addLayout(claude_btn_layout)
+
+        # 진행 상태
+        self.claude_progress = QProgressBar()
+        self.claude_progress.setVisible(False)
+        claude_layout.addWidget(self.claude_progress)
+
+        claude_group.setLayout(claude_layout)
+        layout.addWidget(claude_group)
+
+        # === 3. Claude 결과 섹션 ===
+        result_group = QGroupBox("✨ 3단계: Claude 개선 결과")
+        result_layout = QVBoxLayout()
+
+        result_layout.addWidget(QLabel("개선된 대본:"))
+        self.claude_result_text = QTextEdit()
+        self.claude_result_text.setPlaceholderText("Claude의 개선 결과가 여기에 표시됩니다...")
+        self.claude_result_text.setMinimumHeight(250)
+        result_layout.addWidget(self.claude_result_text)
+
+        # 결과 버튼
+        result_btn_layout = QHBoxLayout()
+
+        copy_result_btn = QPushButton("📋 결과 복사")
+        copy_result_btn.clicked.connect(lambda: self.copy_to_clipboard(self.claude_result_text.toPlainText()))
+        copy_result_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px;")
+        result_btn_layout.addWidget(copy_result_btn)
+
+        save_result_btn = QPushButton("💾 결과 저장")
+        save_result_btn.clicked.connect(self.save_claude_result)
+        save_result_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px;")
+        result_btn_layout.addWidget(save_result_btn)
+
+        result_layout.addLayout(result_btn_layout)
+
+        result_group.setLayout(result_layout)
+        layout.addWidget(result_group)
+
+        layout.addStretch()
+
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
+
+        self.tabs.addTab(tab, "대본 작성3")
+
     def create_settings_tab(self):
         """설정 탭"""
         tab = QWidget()
@@ -1601,6 +1763,38 @@ class ScriptWriter(QMainWindow):
         api_group.setLayout(api_layout)
         layout.addWidget(api_group)
 
+        # Claude API 키 설정
+        claude_api_group = QGroupBox("🔑 Anthropic Claude API 키 설정 (선택사항)")
+        claude_api_layout = QVBoxLayout()
+
+        claude_info_label = QLabel("💡 대본 작성3 탭에서 Claude를 사용하여 자막을 개선할 수 있습니다.\nClaude API 키가 필요합니다.")
+        claude_info_label.setStyleSheet("background-color: #e8f5e9; padding: 8px; border-radius: 4px; font-size: 10px;")
+        claude_info_label.setWordWrap(True)
+        claude_api_layout.addWidget(claude_info_label)
+
+        claude_key_layout = QHBoxLayout()
+        claude_key_layout.addWidget(QLabel("Claude API 키:"))
+        self.claude_api_key_input = QLineEdit()
+        self.claude_api_key_input.setPlaceholderText("Anthropic Claude API 키를 입력하세요 (선택사항)")
+        self.claude_api_key_input.setEchoMode(QLineEdit.Password)
+        if self.config.get('claude_api_key'):
+            self.claude_api_key_input.setText(self.config['claude_api_key'])
+        claude_key_layout.addWidget(self.claude_api_key_input)
+
+        show_claude_key_btn = QPushButton("👁️ 보기")
+        show_claude_key_btn.clicked.connect(self.toggle_claude_api_key_visibility)
+        claude_key_layout.addWidget(show_claude_key_btn)
+
+        claude_api_layout.addLayout(claude_key_layout)
+
+        claude_help_label = QLabel("Claude API 키는 https://console.anthropic.com/settings/keys 에서 생성할 수 있습니다.")
+        claude_help_label.setStyleSheet("color: #666; font-size: 10px;")
+        claude_help_label.setWordWrap(True)
+        claude_api_layout.addWidget(claude_help_label)
+
+        claude_api_group.setLayout(claude_api_layout)
+        layout.addWidget(claude_api_group)
+
         # 기본 설정
         default_group = QGroupBox("⚙️ 기본 설정")
         default_layout = QGridLayout()
@@ -1637,6 +1831,7 @@ class ScriptWriter(QMainWindow):
     def save_settings(self):
         """설정 저장"""
         self.config['openai_api_key'] = self.api_key_input.text().strip()
+        self.config['claude_api_key'] = self.claude_api_key_input.text().strip()
 
         language_map = {
             '한국어': 'ko',
@@ -1914,6 +2109,241 @@ Create a visually stunning thumbnail that will make viewers want to click and wa
             QMessageBox.information(self, "완료", f"전체 워크플로우가 저장되었습니다!\n\n파일: {filename}\n경로: {self.scripts_dir}")
         except Exception as e:
             QMessageBox.critical(self, "오류", f"저장 중 오류 발생:\n{str(e)}")
+
+    # ========== 대본 작성3 탭 (Claude) 관련 함수들 ==========
+
+    def toggle_claude_api_key_visibility(self):
+        """Claude API 키 보이기/숨기기 토글"""
+        if self.claude_api_key_input.echoMode() == QLineEdit.Password:
+            self.claude_api_key_input.setEchoMode(QLineEdit.Normal)
+        else:
+            self.claude_api_key_input.setEchoMode(QLineEdit.Password)
+
+    def load_subtitle_for_claude(self):
+        """대본 작성3용 자막 파일 불러오기"""
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "자막 파일 선택",
+                "",
+                "자막 파일 (*.srt *.vtt *.txt);;모든 파일 (*.*)"
+            )
+
+            if not file_path:
+                return
+
+            # 파일 읽기
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # 타임스탬프 제거 여부 묻기
+            reply = QMessageBox.question(
+                self,
+                "타임스탬프 제거",
+                "타임스탬프를 제거하고 텍스트만 표시하시겠습니까?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+
+            if reply == QMessageBox.Yes:
+                text_only = self.remove_subtitle_timestamps(content)
+                self.claude_subtitle_input.setPlainText(text_only)
+            else:
+                self.claude_subtitle_input.setPlainText(content)
+
+            filename = os.path.basename(file_path)
+            self.statusBar().showMessage(f"자막 파일 불러오기 완료: {filename}")
+
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"자막 파일을 불러올 수 없습니다:\n{str(e)}")
+
+    def request_claude_improvement(self):
+        """Claude에게 자막 개선 요청"""
+        if not ANTHROPIC_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "라이브러리 없음",
+                "Anthropic 라이브러리가 설치되어 있지 않습니다.\n\n설치 명령어:\npip install anthropic"
+            )
+            return
+
+        subtitle_text = self.claude_subtitle_input.toPlainText().strip()
+        if not subtitle_text:
+            QMessageBox.warning(self, "경고", "자막을 먼저 입력하거나 불러와주세요")
+            return
+
+        # API 키 확인
+        api_key = self.config.get('claude_api_key', '').strip()
+        if not api_key:
+            QMessageBox.warning(self, "경고", "설정 탭에서 Claude API 키를 입력하세요")
+            return
+
+        # 개선 방향 및 옵션
+        improvement_type = self.claude_improvement_type.currentText()
+        target_language = self.claude_target_language.currentText()
+        custom_request = self.claude_custom_request.toPlainText().strip()
+
+        # 프롬프트 생성
+        prompt = self._build_claude_prompt(subtitle_text, improvement_type, target_language, custom_request)
+
+        # 진행 표시
+        self.claude_progress.setVisible(True)
+        self.claude_progress.setRange(0, 0)  # 무한 프로그레스
+        self.statusBar().showMessage("Claude에게 요청 중...")
+
+        try:
+            client = Anthropic(api_key=api_key)
+
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=4096,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            result_text = response.content[0].text
+            self.claude_result_text.setPlainText(result_text)
+
+            self.claude_progress.setVisible(False)
+            self.statusBar().showMessage("Claude 개선 완료!")
+            QMessageBox.information(self, "완료", "Claude가 대본을 성공적으로 개선했습니다!")
+
+        except Exception as e:
+            self.claude_progress.setVisible(False)
+            self.statusBar().showMessage("Claude 요청 실패")
+            QMessageBox.critical(self, "오류", f"Claude 요청 중 오류 발생:\n{str(e)}")
+
+    def _build_claude_prompt(self, subtitle_text, improvement_type, target_language, custom_request):
+        """Claude 요청용 프롬프트 생성"""
+        improvement_instructions = {
+            "전체적으로 다듬기": "이 자막을 전체적으로 매끄럽고 자연스럽게 다듬어주세요. 문맥이 어색한 부분을 수정하고, 흐름을 개선해주세요.",
+            "문법 및 맞춤법 교정": "이 자막의 문법과 맞춤법 오류를 모두 찾아 교정해주세요.",
+            "가독성 향상": "이 자막을 더 읽기 쉽고 이해하기 쉽게 개선해주세요. 복잡한 문장은 간단하게 나누고, 명확하게 표현해주세요.",
+            "전문적인 톤으로 변경": "이 자막을 전문적이고 격식 있는 톤으로 바꿔주세요.",
+            "친근한 톤으로 변경": "이 자막을 친근하고 부드러운 톤으로 바꿔주세요.",
+            "요약하기": "이 자막의 핵심 내용만 간결하게 요약해주세요.",
+            "확장하기": "이 자막을 더 자세하고 풍부하게 확장해주세요.",
+            "커스텀 (직접 입력)": custom_request if custom_request else "사용자의 요구사항에 맞게 개선해주세요."
+        }
+
+        instruction = improvement_instructions.get(improvement_type, improvement_instructions["전체적으로 다듬기"])
+
+        language_instruction = ""
+        if target_language != "원문 유지":
+            language_instruction = f"\n\n결과는 반드시 {target_language}로 작성해주세요."
+
+        custom_instruction = ""
+        if custom_request and improvement_type != "커스텀 (직접 입력)":
+            custom_instruction = f"\n\n추가 요청사항: {custom_request}"
+
+        prompt = f"""다음 자막 텍스트를 개선해주세요.
+
+{instruction}{language_instruction}{custom_instruction}
+
+[원본 자막]
+{subtitle_text}
+
+[개선 요청사항]
+- 원본의 의미와 뉘앙스를 최대한 유지해주세요
+- 영상 자막으로 사용하기 적합하게 만들어주세요
+- 개선된 자막만 출력하고, 설명은 하지 마세요
+
+개선된 자막:"""
+
+        return prompt
+
+    def save_claude_result(self):
+        """Claude 개선 결과 저장"""
+        result_text = self.claude_result_text.toPlainText().strip()
+        if not result_text:
+            QMessageBox.warning(self, "경고", "저장할 결과가 없습니다")
+            return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"claude_improved_{timestamp}.txt"
+        filepath = os.path.join(self.scripts_dir, filename)
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"=== Claude 개선 결과 ===\n")
+                f.write(f"생성 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"개선 방향: {self.claude_improvement_type.currentText()}\n")
+                f.write(f"목표 언어: {self.claude_target_language.currentText()}\n\n")
+                f.write(result_text)
+
+            self.statusBar().showMessage(f"결과 저장 완료: {filename}")
+            QMessageBox.information(self, "완료", f"결과가 저장되었습니다!\n\n파일: {filename}\n경로: {self.scripts_dir}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"저장 중 오류 발생:\n{str(e)}")
+
+    def load_subtitle_file(self):
+        """로컬 SRT 자막 파일 불러오기"""
+        try:
+            # 파일 선택 다이얼로그
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "자막 파일 선택",
+                "",
+                "자막 파일 (*.srt *.vtt *.txt);;모든 파일 (*.*)"
+            )
+
+            if not file_path:
+                return
+
+            # 파일 읽기
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # 타임스탬프 제거 여부 묻기
+            reply = QMessageBox.question(
+                self,
+                "타임스탬프 제거",
+                "타임스탬프를 제거하고 텍스트만 표시하시겠습니까?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+
+            if reply == QMessageBox.Yes:
+                # SRT/VTT 타임스탬프 제거
+                text_only = self.remove_subtitle_timestamps(content)
+                self.analysis_input.setPlainText(text_only)
+            else:
+                # 원본 그대로 표시
+                self.analysis_input.setPlainText(content)
+
+            filename = os.path.basename(file_path)
+            self.statusBar().showMessage(f"자막 파일 불러오기 완료: {filename}")
+
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"자막 파일을 불러올 수 없습니다:\n{str(e)}")
+
+    def remove_subtitle_timestamps(self, content):
+        """자막에서 타임스탬프 제거하고 텍스트만 추출"""
+        import re
+
+        lines = content.split('\n')
+        text_lines = []
+
+        # SRT/VTT 패턴: 숫자 인덱스, 타임스탬프, 빈 줄 제거
+        timestamp_pattern = re.compile(r'^\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}')
+        index_pattern = re.compile(r'^\d+$')
+
+        for line in lines:
+            line = line.strip()
+
+            # 빈 줄, 인덱스, 타임스탬프 건너뛰기
+            if not line or index_pattern.match(line) or timestamp_pattern.match(line):
+                continue
+
+            # WEBVTT 헤더 건너뛰기
+            if line.startswith('WEBVTT') or line.startswith('NOTE'):
+                continue
+
+            text_lines.append(line)
+
+        return '\n'.join(text_lines)
 
 
 def main():

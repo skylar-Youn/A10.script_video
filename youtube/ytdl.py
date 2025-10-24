@@ -160,6 +160,10 @@ def download(
     ydl_opts = {
         "outtmpl": str(output_dir / "%(title)s [%(id)s].%(ext)s"),
         "skip_download": skip_download,
+        # 비디오 포맷 명시 (최고 화질 비디오 + 오디오, 또는 최고 화질 단일 파일)
+        "format": "bestvideo+bestaudio/best",
+        # ffmpeg로 병합
+        "merge_output_format": "mp4",
         "writesubtitles": download_subs,
         "writeautomaticsub": download_subs and auto_subs,
         "subtitleslangs": sub_langs,
