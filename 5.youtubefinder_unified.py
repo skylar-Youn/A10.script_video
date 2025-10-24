@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QComboBox, QSpinBox, QDoubleSpinBox,
                              QTextEdit, QGroupBox, QGridLayout, QMessageBox,
                              QHeaderView, QProgressBar, QRadioButton, QButtonGroup,
-                             QFileDialog)
+                             QFileDialog, QCheckBox)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 import time
