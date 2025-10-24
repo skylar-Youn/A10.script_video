@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VMaker - 자막 기반 비디오 편집기</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎬 VMaker</h1>
+            <p>자막 기반 비디오 편집 프로토타입</p>
+        </header>
+
+        <main>
+            <!-- 파일 업로드 섹션 -->
+            <section class="upload-section">
+                <div class="upload-box">
+                    <h3>📹 비디오 업로드</h3>
+                    <input type="file" id="videoFile" accept="video/*">
+                    <button onclick="uploadVideo()" class="btn btn-primary">비디오 업로드</button>
+                </div>
+                <div class="upload-box">
+                    <h3>📝 자막 업로드 (SRT)</h3>
+                    <input type="file" id="subtitleFile" accept=".srt">
+                    <button onclick="uploadSubtitle()" class="btn btn-primary">자막 업로드</button>
+                </div>
+            </section>
+
+            <!-- 상태 표시 -->
+            <div id="status" class="status"></div>
+
+            <!-- 비디오 플레이어 -->
+            <section class="player-section" id="playerSection" style="display: none;">
+                <h3>비디오 미리보기</h3>
+                <video id="videoPlayer" controls width="100%"></video>
+                <div class="player-info">
+                    <span id="currentTime">00:00</span> / <span id="duration">00:00</span>
+                </div>
+            </section>
+
+            <!-- 타임라인 -->
+            <section class="timeline-section" id="timelineSection" style="display: none;">
+                <div class="timeline-header">
+                    <h3>타임라인 (자막 기반)</h3>
+                    <div class="timeline-controls">
+                        <button onclick="selectAll()" class="btn btn-secondary">전체 선택</button>
+                        <button onclick="deselectAll()" class="btn btn-secondary">전체 해제</button>
+                        <button onclick="invertSelection()" class="btn btn-secondary">선택 반전</button>
+                        <button onclick="renderVideo()" class="btn btn-success">✂️ 선택된 구간으로 렌더링</button>
+                    </div>
+                </div>
+
+                <div id="timeline" class="timeline">
+                    <!-- 자막 블록들이 여기에 동적으로 추가됩니다 -->
+                </div>
+
+                <div class="timeline-info">
+                    <span>총 자막: <span id="totalSubtitles">0</span>개</span>
+                    <span>선택됨: <span id="selectedCount">0</span>개</span>
+                    <span>예상 길이: <span id="estimatedDuration">00:00</span></span>
+                </div>
+            </section>
+
+            <!-- 렌더링 진행 상태 -->
+            <section class="render-section" id="renderSection" style="display: none;">
+                <h3>렌더링 진행 중...</h3>
+                <div class="progress-bar">
+                    <div id="progressBar" class="progress"></div>
+                </div>
+                <p id="renderStatus">자막 구간 분할 중...</p>
+            </section>
+
+            <!-- 다운로드 섹션 -->
+            <section class="download-section" id="downloadSection" style="display: none;">
+                <h3>✅ 렌더링 완료!</h3>
+                <button onclick="downloadVideo()" class="btn btn-success btn-large">💾 편집된 비디오 다운로드</button>
+                <video id="resultPlayer" controls width="100%"></video>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

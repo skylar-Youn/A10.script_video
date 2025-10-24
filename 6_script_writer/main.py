@@ -1197,6 +1197,14 @@ class ScriptWriter(QMainWindow):
         find_subtitle_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 4px 12px;")
         find_subtitle_btn.setMaximumWidth(140)
         input_label_layout.addWidget(find_subtitle_btn)
+
+        # devtools 복사 버튼
+        devtools_copy_btn = QPushButton("🔧 DevTools에 복사")
+        devtools_copy_btn.clicked.connect(self.copy_subtitle_to_devtools)
+        devtools_copy_btn.setStyleSheet("background-color: #FF5722; color: white; padding: 4px 12px;")
+        devtools_copy_btn.setMaximumWidth(150)
+        input_label_layout.addWidget(devtools_copy_btn)
+
         input_label_layout.addStretch()
 
         analysis_layout.addLayout(input_label_layout)
@@ -1205,6 +1213,16 @@ class ScriptWriter(QMainWindow):
         self.analysis_input.setPlaceholderText("분석할 대본을 입력하거나 붙여넣으세요...")
         self.analysis_input.setMaximumHeight(150)
         analysis_layout.addWidget(self.analysis_input)
+
+        # 프롬프트 타입 선택
+        prompt_type_layout = QHBoxLayout()
+        prompt_type_layout.addWidget(QLabel("프롬프트 타입:"))
+        self.analysis_prompt_type = QComboBox()
+        self.analysis_prompt_type.addItems(["분석해줘", "요약해줘", "개선점 찾아줘", "재작성해줘"])
+        self.analysis_prompt_type.setMaximumWidth(150)
+        prompt_type_layout.addWidget(self.analysis_prompt_type)
+        prompt_type_layout.addStretch()
+        analysis_layout.addLayout(prompt_type_layout)
 
         # 버튼
         analysis_btn_layout = QHBoxLayout()
@@ -1243,13 +1261,24 @@ class ScriptWriter(QMainWindow):
         layout.addWidget(analysis_group)
 
         # === 2. ChatGPT 창작 섹션 ===
-        creative_group = QGroupBox("✨ 2단계: ChatGPT에게 새롭게 창작 요청")
+        creative_group = QGroupBox("✨ 2단계: 분석 결과 기반 새로운 콘텐츠 창작")
         creative_layout = QVBoxLayout()
 
+        # 안내 메시지
+        info_label = QLabel("ℹ️ 1단계의 분석 결과를 바탕으로 새로운 콘텐츠를 창작합니다")
+        info_label.setStyleSheet("color: #0288D1; font-weight: bold; padding: 5px;")
+        creative_layout.addWidget(info_label)
+
         # 입력 영역
-        creative_layout.addWidget(QLabel("창작 주제 및 요구사항:"))
+        creative_layout.addWidget(QLabel("추가 요구사항 (선택사항):"))
         self.creative_input = QTextEdit()
-        self.creative_input.setPlaceholderText("창작할 주제나 아이디어를 입력하세요...\n예: '미래 도시의 하루', '감동적인 가족 이야기' 등")
+        self.creative_input.setPlaceholderText(
+            "분석 결과 외에 추가로 반영할 요구사항을 입력하세요 (선택사항)...\n\n"
+            "예시:\n"
+            "- 더욱 감동적인 톤으로 작성해주세요\n"
+            "- 10대 청소년 대상으로 각색해주세요\n"
+            "- 유머 요소를 추가해주세요"
+        )
         self.creative_input.setMaximumHeight(120)
         creative_layout.addWidget(self.creative_input)
 
@@ -1388,11 +1417,20 @@ class ScriptWriter(QMainWindow):
         googlefx_group.setLayout(googlefx_layout)
         layout.addWidget(googlefx_group)
 
-        # 최종 저장 버튼
+        # 저장/불러오기 버튼
+        save_load_layout = QHBoxLayout()
+
         save_workflow_btn = QPushButton("💾 전체 워크플로우 저장")
         save_workflow_btn.clicked.connect(self.save_workflow)
         save_workflow_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 10px; font-weight: bold;")
-        layout.addWidget(save_workflow_btn)
+        save_load_layout.addWidget(save_workflow_btn)
+
+        load_workflow_btn = QPushButton("📂 워크플로우 불러오기")
+        load_workflow_btn.clicked.connect(self.load_workflow)
+        load_workflow_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; font-weight: bold;")
+        save_load_layout.addWidget(load_workflow_btn)
+
+        layout.addLayout(save_load_layout)
 
         layout.addStretch()
 
@@ -1440,8 +1478,70 @@ class ScriptWriter(QMainWindow):
         subtitle_group.setLayout(subtitle_layout)
         layout.addWidget(subtitle_group)
 
-        # === 2. Claude에게 재요청 섹션 ===
-        claude_group = QGroupBox("🤖 2단계: Claude에게 대본 개선 요청")
+        # === 2. 대본 분석 섹션 ===
+        analysis_group = QGroupBox("📊 2단계: 대본 상세 분석")
+        analysis_layout = QVBoxLayout()
+
+        # 분석 버튼
+        analyze_btn = QPushButton("📊 대본 분석하기")
+        analyze_btn.clicked.connect(self.analyze_senior_script)
+        analyze_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 12px; font-weight: bold;")
+        analysis_layout.addWidget(analyze_btn)
+
+        # 진행 상태
+        self.senior_analysis_progress = QProgressBar()
+        self.senior_analysis_progress.setVisible(False)
+        analysis_layout.addWidget(self.senior_analysis_progress)
+
+        # 분석 항목 안내 (복사 가능)
+        analysis_layout.addWidget(QLabel("📋 분석 항목 (복사 가능):"))
+        self.senior_analysis_items = QTextEdit()
+        self.senior_analysis_items.setPlainText("""1. 전체 구조 및 흐름
+2. 주요 메시지 및 핵심 포인트
+3. 대상 시청자층
+4. 감정적 톤 및 분위기
+5. 강점과 개선점
+6. 시청자 참여도를 높이기 위한 제안
+7. 다른 각도에서 재작성 제안
+8. 추가적인 자료 및 보완 내용""")
+        self.senior_analysis_items.setReadOnly(True)
+        self.senior_analysis_items.setMaximumHeight(150)
+        self.senior_analysis_items.setStyleSheet("background-color: #F3E5F5; padding: 10px; border: 2px solid #9C27B0;")
+        analysis_layout.addWidget(self.senior_analysis_items)
+
+        # 분석 항목 복사 버튼
+        copy_items_btn = QPushButton("📋 분석 항목 복사")
+        copy_items_btn.clicked.connect(lambda: self.copy_to_clipboard(self.senior_analysis_items.toPlainText()))
+        copy_items_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 6px;")
+        analysis_layout.addWidget(copy_items_btn)
+
+        # 분석 결과
+        analysis_layout.addWidget(QLabel("분석 결과:"))
+        self.senior_analysis_result = QTextEdit()
+        self.senior_analysis_result.setPlaceholderText("대본 분석 결과가 여기에 표시됩니다...")
+        self.senior_analysis_result.setMinimumHeight(300)
+        analysis_layout.addWidget(self.senior_analysis_result)
+
+        # 분석 결과 버튼
+        analysis_btn_layout = QHBoxLayout()
+
+        copy_analysis_btn = QPushButton("📋 분석 복사")
+        copy_analysis_btn.clicked.connect(lambda: self.copy_to_clipboard(self.senior_analysis_result.toPlainText()))
+        copy_analysis_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px;")
+        analysis_btn_layout.addWidget(copy_analysis_btn)
+
+        save_analysis_btn = QPushButton("💾 분석 저장")
+        save_analysis_btn.clicked.connect(self.save_senior_analysis)
+        save_analysis_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px;")
+        analysis_btn_layout.addWidget(save_analysis_btn)
+
+        analysis_layout.addLayout(analysis_btn_layout)
+
+        analysis_group.setLayout(analysis_layout)
+        layout.addWidget(analysis_group)
+
+        # === 3. Claude에게 재요청 섹션 ===
+        claude_group = QGroupBox("🤖 3단계: Claude에게 대본 개선 요청")
         claude_layout = QVBoxLayout()
 
         # 요청 옵션
@@ -1493,8 +1593,8 @@ class ScriptWriter(QMainWindow):
         claude_group.setLayout(claude_layout)
         layout.addWidget(claude_group)
 
-        # === 3. Claude 결과 섹션 ===
-        result_group = QGroupBox("✨ 3단계: Claude 개선 결과")
+        # === 4. Claude 결과 섹션 ===
+        result_group = QGroupBox("✨ 4단계: Claude 개선 결과")
         result_layout = QVBoxLayout()
 
         result_layout.addWidget(QLabel("개선된 대본:"))
@@ -2450,14 +2550,40 @@ class ScriptWriter(QMainWindow):
 
     # ========== 대본 작성2 탭 관련 함수들 ==========
 
+    def copy_subtitle_to_devtools(self):
+        """자막 내용을 DevTools에 복사"""
+        subtitle_content = self.analysis_input.toPlainText().strip()
+        if not subtitle_content:
+            QMessageBox.warning(self, "경고", "복사할 자막 내용이 없습니다")
+            return
+
+        # 클립보드에 복사
+        self.copy_to_clipboard(subtitle_content)
+
+        # 사용자에게 안내
+        QMessageBox.information(
+            self,
+            "DevTools 복사 완료",
+            "자막 내용이 클립보드에 복사되었습니다!\n\n"
+            "사용 방법:\n"
+            "1. 브라우저에서 F12를 눌러 DevTools 열기\n"
+            "2. Console 탭 선택\n"
+            "3. Ctrl+V로 붙여넣기\n"
+            "4. Enter로 실행"
+        )
+        self.statusBar().showMessage("자막 내용이 DevTools용으로 복사되었습니다")
+
     def generate_analysis_prompt(self):
-        """ChatGPT 대본 분석 프롬프트 생성"""
+        """ChatGPT 대본 분석 프롬프트 생성 (타입별)"""
         script_content = self.analysis_input.toPlainText().strip()
         if not script_content:
             QMessageBox.warning(self, "경고", "분석할 대본을 입력하세요")
             return
 
-        prompt = f"""다음 대본을 상세하게 분석해주세요.
+        prompt_type = self.analysis_prompt_type.currentText()
+
+        if prompt_type == "분석해줘":
+            prompt = f"""다음 대본을 분석해줘.
 
 대본:
 {script_content}
@@ -2465,15 +2591,53 @@ class ScriptWriter(QMainWindow):
 분석 항목:
 1. 전체 구조 및 흐름
 2. 주요 메시지 및 핵심 포인트
-3. 대상 시청자층
-4. 감정적 톤 및 분위기
 5. 강점과 개선점
-6. 시청자 참여도를 높이기 위한 제안
+8. 추가적인 자료 및 보완 내용
 
-각 항목별로 구체적이고 실용적인 분석을 제공해주세요."""
+분석해줘."""
+
+        elif prompt_type == "요약해줘":
+            prompt = f"""다음 대본을 핵심 내용 위주로 요약해주세요.
+
+대본:
+{script_content}
+
+요약 요청사항:
+- 핵심 메시지 3가지
+- 주요 논점
+- 결론
+- 150자 이내 한 줄 요약"""
+
+        elif prompt_type == "개선점 찾아줘":
+            prompt = f"""다음 대본의 개선점을 찾아서 구체적인 수정 방안을 제시해주세요.
+
+대본:
+{script_content}
+
+개선 항목:
+1. 구조적 개선점
+2. 내용 보완이 필요한 부분
+3. 표현 개선 (가독성, 명확성)
+4. 시청자 참여도 향상 방안
+5. 추가하면 좋을 요소
+
+각 개선점마다 Before/After 예시를 포함해주세요."""
+
+        elif prompt_type == "재작성해줘":
+            prompt = f"""다음 대본을 더 효과적으로 재작성해주세요.
+
+원본 대본:
+{script_content}
+
+재작성 지침:
+- 핵심 메시지는 유지하되 표현을 개선
+- 시청자 참여도를 높이는 요소 추가
+- 논리적 흐름 강화
+- 가독성과 명확성 향상
+- 감정적 호소력 강화"""
 
         self.analysis_prompt.setPlainText(prompt)
-        self.statusBar().showMessage("ChatGPT 대본 분석 프롬프트가 생성되었습니다")
+        self.statusBar().showMessage(f"ChatGPT '{prompt_type}' 프롬프트가 생성되었습니다")
 
     def open_chatgpt_for_analysis(self):
         """ChatGPT를 열어서 분석 프롬프트 사용"""
@@ -2482,13 +2646,23 @@ class ScriptWriter(QMainWindow):
             QMessageBox.warning(self, "경고", "먼저 프롬프트를 생성하세요")
             return
 
-        # ChatGPT URL에 프롬프트 포함
-        encoded_prompt = urllib.parse.quote(prompt)
-        url = f"https://chat.openai.com/?q={encoded_prompt}"
+        # ChatGPT 열기
+        webbrowser.open("https://chatgpt.com")
 
-        webbrowser.open(url)
-        self.statusBar().showMessage("ChatGPT가 열렸습니다. 프롬프트를 확인하고 결과를 붙여넣으세요")
-        QMessageBox.information(self, "안내", "ChatGPT가 브라우저에서 열렸습니다.\n\n1. 프롬프트를 확인하세요\n2. 결과를 복사하세요\n3. '분석 결과' 영역에 붙여넣으세요")
+        # 프롬프트를 클립보드에 복사
+        clipboard = QApplication.clipboard()
+        clipboard.setText(prompt)
+
+        self.statusBar().showMessage("ChatGPT가 열렸습니다. 프롬프트가 클립보드에 복사되었습니다")
+        QMessageBox.information(
+            self,
+            "안내",
+            "ChatGPT가 브라우저에서 열렸습니다.\n\n"
+            "프롬프트가 클립보드에 복사되었습니다.\n\n"
+            "1. ChatGPT에 프롬프트를 붙여넣으세요 (Ctrl+V)\n"
+            "2. 결과를 복사하세요\n"
+            "3. '분석 결과' 영역에 붙여넣으세요"
+        )
 
     def copy_to_clipboard(self, text):
         """클립보드에 텍스트 복사"""
@@ -2502,28 +2676,48 @@ class ScriptWriter(QMainWindow):
         QMessageBox.information(self, "완료", "클립보드에 복사되었습니다!")
 
     def generate_creative_prompt(self):
-        """ChatGPT 창작 프롬프트 생성"""
-        topic = self.creative_input.toPlainText().strip()
-        if not topic:
-            QMessageBox.warning(self, "경고", "창작 주제를 입력하세요")
+        """ChatGPT 창작 프롬프트 생성 - 1단계 분석 결과를 바탕으로"""
+        # 1단계 분석 결과 가져오기
+        analysis_result = self.analysis_result.toPlainText().strip()
+
+        if not analysis_result:
+            QMessageBox.warning(self, "경고", "먼저 1단계에서 대본 분석을 완료해주세요")
             return
 
-        prompt = f"""다음 주제로 창의적이고 매력적인 콘텐츠를 창작해주세요.
+        # 추가 요구사항 가져오기 (선택사항)
+        additional_requirements = self.creative_input.toPlainText().strip()
 
-주제/요구사항:
-{topic}
+        # 분석 결과를 바탕으로 창작 프롬프트 생성
+        prompt = f"""다음은 기존 대본에 대한 분석 결과입니다. 이 분석을 바탕으로 새롭고 창의적인 콘텐츠를 창작해주세요.
 
-창작 요구사항:
-1. 독창적이고 흥미로운 스토리 또는 콘텐츠
-2. 시청자의 감정을 자극하는 요소 포함
-3. 명확한 메시지 전달
-4. 시각적으로 표현 가능한 장면들
-5. 약 5-10분 분량의 콘텐츠
+📊 **기존 대본 분석 결과:**
+{analysis_result}
 
-자유롭게 창작하되, 위 요구사항을 충족하는 콘텐츠를 만들어주세요."""
+---
+
+✨ **창작 요청:**
+위 분석 결과를 참고하여, 다음 사항을 반영한 새로운 콘텐츠를 창작해주세요.
+
+**창작 지침:**
+1. **구조 개선**: 분석에서 파악된 강점은 유지하고, 개선점은 보완하세요
+2. **메시지 강화**: 핵심 포인트를 더욱 명확하고 임팩트 있게 전달하세요
+3. **시청자 참여**: 대상 시청자층에 맞는 톤과 스타일로 재구성하세요
+4. **차별화**: 다른 각도에서의 접근이나 새로운 관점을 추가하세요
+5. **완성도**: 약 5-10분 분량의 완성된 대본으로 작성하세요"""
+
+        # 추가 요구사항이 있으면 포함
+        if additional_requirements:
+            prompt += f"""
+
+**추가 요구사항:**
+{additional_requirements}"""
+
+        prompt += """
+
+위 내용을 모두 반영하여, 완전히 새롭게 재창작된 대본을 작성해주세요."""
 
         self.creative_prompt.setPlainText(prompt)
-        self.statusBar().showMessage("ChatGPT 창작 프롬프트가 생성되었습니다")
+        self.statusBar().showMessage("분석 결과 기반 창작 프롬프트가 생성되었습니다")
 
     def open_chatgpt_for_creative(self):
         """ChatGPT를 열어서 창작 프롬프트 사용"""
@@ -2532,12 +2726,23 @@ class ScriptWriter(QMainWindow):
             QMessageBox.warning(self, "경고", "먼저 프롬프트를 생성하세요")
             return
 
-        encoded_prompt = urllib.parse.quote(prompt)
-        url = f"https://chat.openai.com/?q={encoded_prompt}"
+        # ChatGPT 열기
+        webbrowser.open("https://chatgpt.com")
 
-        webbrowser.open(url)
-        self.statusBar().showMessage("ChatGPT가 열렸습니다. 프롬프트를 확인하고 결과를 붙여넣으세요")
-        QMessageBox.information(self, "안내", "ChatGPT가 브라우저에서 열렸습니다.\n\n1. 프롬프트를 확인하세요\n2. 창작 결과를 복사하세요\n3. '창작 결과' 영역에 붙여넣으세요")
+        # 프롬프트를 클립보드에 복사
+        clipboard = QApplication.clipboard()
+        clipboard.setText(prompt)
+
+        self.statusBar().showMessage("ChatGPT가 열렸습니다. 프롬프트가 클립보드에 복사되었습니다")
+        QMessageBox.information(
+            self,
+            "안내",
+            "ChatGPT가 브라우저에서 열렸습니다.\n\n"
+            "프롬프트가 클립보드에 복사되었습니다.\n\n"
+            "1. ChatGPT에 프롬프트를 붙여넣으세요 (Ctrl+V)\n"
+            "2. 창작 결과를 복사하세요\n"
+            "3. '창작 결과' 영역에 붙여넣으세요"
+        )
 
     def transfer_creative_to_claude(self):
         """ChatGPT 창작 결과를 Claude 입력으로 자동 전달"""
@@ -2653,63 +2858,198 @@ Create a visually stunning thumbnail that will make viewers want to click and wa
         QMessageBox.information(self, "안내", "Google FX가 브라우저에서 열렸습니다.\n\n프롬프트가 클립보드에 복사되었습니다.\n\n1. ImageFX를 선택하세요\n2. 프롬프트를 붙여넣으세요 (Ctrl+V)\n3. 이미지를 생성하세요\n4. 마음에 드는 이미지를 다운로드하세요")
 
     def save_workflow(self):
-        """전체 워크플로우 저장"""
+        """전체 워크플로우 저장 - JSON 및 TXT 형식"""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"workflow_{timestamp}.txt"
-        filepath = os.path.join(self.scripts_dir, filename)
 
-        content = f"""=== 대본 작성 워크플로우 ===
-생성 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        # 워크플로우 상태 데이터
+        workflow_data = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "version": "시니어V1",
+            "stage1_analysis": {
+                "input_script": self.analysis_input.toPlainText(),
+                "prompt_type": self.analysis_prompt_type.currentText(),
+                "generated_prompt": self.analysis_prompt.toPlainText(),
+                "analysis_result": self.analysis_result.toPlainText()
+            },
+            "stage2_creative": {
+                "additional_requirements": self.creative_input.toPlainText(),
+                "generated_prompt": self.creative_prompt.toPlainText(),
+                "creative_result": self.creative_result.toPlainText()
+            },
+            "stage3_claude": {
+                "claude_input": self.claude_input.toPlainText(),
+                "claude_prompt": self.claude_prompt.toPlainText(),
+                "claude_result": self.claude_result.toPlainText()
+            },
+            "stage4_googlefx": {
+                "image_prompt": self.googlefx_prompt.toPlainText()
+            }
+        }
 
-=== 1. ChatGPT 대본 분석 ===
+        # JSON 파일 저장
+        json_filename = f"workflow_{timestamp}.json"
+        json_filepath = os.path.join(self.scripts_dir, json_filename)
+
+        # TXT 파일 저장 (가독성 좋음)
+        txt_filename = f"workflow_{timestamp}.txt"
+        txt_filepath = os.path.join(self.scripts_dir, txt_filename)
+
+        txt_content = f"""{'='*60}
+시니어V1 - 전체 워크플로우 저장
+생성 시간: {workflow_data['timestamp']}
+{'='*60}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 1단계: ChatGPT 대본 분석
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [입력 대본]
-{self.analysis_input.toPlainText()}
+{workflow_data['stage1_analysis']['input_script']}
 
-[분석 프롬프트]
-{self.analysis_prompt.toPlainText()}
+[프롬프트 타입]
+{workflow_data['stage1_analysis']['prompt_type']}
+
+[생성된 프롬프트]
+{workflow_data['stage1_analysis']['generated_prompt']}
 
 [분석 결과]
-{self.analysis_result.toPlainText()}
+{workflow_data['stage1_analysis']['analysis_result']}
 
-=== 2. ChatGPT 창작 ===
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ 2단계: 분석 결과 기반 새로운 콘텐츠 창작
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[창작 주제]
-{self.creative_input.toPlainText()}
+[추가 요구사항]
+{workflow_data['stage2_creative']['additional_requirements']}
 
-[창작 프롬프트]
-{self.creative_prompt.toPlainText()}
+[생성된 창작 프롬프트]
+{workflow_data['stage2_creative']['generated_prompt']}
 
 [창작 결과]
-{self.creative_result.toPlainText()}
+{workflow_data['stage2_creative']['creative_result']}
 
-=== 3. Claude 유튜브 대본 ===
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 3단계: Claude 유튜브 대본 생성
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [Claude 입력]
-{self.claude_input.toPlainText()}
+{workflow_data['stage3_claude']['claude_input']}
 
 [Claude 프롬프트]
-{self.claude_prompt.toPlainText()}
+{workflow_data['stage3_claude']['claude_prompt']}
 
 [Claude 대본 결과]
-{self.claude_result.toPlainText()}
+{workflow_data['stage3_claude']['claude_result']}
 
-=== 4. Google FX 이미지 프롬프트 ===
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎨 4단계: Google FX 이미지 프롬프트
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [이미지 프롬프트]
-{self.googlefx_prompt.toPlainText()}
+{workflow_data['stage4_googlefx']['image_prompt']}
 
-=== 워크플로우 완료 ===
+{'='*60}
+워크플로우 저장 완료
+{'='*60}
 """
 
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(content)
+            # JSON 저장
+            import json
+            with open(json_filepath, 'w', encoding='utf-8') as f:
+                json.dump(workflow_data, f, ensure_ascii=False, indent=2)
 
-            self.statusBar().showMessage(f"워크플로우 저장 완료: {filename}")
-            QMessageBox.information(self, "완료", f"전체 워크플로우가 저장되었습니다!\n\n파일: {filename}\n경로: {self.scripts_dir}")
+            # TXT 저장
+            with open(txt_filepath, 'w', encoding='utf-8') as f:
+                f.write(txt_content)
+
+            self.statusBar().showMessage(f"워크플로우 저장 완료: {txt_filename}")
+            QMessageBox.information(
+                self,
+                "완료",
+                f"전체 워크플로우가 저장되었습니다!\n\n"
+                f"📄 TXT: {txt_filename}\n"
+                f"📋 JSON: {json_filename}\n\n"
+                f"경로: {self.scripts_dir}\n\n"
+                f"💡 JSON 파일로 나중에 불러올 수 있습니다"
+            )
         except Exception as e:
             QMessageBox.critical(self, "오류", f"저장 중 오류 발생:\n{str(e)}")
+
+    def load_workflow(self):
+        """저장된 워크플로우 불러오기 (JSON 파일)"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "워크플로우 불러오기",
+            self.scripts_dir,
+            "JSON Files (*.json);;All Files (*)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            import json
+            with open(file_path, 'r', encoding='utf-8') as f:
+                workflow_data = json.load(f)
+
+            # 버전 확인
+            if workflow_data.get("version") != "시니어V1":
+                QMessageBox.warning(
+                    self,
+                    "경고",
+                    f"이 파일은 '{workflow_data.get('version', '알 수 없음')}' 버전입니다.\n"
+                    "시니어V1 워크플로우 파일이 아닐 수 있습니다."
+                )
+
+            # 1단계 데이터 복원
+            if "stage1_analysis" in workflow_data:
+                stage1 = workflow_data["stage1_analysis"]
+                self.analysis_input.setPlainText(stage1.get("input_script", ""))
+
+                # 프롬프트 타입 설정
+                prompt_type = stage1.get("prompt_type", "분석해줘")
+                index = self.analysis_prompt_type.findText(prompt_type)
+                if index >= 0:
+                    self.analysis_prompt_type.setCurrentIndex(index)
+
+                self.analysis_prompt.setPlainText(stage1.get("generated_prompt", ""))
+                self.analysis_result.setPlainText(stage1.get("analysis_result", ""))
+
+            # 2단계 데이터 복원
+            if "stage2_creative" in workflow_data:
+                stage2 = workflow_data["stage2_creative"]
+                self.creative_input.setPlainText(stage2.get("additional_requirements", ""))
+                self.creative_prompt.setPlainText(stage2.get("generated_prompt", ""))
+                self.creative_result.setPlainText(stage2.get("creative_result", ""))
+
+            # 3단계 데이터 복원
+            if "stage3_claude" in workflow_data:
+                stage3 = workflow_data["stage3_claude"]
+                self.claude_input.setPlainText(stage3.get("claude_input", ""))
+                self.claude_prompt.setPlainText(stage3.get("claude_prompt", ""))
+                self.claude_result.setPlainText(stage3.get("claude_result", ""))
+
+            # 4단계 데이터 복원
+            if "stage4_googlefx" in workflow_data:
+                stage4 = workflow_data["stage4_googlefx"]
+                self.googlefx_prompt.setPlainText(stage4.get("image_prompt", ""))
+
+            filename = os.path.basename(file_path)
+            self.statusBar().showMessage(f"워크플로우 불러오기 완료: {filename}")
+            QMessageBox.information(
+                self,
+                "완료",
+                f"워크플로우가 성공적으로 불러와졌습니다!\n\n"
+                f"파일: {filename}\n"
+                f"저장 시간: {workflow_data.get('timestamp', '알 수 없음')}\n\n"
+                f"모든 단계의 상태가 복원되었습니다."
+            )
+
+        except json.JSONDecodeError as e:
+            QMessageBox.critical(self, "오류", f"JSON 파일 파싱 오류:\n{str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"불러오기 중 오류 발생:\n{str(e)}")
 
     # ========== 대본 작성3 탭 (Claude) 관련 함수들 ==========
 
@@ -2757,6 +3097,138 @@ Create a visually stunning thumbnail that will make viewers want to click and wa
 
         except Exception as e:
             QMessageBox.warning(self, "오류", f"자막 파일을 불러올 수 없습니다:\n{str(e)}")
+
+    def analyze_senior_script(self):
+        """시니어V2 - 대본 상세 분석 (8가지 항목)"""
+        if not ANTHROPIC_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "라이브러리 없음",
+                "Anthropic 라이브러리가 설치되어 있지 않습니다.\n\n설치 명령어:\npip install anthropic"
+            )
+            return
+
+        subtitle_text = self.claude_subtitle_input.toPlainText().strip()
+        if not subtitle_text:
+            QMessageBox.warning(self, "경고", "분석할 자막을 먼저 불러오거나 입력하세요")
+            return
+
+        # API 키 확인
+        api_key = self.config.get('claude_api_key', '').strip()
+        if not api_key:
+            QMessageBox.warning(self, "경고", "설정 탭에서 Claude API 키를 입력하세요")
+            return
+
+        # 진행 표시
+        self.senior_analysis_progress.setVisible(True)
+        self.senior_analysis_progress.setRange(0, 0)
+        self.statusBar().showMessage("대본 분석 중...")
+
+        try:
+            client = Anthropic(api_key=api_key)
+
+            # 상세 분석 프롬프트
+            prompt = f"""다음 대본을 8가지 항목으로 상세히 분석해주세요.
+
+[대본 내용]
+{subtitle_text}
+
+[분석 요청]
+다음 8가지 항목에 대해 깊이 있게 분석하고, 구체적인 개선 방안을 제시해주세요:
+
+📋 **1. 전체 구조 및 흐름**
+- 대본의 구성과 전개 방식
+- 도입-전개-결론의 균형
+- 흐름의 자연스러움과 논리성
+- 개선 제안
+
+📌 **2. 주요 메시지 및 핵심 포인트**
+- 전달하고자 하는 핵심 메시지
+- 주요 논점과 강조점
+- 메시지의 명확성
+- 개선 제안
+
+👥 **3. 대상 시청자층**
+- 예상되는 타겟 연령대 및 관심사
+- 시청자 특성 분석
+- 시청자층에 맞는 콘텐츠인지 평가
+- 개선 제안
+
+💭 **4. 감정적 톤 및 분위기**
+- 대본의 전반적인 톤 (진지한, 가벼운, 교육적 등)
+- 감정적 호소력
+- 분위기의 일관성
+- 개선 제안
+
+⭐ **5. 강점과 개선점**
+- 이 대본의 뚜렷한 강점 3가지
+- 개선이 필요한 약점 3가지
+- 구체적인 수정 방안
+
+🎯 **6. 시청자 참여도를 높이기 위한 제안**
+- 시청자 몰입도를 높일 수 있는 구체적 방법
+- 질문, 예시, 스토리텔링 등 활용 방안
+- 인터랙티브 요소 추가 제안
+
+🔄 **7. 다른 각도에서 재작성 제안**
+- 현재와는 다른 접근 방식 3가지
+- 각 접근법의 장단점
+- 권장하는 재작성 방향
+
+📚 **8. 추가적인 자료 및 보완 내용**
+- 추가하면 좋을 통계, 사례, 연구 결과
+- 보완이 필요한 내용
+- 참고할 만한 자료 유형
+- 신뢰도를 높일 수 있는 요소
+
+[출력 지침]
+- 각 항목별로 상세하고 구체적으로 작성
+- 실행 가능한 개선 방안 제시
+- 이모지를 활용하여 가독성 높게 작성
+- 전문적이면서도 이해하기 쉬운 설명"""
+
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=4000,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            result_text = response.content[0].text
+            self.senior_analysis_result.setPlainText(result_text)
+
+            self.senior_analysis_progress.setVisible(False)
+            self.statusBar().showMessage("대본 분석 완료!")
+            QMessageBox.information(self, "완료", "대본 분석이 완료되었습니다!")
+
+        except Exception as e:
+            self.senior_analysis_progress.setVisible(False)
+            self.statusBar().showMessage("분석 실패")
+            QMessageBox.critical(self, "오류", f"분석 중 오류 발생:\n{str(e)}")
+
+    def save_senior_analysis(self):
+        """시니어V2 - 분석 결과 저장"""
+        analysis_text = self.senior_analysis_result.toPlainText().strip()
+        if not analysis_text:
+            QMessageBox.warning(self, "경고", "저장할 분석 결과가 없습니다")
+            return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"senior_analysis_{timestamp}.txt"
+        filepath = os.path.join(self.scripts_dir, filename)
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"=== 시니어V2 대본 상세 분석 ===\n")
+                f.write(f"분석 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(analysis_text)
+
+            self.statusBar().showMessage(f"분석 결과 저장 완료: {filename}")
+            QMessageBox.information(self, "완료", f"분석 결과가 저장되었습니다!\n\n파일: {filename}\n경로: {self.scripts_dir}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"저장 중 오류 발생:\n{str(e)}")
 
     def request_claude_improvement(self):
         """Claude에게 자막 개선 요청"""
