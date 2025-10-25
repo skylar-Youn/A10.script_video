@@ -33,10 +33,296 @@
 
             <!-- 비디오 플레이어 -->
             <section class="player-section" id="playerSection" style="display: none;">
-                <h3>비디오 미리보기</h3>
-                <video id="videoPlayer" controls width="100%"></video>
+                <div class="player-header">
+                    <h3>비디오 미리보기</h3>
+                    <div class="player-controls-group">
+                        <div class="aspect-ratio-controls">
+                            <button onclick="setAspectRatio('youtube')" class="btn btn-secondary aspect-btn active" id="btnYoutube">
+                                📺 유튜브 (16:9)
+                            </button>
+                            <button onclick="setAspectRatio('shorts')" class="btn btn-secondary aspect-btn" id="btnShorts">
+                                📱 쇼츠 (9:16)
+                            </button>
+                        </div>
+                        <div class="size-controls">
+                            <label for="sizeSlider" class="size-label">
+                                📐 크기: <span id="sizeValue">50</span>%
+                            </label>
+                            <input type="range" id="sizeSlider" class="size-slider"
+                                   min="25" max="100" value="50" step="5"
+                                   oninput="setVideoSizeSlider(this.value)">
+                        </div>
+                    </div>
+                </div>
+                <div class="video-container" id="videoContainer" data-aspect="youtube">
+                    <video id="videoPlayer" controls width="100%"></video>
+                    <div id="coverBox" class="cover-box"></div>
+                    <div id="topBar" class="letterbox-bar top-bar"></div>
+                    <div id="bottomBar" class="letterbox-bar bottom-bar"></div>
+                    <div id="titleOverlay" class="title-overlay"></div>
+                    <div id="subtitleOverlay" class="subtitle-overlay"></div>
+                </div>
                 <div class="player-info">
                     <span id="currentTime">00:00</span> / <span id="duration">00:00</span>
+                </div>
+
+                <!-- 글자 가림 박스 설정 -->
+                <div class="subtitle-effects-panel" style="margin-bottom: 20px;">
+                    <h4>🔲 글자 가림 박스</h4>
+
+                    <div class="effect-control">
+                        <label>
+                            <input type="checkbox" id="coverBoxEnabled" onchange="updateCoverBox()">
+                            글자 가림 박스 표시
+                        </label>
+                    </div>
+
+                    <div class="effects-grid">
+                        <div class="effect-section">
+                            <h5>위치 (좌상단)</h5>
+
+                            <div class="effect-control">
+                                <label>X 위치 (%)</label>
+                                <input type="range" id="coverBoxLeft" min="0" max="100" value="10" onchange="updateCoverBox()">
+                                <span id="coverBoxLeftValue">10%</span>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>Y 위치 (%)</label>
+                                <input type="range" id="coverBoxTop" min="0" max="100" value="10" onchange="updateCoverBox()">
+                                <span id="coverBoxTopValue">10%</span>
+                            </div>
+                        </div>
+
+                        <div class="effect-section">
+                            <h5>크기 및 투명도</h5>
+
+                            <div class="effect-control">
+                                <label>너비 (%)</label>
+                                <input type="range" id="coverBoxWidth" min="5" max="50" value="20" onchange="updateCoverBox()">
+                                <span id="coverBoxWidthValue">20%</span>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>높이 (%)</label>
+                                <input type="range" id="coverBoxHeight" min="5" max="50" value="15" onchange="updateCoverBox()">
+                                <span id="coverBoxHeightValue">15%</span>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>투명도</label>
+                                <input type="range" id="coverBoxOpacity" min="0" max="100" value="90" onchange="updateCoverBox()">
+                                <span id="coverBoxOpacityValue">90%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 레터박스 설정 -->
+                <div class="subtitle-effects-panel" style="margin-bottom: 20px;">
+                    <h4>🎬 레터박스 (상단/하단 배경)</h4>
+
+                    <div class="effects-grid">
+                        <div class="effect-section">
+                            <h5>상단 배경</h5>
+
+                            <div class="effect-control">
+                                <label>
+                                    <input type="checkbox" id="topBarEnabled" onchange="updateLetterbox()">
+                                    상단 배경 표시
+                                </label>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>높이 (픽셀)</label>
+                                <input type="range" id="topBarHeight" min="0" max="200" value="80" onchange="updateLetterbox()">
+                                <span id="topBarHeightValue">80px</span>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>투명도</label>
+                                <input type="range" id="topBarOpacity" min="0" max="100" value="80" onchange="updateLetterbox()">
+                                <span id="topBarOpacityValue">80%</span>
+                            </div>
+                        </div>
+
+                        <div class="effect-section">
+                            <h5>하단 배경</h5>
+
+                            <div class="effect-control">
+                                <label>
+                                    <input type="checkbox" id="bottomBarEnabled" onchange="updateLetterbox()">
+                                    하단 배경 표시
+                                </label>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>높이 (픽셀)</label>
+                                <input type="range" id="bottomBarHeight" min="0" max="200" value="80" onchange="updateLetterbox()">
+                                <span id="bottomBarHeightValue">80px</span>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>투명도</label>
+                                <input type="range" id="bottomBarOpacity" min="0" max="100" value="80" onchange="updateLetterbox()">
+                                <span id="bottomBarOpacityValue">80%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 제목 설정 -->
+                <div class="subtitle-effects-panel" style="margin-bottom: 20px;">
+                    <h4>📌 제목 설정</h4>
+
+                    <div class="effect-control" style="margin-bottom: 15px;">
+                        <label>제목 텍스트</label>
+                        <input type="text" id="videoTitle" placeholder="제목을 입력하세요"
+                               oninput="updateTitle()"
+                               style="width: 100%; padding: 10px; border: 2px solid #dee2e6; border-radius: 8px; font-size: 1em;">
+                    </div>
+
+                    <div class="effects-grid">
+                        <div class="effect-section">
+                            <h5>제목 스타일</h5>
+
+                            <div class="effect-control">
+                                <label>글꼴 크기</label>
+                                <select id="titleFontSize" onchange="updateTitle()">
+                                    <option value="1.5em">작게</option>
+                                    <option value="2em" selected>보통</option>
+                                    <option value="2.5em">크게</option>
+                                    <option value="3em">매우 크게</option>
+                                </select>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>글꼴 색상</label>
+                                <input type="color" id="titleColor" value="#ffffff" onchange="updateTitle()">
+                            </div>
+
+                            <div class="effect-control">
+                                <label>배경색</label>
+                                <input type="color" id="titleBgColor" value="#667eea" onchange="updateTitle()">
+                                <input type="range" id="titleBgOpacity" min="0" max="100" value="90" onchange="updateTitle()">
+                                <span id="titleBgOpacityValue">90%</span>
+                            </div>
+                        </div>
+
+                        <div class="effect-section">
+                            <h5>제목 위치</h5>
+
+                            <div class="effect-control">
+                                <label>표시 위치</label>
+                                <select id="titlePosition" onchange="updateTitle()">
+                                    <option value="top" selected>상단</option>
+                                    <option value="center">중앙</option>
+                                    <option value="bottom">하단</option>
+                                </select>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>그림자</label>
+                                <select id="titleShadow" onchange="updateTitle()">
+                                    <option value="none">없음</option>
+                                    <option value="2px 2px 4px rgba(0,0,0,0.9)" selected>기본</option>
+                                    <option value="3px 3px 8px rgba(0,0,0,1)">진하게</option>
+                                    <option value="0 0 15px rgba(255,255,255,0.8)">빛나는</option>
+                                </select>
+                            </div>
+
+                            <div class="effect-control">
+                                <button onclick="clearTitle()" class="btn btn-secondary">제목 지우기</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 자막 효과 설정 -->
+                <div class="subtitle-effects-panel">
+                    <h4>🎨 자막 효과 설정</h4>
+
+                    <div class="effects-grid">
+                        <!-- 정적 효과 -->
+                        <div class="effect-section">
+                            <h5>정적 효과</h5>
+
+                            <div class="effect-control">
+                                <label>글꼴 크기</label>
+                                <select id="fontSize" onchange="updateSubtitleStyle()">
+                                    <option value="1em">작게</option>
+                                    <option value="1.5em" selected>보통</option>
+                                    <option value="2em">크게</option>
+                                    <option value="2.5em">매우 크게</option>
+                                    <option value="3em">거대</option>
+                                </select>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>글꼴 색상</label>
+                                <input type="color" id="fontColor" value="#ffffff" onchange="updateSubtitleStyle()">
+                            </div>
+
+                            <div class="effect-control">
+                                <label>배경색</label>
+                                <input type="color" id="bgColor" value="#000000" onchange="updateSubtitleStyle()">
+                                <input type="range" id="bgOpacity" min="0" max="100" value="80" onchange="updateSubtitleStyle()">
+                                <span id="bgOpacityValue">80%</span>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>테두리</label>
+                                <select id="borderStyle" onchange="updateSubtitleStyle()">
+                                    <option value="none">없음</option>
+                                    <option value="2px solid white">흰색 테두리</option>
+                                    <option value="2px solid black">검정 테두리</option>
+                                    <option value="3px double white">이중 테두리</option>
+                                    <option value="2px dashed yellow">노란 점선</option>
+                                </select>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>그림자</label>
+                                <select id="textShadow" onchange="updateSubtitleStyle()">
+                                    <option value="none">없음</option>
+                                    <option value="2px 2px 4px rgba(0,0,0,0.9)" selected>기본</option>
+                                    <option value="3px 3px 6px rgba(0,0,0,1)">진하게</option>
+                                    <option value="0 0 10px rgba(255,255,255,0.8)">빛나는</option>
+                                    <option value="5px 5px 0 rgba(0,0,0,0.5)">3D</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 동적 효과 -->
+                        <div class="effect-section">
+                            <h5>동적 효과</h5>
+
+                            <div class="effect-control">
+                                <label>애니메이션</label>
+                                <select id="animation" onchange="updateSubtitleStyle()">
+                                    <option value="none">없음</option>
+                                    <option value="fadeIn">페이드 인</option>
+                                    <option value="slideUp">슬라이드 업</option>
+                                    <option value="slideDown">슬라이드 다운</option>
+                                    <option value="zoomIn">확대</option>
+                                    <option value="bounce">바운스</option>
+                                </select>
+                            </div>
+
+                            <div class="effect-control">
+                                <label>속도</label>
+                                <select id="animationSpeed" onchange="updateSubtitleStyle()">
+                                    <option value="0.3s">빠르게</option>
+                                    <option value="0.5s" selected>보통</option>
+                                    <option value="1s">느리게</option>
+                                </select>
+                            </div>
+
+                            <div class="effect-control">
+                                <button onclick="resetSubtitleEffects()" class="btn btn-secondary">효과 초기화</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -48,6 +334,7 @@
                         <button onclick="selectAll()" class="btn btn-secondary">전체 선택</button>
                         <button onclick="deselectAll()" class="btn btn-secondary">전체 해제</button>
                         <button onclick="invertSelection()" class="btn btn-secondary">선택 반전</button>
+                        <button onclick="mergeSelectedSubtitles()" class="btn btn-secondary">🔗 행 합치기</button>
                         <button onclick="downloadEditedSubtitles()" class="btn btn-primary">💾 수정된 자막 다운로드</button>
                         <button onclick="renderVideo()" class="btn btn-success">✂️ 선택된 구간으로 렌더링</button>
                     </div>
@@ -77,7 +364,9 @@
             <section class="download-section" id="downloadSection" style="display: none;">
                 <h3>✅ 렌더링 완료!</h3>
                 <button onclick="downloadVideo()" class="btn btn-success btn-large">💾 편집된 비디오 다운로드</button>
-                <video id="resultPlayer" controls width="100%"></video>
+                <div class="video-container">
+                    <video id="resultPlayer" controls width="100%"></video>
+                </div>
             </section>
         </main>
     </div>
