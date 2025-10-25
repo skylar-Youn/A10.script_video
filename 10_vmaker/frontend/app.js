@@ -1984,6 +1984,11 @@ function loadState() {
             // 비디오 메타데이터 업데이트
             player.onloadedmetadata = () => {
                 document.getElementById('duration').textContent = formatTime(player.duration);
+
+                // 타임라인 다시 렌더링 (공백 블록 추가를 위해)
+                if (subtitles.length > 0) {
+                    renderTimeline();
+                }
             };
 
             // 비디오 재생 시 제목 애니메이션 다시 실행
@@ -2431,6 +2436,11 @@ async function uploadVideo() {
             // 비디오 메타데이터 업데이트
             player.onloadedmetadata = () => {
                 document.getElementById('duration').textContent = formatTime(player.duration);
+
+                // 타임라인 다시 렌더링 (공백 블록 추가를 위해)
+                if (subtitles.length > 0) {
+                    renderTimeline();
+                }
             };
 
             // 비디오 재생 시 제목 애니메이션 다시 실행
