@@ -15,6 +15,9 @@ let currentVideoSize = 50; // 기본값: 50%
 let gapBlocks = []; // 공백 구간 정보 {id, start, end, hasVideo, videoFilename, hasAudio, audioFilename}
 let currentGapId = 0; // 공백 블록 ID 카운터
 
+// 업로드된 비디오 정보 (썸네일 포함)
+let uploadedVideos = {}; // {filename: {filename, path, thumbnail}}
+
 // 음악 상태
 let currentAudioPath = '';
 let currentAudioFilename = '';
@@ -2399,6 +2402,31 @@ function showStatus(message, type = 'info') {
 }
 
 // 비디오 업로드
+// 비디오 썸네일 생성
+function generateVideoThumbnail(videoElement) {
+    return new Promise((resolve) => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // 썸네일 크기 설정 (작은 크기로)
+        const width = 80;
+        const height = Math.round((videoElement.videoHeight / videoElement.videoWidth) * width);
+
+        canvas.width = width;
+        canvas.height = height;
+
+        // 비디오의 첫 프레임 캡처 (1초 위치)
+        videoElement.currentTime = 1;
+
+        videoElement.onseeked = () => {
+            ctx.drawImage(videoElement, 0, 0, width, height);
+            const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
+            resolve(thumbnail);
+            videoElement.onseeked = null; // 이벤트 핸들러 제거
+        };
+    });
+}
+
 async function uploadVideo() {
     const fileInput = document.getElementById('videoFile');
     const file = fileInput.files[0];
@@ -2438,8 +2466,21 @@ async function uploadVideo() {
             }
 
             // 비디오 메타데이터 업데이트
-            player.onloadedmetadata = () => {
+            player.onloadedmetadata = async () => {
                 document.getElementById('duration').textContent = formatTime(player.duration);
+
+                // 비디오 썸네일 생성 및 저장
+                try {
+                    const thumbnail = await generateVideoThumbnail(player);
+                    uploadedVideos[data.filename] = {
+                        filename: data.filename,
+                        path: data.path,
+                        thumbnail: thumbnail
+                    };
+                    console.log('✅ 비디오 썸네일 생성 완료:', data.filename);
+                } catch (error) {
+                    console.error('썸네일 생성 실패:', error);
+                }
 
                 // 타임라인 다시 렌더링 (공백 블록 추가를 위해)
                 if (subtitles.length > 0) {
@@ -2611,7 +2652,13 @@ function createSubtitleBlock(sub) {
     // 영상 및 음악 적용 여부 표시
     let indicators = '';
     if (sub.hasVideo) {
-        indicators += '<span class="video-indicator" title="영상 적용됨">🎬</span>';
+        // 썸네일이 있으면 썸네일 표시, 없으면 🎬 아이콘
+        const videoInfo = uploadedVideos[sub.videoFilename];
+        if (videoInfo && videoInfo.thumbnail) {
+            indicators += `<img src="${videoInfo.thumbnail}" class="video-thumbnail" title="영상: ${sub.videoFilename}" alt="비디오 썸네일">`;
+        } else {
+            indicators += '<span class="video-indicator" title="영상 적용됨">🎬</span>';
+        }
     }
     if (sub.hasAudio) {
         indicators += '<span class="audio-indicator" title="음악 적용됨">🎵</span>';
@@ -2673,7 +2720,13 @@ function createGapBlock(gapInfo) {
     // 영상 및 음악 적용 여부 표시
     let indicators = '';
     if (gapInfo.hasVideo) {
-        indicators += '<span class="video-indicator" title="영상 적용됨">🎬</span>';
+        // 썸네일이 있으면 썸네일 표시, 없으면 🎬 아이콘
+        const videoInfo = uploadedVideos[gapInfo.videoFilename];
+        if (videoInfo && videoInfo.thumbnail) {
+            indicators += `<img src="${videoInfo.thumbnail}" class="video-thumbnail" title="영상: ${gapInfo.videoFilename}" alt="비디오 썸네일">`;
+        } else {
+            indicators += '<span class="video-indicator" title="영상 적용됨">🎬</span>';
+        }
     }
     if (gapInfo.hasAudio) {
         indicators += '<span class="audio-indicator" title="음악 적용됨">🎵</span>';

@@ -1431,6 +1431,26 @@ main {
     animation: pulse 2s ease-in-out infinite;
 }
 
+/* 비디오 썸네일 */
+.video-thumbnail {
+    width: 50px;
+    height: 28px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 2px solid #667eea;
+    margin: 0 8px;
+    display: inline-block;
+    vertical-align: middle;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease;
+}
+
+.video-thumbnail:hover {
+    transform: scale(1.2);
+    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+    cursor: pointer;
+}
+
 .no-video-indicator {
     font-size: 1.5em;
     margin: 0 8px;
