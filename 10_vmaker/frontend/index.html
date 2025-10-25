@@ -143,7 +143,10 @@
                             <button onclick="playSubtitleTimeline()" class="btn btn-success">▶️ 자막 재생</button>
                             <button onclick="stopSubtitleTimeline()" class="btn btn-danger" style="display: none;" id="stopTimelineBtn">⏹️ 정지</button>
                             <button onclick="downloadEditedSubtitles()" class="btn btn-primary">💾 수정된 자막 다운로드</button>
-                            <button onclick="renderVideo()" class="btn btn-success">✂️ 선택된 구간으로 렌더링</button>
+                            <button onclick="saveProject()" class="btn btn-info">💾 프로젝트 저장</button>
+                            <button onclick="document.getElementById('projectFileInput').click()" class="btn btn-info">📂 프로젝트 불러오기</button>
+                            <input type="file" id="projectFileInput" accept=".json" style="display: none;" onchange="loadProject(event)">
+                            <button onclick="renderVideo()" class="btn btn-success">🎬 MP4로 출력</button>
                         </div>
                     </div>
 

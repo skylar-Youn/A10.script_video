@@ -3160,8 +3160,8 @@ function updateTimelineInfo() {
 
 // 비디오 렌더링
 async function renderVideo() {
-    if (selectedIds.size === 0) {
-        showStatus('최소 1개 이상의 자막 구간을 선택해주세요.', 'error');
+    if (subtitles.length === 0) {
+        showStatus('자막이 없습니다. 먼저 자막을 업로드해주세요.', 'error');
         return;
     }
 
@@ -3174,23 +3174,42 @@ async function renderVideo() {
     document.getElementById('renderSection').style.display = 'block';
     document.getElementById('downloadSection').style.display = 'none';
 
-    showStatus(`${selectedIds.size}개 구간 렌더링 시작...`, 'info');
+    showStatus(`MP4 렌더링 시작...`, 'info');
 
     // 진행바 애니메이션
     const progressBar = document.getElementById('progressBar');
-    progressBar.style.width = '30%';
+    progressBar.style.width = '10%';
 
     try {
-        const response = await fetch(`${API_BASE}/api/editor/render`, {
+        // 전체 프로젝트 데이터 전송
+        const projectData = {
+            version: '1.0',
+            currentVideoPath,
+            currentVideoFilename,
+            currentAudioPath,
+            currentAudioFilename,
+            subtitles,
+            gapBlocks,
+            selectedIds: Array.from(selectedIds),
+            subtitleEffects,
+            videoTitleSettings,
+            letterboxSettings,
+            coverBoxSettings,
+            videoEffects,
+            imageOverlays,
+            audioSettings,
+            currentAspectRatio,
+            currentVideoSize
+        };
+
+        progressBar.style.width = '30%';
+
+        const response = await fetch(`${API_BASE}/api/editor/render-full`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                video_path: currentVideoPath,
-                selected_ids: Array.from(selectedIds).sort((a, b) => a - b),
-                output_path: 'output.mp4'
-            })
+            body: JSON.stringify(projectData)
         });
 
         progressBar.style.width = '80%';
@@ -3269,6 +3288,109 @@ function downloadEditedSubtitles() {
     URL.revokeObjectURL(url);
 
     showStatus('수정된 자막 파일이 다운로드되었습니다.', 'success');
+}
+
+// 프로젝트 저장 (JSON 파일로 다운로드)
+function saveProject() {
+    const projectData = {
+        version: '1.0',
+        timestamp: Date.now(),
+        projectName: `VMaker_Project_${new Date().toISOString().slice(0,10)}`,
+        currentVideoPath,
+        currentVideoFilename,
+        currentSubtitlePath,
+        currentAudioPath,
+        currentAudioFilename,
+        subtitles,
+        gapBlocks,
+        selectedIds: Array.from(selectedIds),
+        currentAspectRatio,
+        currentVideoSize,
+        subtitleEffects,
+        videoTitleSettings,
+        letterboxSettings,
+        coverBoxSettings,
+        panelStates,
+        playerSettings,
+        videoEffects,
+        imageOverlays,
+        selectedImageId,
+        currentImageId,
+        audioSettings,
+        uploadedVideos  // 썸네일 데이터 포함
+    };
+
+    // JSON 파일로 다운로드
+    const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectData.projectName}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showStatus('프로젝트가 저장되었습니다.', 'success');
+}
+
+// 프로젝트 불러오기 (JSON 파일에서)
+function loadProject(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const projectData = JSON.parse(e.target.result);
+
+            // 프로젝트 데이터 복원
+            currentVideoPath = projectData.currentVideoPath || '';
+            currentVideoFilename = projectData.currentVideoFilename || '';
+            currentSubtitlePath = projectData.currentSubtitlePath || '';
+            currentAudioPath = projectData.currentAudioPath || '';
+            currentAudioFilename = projectData.currentAudioFilename || '';
+            subtitles = projectData.subtitles || [];
+            gapBlocks = projectData.gapBlocks || [];
+            selectedIds = new Set(projectData.selectedIds || []);
+            currentAspectRatio = projectData.currentAspectRatio || 'youtube';
+            currentVideoSize = projectData.currentVideoSize || 50;
+
+            // 효과 설정 복원
+            if (projectData.subtitleEffects) subtitleEffects = projectData.subtitleEffects;
+            if (projectData.videoTitleSettings) videoTitleSettings = projectData.videoTitleSettings;
+            if (projectData.letterboxSettings) letterboxSettings = projectData.letterboxSettings;
+            if (projectData.coverBoxSettings) coverBoxSettings = projectData.coverBoxSettings;
+            if (projectData.panelStates) panelStates = projectData.panelStates;
+            if (projectData.playerSettings) playerSettings = projectData.playerSettings;
+            if (projectData.videoEffects) videoEffects = projectData.videoEffects;
+            if (projectData.imageOverlays) imageOverlays = projectData.imageOverlays;
+            if (projectData.selectedImageId) selectedImageId = projectData.selectedImageId;
+            if (projectData.currentImageId) currentImageId = projectData.currentImageId;
+            if (projectData.audioSettings) audioSettings = projectData.audioSettings;
+            if (projectData.uploadedVideos) uploadedVideos = projectData.uploadedVideos;
+
+            // UI 업데이트
+            if (subtitles.length > 0) {
+                document.getElementById('timelineSection').style.display = 'block';
+                renderTimeline();
+            }
+
+            // localStorage에도 저장
+            saveState();
+
+            showStatus(`프로젝트가 불러와졌습니다: ${projectData.projectName || file.name}`, 'success');
+
+        } catch (error) {
+            showStatus(`프로젝트 불러오기 실패: ${error.message}`, 'error');
+            console.error('Project load error:', error);
+        }
+    };
+
+    reader.readAsText(file);
+
+    // 파일 input 초기화 (같은 파일을 다시 선택할 수 있도록)
+    event.target.value = '';
 }
 
 // 페이지 로드 시
