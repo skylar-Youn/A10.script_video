@@ -2518,65 +2518,16 @@ function renderTimeline() {
     const timeline = document.getElementById('timeline');
     timeline.innerHTML = '';
 
-    subtitles.forEach(sub => {
-        const block = document.createElement('div');
-        block.className = 'subtitle-block';
-        block.dataset.id = sub.id;
+    // 모든 블록 (자막 + 공백) 생성
+    const allBlocks = createTimelineBlocks();
 
-        const duration = sub.end - sub.start;
+    // 시간순으로 정렬
+    allBlocks.sort((a, b) => a.startTime - b.startTime);
 
-        // 영상 및 음악 적용 여부 표시
-        let indicators = '';
-        if (sub.hasVideo) {
-            indicators += '<span class="video-indicator" title="영상 적용됨">🎬</span>';
-        }
-        if (sub.hasAudio) {
-            indicators += '<span class="audio-indicator" title="음악 적용됨">🎵</span>';
-        }
-        if (!sub.hasVideo && !sub.hasAudio) {
-            indicators = '<span class="no-media-indicator" title="자막만">📝</span>';
-        }
-
-        block.innerHTML = `
-            <input type="checkbox" class="subtitle-checkbox" ${selectedIds.has(sub.id) ? 'checked' : ''}>
-            ${indicators}
-            <div class="subtitle-info">
-                <div class="subtitle-time">${formatTime(sub.start)} - ${formatTime(sub.end)}</div>
-                <div class="subtitle-text-container">
-                    <div class="subtitle-text" data-id="${sub.id}">${sub.text}</div>
-                    <button class="edit-btn" onclick="editSubtitleText(${sub.id}, event)" title="자막 수정 (Enter:줄바꿈, Backspace:줄 합치기, Shift+Enter:분할)">✏️</button>
-                </div>
-            </div>
-            <div class="subtitle-duration">${duration.toFixed(1)}s</div>
-        `;
-
-        // 클릭 이벤트 (편집 버튼과 체크박스 제외)
-        block.onclick = (e) => {
-            if (e.target.type !== 'checkbox' && !e.target.classList.contains('edit-btn')) {
-                toggleSubtitle(sub.id);
-            }
-        };
-
-        // 체크박스 이벤트
-        const checkbox = block.querySelector('.subtitle-checkbox');
-        checkbox.onchange = () => {
-            toggleSubtitle(sub.id);
-        };
-
-        // 더블 클릭으로 해당 시간으로 이동
-        block.ondblclick = (e) => {
-            if (!e.target.classList.contains('edit-btn')) {
-                const player = document.getElementById('videoPlayer');
-                player.currentTime = sub.start;
-                player.play();
-            }
-        };
-
-        timeline.appendChild(block);
+    // DOM에 추가
+    allBlocks.forEach(item => {
+        timeline.appendChild(item.element);
     });
-
-    // 마지막 자막 이후 영상 종료까지 공백 블록 추가
-    addGapBlocksToTimeline(timeline);
 
     updateTimelineInfo();
 
@@ -2584,30 +2535,102 @@ function renderTimeline() {
     setupDragAndDrop();
 }
 
-// 타임라인에 공백 블록 추가 (마지막 자막 ~ 영상 종료)
-function addGapBlocksToTimeline(timeline) {
+// 타임라인 블록 생성 (자막 + 공백)
+function createTimelineBlocks() {
+    const blocks = [];
     const videoPlayer = document.getElementById('videoPlayer');
-
-    // 영상이 로드되지 않았으면 건너뜀
-    if (!videoPlayer || !videoPlayer.duration || isNaN(videoPlayer.duration)) {
-        return;
-    }
-
-    const videoDuration = videoPlayer.duration;
+    const videoDuration = videoPlayer && videoPlayer.duration && !isNaN(videoPlayer.duration) ? videoPlayer.duration : 0;
 
     if (subtitles.length === 0) {
-        // 자막이 없으면 전체 영상 구간을 공백으로 표시
-        const gapBlock = createGapBlock(0, videoDuration, currentVideoFilename);
-        timeline.appendChild(gapBlock);
-    } else {
-        // 마지막 자막 이후 공백 확인
-        const lastSubtitle = subtitles[subtitles.length - 1];
-
-        if (lastSubtitle.end < videoDuration - 0.1) { // 0.1초 이상 차이가 있을 때만
-            const gapBlock = createGapBlock(lastSubtitle.end, videoDuration, currentVideoFilename);
-            timeline.appendChild(gapBlock);
+        // 자막이 없으면 전체 영상 구간을 공백으로
+        if (videoDuration > 0) {
+            const gapBlock = createGapBlock(0, videoDuration, currentVideoFilename);
+            blocks.push({ startTime: 0, endTime: videoDuration, element: gapBlock, isGap: true });
         }
+        return blocks;
     }
+
+    let currentTime = 0;
+
+    subtitles.forEach((sub, index) => {
+        // 이전 구간과 현재 자막 사이에 공백이 있으면 공백 블록 추가
+        if (sub.start > currentTime + 0.01) { // 0.01초 이상 차이
+            const gapBlock = createGapBlock(currentTime, sub.start, currentVideoFilename);
+            blocks.push({ startTime: currentTime, endTime: sub.start, element: gapBlock, isGap: true });
+        }
+
+        // 자막 블록 추가
+        const subtitleBlock = createSubtitleBlock(sub);
+        blocks.push({ startTime: sub.start, endTime: sub.end, element: subtitleBlock, isGap: false });
+
+        currentTime = sub.end;
+    });
+
+    // 마지막 자막 이후 공백
+    if (videoDuration > 0 && currentTime < videoDuration - 0.01) {
+        const gapBlock = createGapBlock(currentTime, videoDuration, currentVideoFilename);
+        blocks.push({ startTime: currentTime, endTime: videoDuration, element: gapBlock, isGap: true });
+    }
+
+    return blocks;
+}
+
+// 자막 블록 생성
+function createSubtitleBlock(sub) {
+    const block = document.createElement('div');
+    block.className = 'subtitle-block';
+    block.dataset.id = sub.id;
+
+    const duration = sub.end - sub.start;
+
+    // 영상 및 음악 적용 여부 표시
+    let indicators = '';
+    if (sub.hasVideo) {
+        indicators += '<span class="video-indicator" title="영상 적용됨">🎬</span>';
+    }
+    if (sub.hasAudio) {
+        indicators += '<span class="audio-indicator" title="음악 적용됨">🎵</span>';
+    }
+    if (!sub.hasVideo && !sub.hasAudio) {
+        indicators = '<span class="no-media-indicator" title="자막만">📝</span>';
+    }
+
+    block.innerHTML = `
+        <input type="checkbox" class="subtitle-checkbox" ${selectedIds.has(sub.id) ? 'checked' : ''}>
+        ${indicators}
+        <div class="subtitle-info">
+            <div class="subtitle-time">${formatTime(sub.start)} - ${formatTime(sub.end)}</div>
+            <div class="subtitle-text-container">
+                <div class="subtitle-text" data-id="${sub.id}">${sub.text}</div>
+                <button class="edit-btn" onclick="editSubtitleText(${sub.id}, event)" title="자막 수정 (Enter:줄바꿈, Backspace:줄 합치기, Shift+Enter:분할)">✏️</button>
+            </div>
+        </div>
+        <div class="subtitle-duration">${duration.toFixed(1)}s</div>
+    `;
+
+    // 클릭 이벤트 (편집 버튼과 체크박스 제외)
+    block.onclick = (e) => {
+        if (e.target.type !== 'checkbox' && !e.target.classList.contains('edit-btn')) {
+            toggleSubtitle(sub.id);
+        }
+    };
+
+    // 체크박스 이벤트
+    const checkbox = block.querySelector('.subtitle-checkbox');
+    checkbox.onchange = () => {
+        toggleSubtitle(sub.id);
+    };
+
+    // 더블 클릭으로 해당 시간으로 이동
+    block.ondblclick = (e) => {
+        if (!e.target.classList.contains('edit-btn')) {
+            const player = document.getElementById('videoPlayer');
+            player.currentTime = sub.start;
+            player.play();
+        }
+    };
+
+    return block;
 }
 
 // 공백 블록 생성
