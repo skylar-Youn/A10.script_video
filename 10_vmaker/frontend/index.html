@@ -31,6 +31,11 @@
                     <input type="file" id="imageFile" accept="image/*">
                     <p class="upload-hint">파일을 선택하면 자동으로 업로드됩니다</p>
                 </div>
+                <div class="upload-box">
+                    <h3>🎵 음악 업로드</h3>
+                    <input type="file" id="audioFile" accept="audio/*">
+                    <p class="upload-hint">MP3, WAV, OGG 등 지원</p>
+                </div>
             </section>
 
             <!-- 상태 표시 -->
@@ -60,7 +65,7 @@
                     </div>
                 </div>
                 <div class="video-container" id="videoContainer" data-aspect="youtube">
-                    <video id="videoPlayer" controls width="100%"></video>
+                    <video id="videoPlayer" width="100%"></video>
                     <div id="coverBox" class="cover-box"></div>
                     <div id="topBar" class="letterbox-bar top-bar"></div>
                     <div id="bottomBar" class="letterbox-bar bottom-bar"></div>
@@ -68,9 +73,76 @@
                     <div id="titleOverlay" class="title-overlay"></div>
                     <div id="subtitleOverlay" class="subtitle-overlay"></div>
                 </div>
-                <div class="player-info">
-                    <span id="currentTime">00:00</span> / <span id="duration">00:00</span>
+                <div class="player-controls">
+                    <button id="playPauseBtn" class="control-btn" onclick="togglePlayPause()">
+                        <span id="playIcon">▶️</span>
+                    </button>
+                    <input type="range" id="seekBar" class="seek-bar" min="0" max="100" value="0" step="0.1" oninput="seekVideo(this.value)">
+                    <div class="player-info">
+                        <span id="currentTime">00:00</span> / <span id="duration">00:00</span>
+                    </div>
                 </div>
+
+                <!-- 음악 플레이어 섹션 -->
+                <div id="audioPlayerSection" class="audio-player-section" style="display: none; margin-top: 15px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                        <h4 style="margin: 0;">🎵 배경 음악</h4>
+                        <button onclick="removeAudio()" class="btn btn-danger" style="padding: 4px 12px; font-size: 0.85em;">
+                            🗑️ 제거
+                        </button>
+                    </div>
+                    <audio id="audioPlayer" style="width: 100%; margin-bottom: 10px;"></audio>
+                    <div class="audio-controls">
+                        <div class="effect-control">
+                            <label>🔊 볼륨</label>
+                            <input type="range" id="audioVolume" min="0" max="100" value="50" oninput="updateAudioVolume(this.value)">
+                            <span id="audioVolumeValue">50%</span>
+                        </div>
+                        <div class="effect-control">
+                            <label>
+                                <input type="checkbox" id="audioLoop" onchange="toggleAudioLoop(this.checked)">
+                                🔁 반복 재생
+                            </label>
+                        </div>
+                        <div class="effect-control">
+                            <label>
+                                <input type="checkbox" id="audioSync" checked onchange="toggleAudioSync(this.checked)">
+                                🔗 비디오와 동기화
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 타임라인 -->
+                <section class="timeline-section" id="timelineSection" style="display: none;">
+                    <div class="timeline-header">
+                        <h3>타임라인 (자막 기반)</h3>
+                        <div class="timeline-controls">
+                            <button onclick="selectAll()" class="btn btn-secondary">전체 선택</button>
+                            <button onclick="deselectAll()" class="btn btn-secondary">전체 해제</button>
+                            <button onclick="invertSelection()" class="btn btn-secondary">선택 반전</button>
+                            <button onclick="mergeSelectedSubtitles()" class="btn btn-secondary">🔗 행 합치기</button>
+                            <button onclick="applyVideoToSubtitles()" class="btn btn-primary">🎬 영상 적용</button>
+                            <button onclick="applyAudioToSubtitles()" class="btn btn-primary">🎵 음악 적용</button>
+                            <button onclick="removeVideoFromSubtitles()" class="btn btn-warning">🎬❌ 영상 제거</button>
+                            <button onclick="removeAudioFromSubtitles()" class="btn btn-warning">🎵❌ 음악 제거</button>
+                            <button onclick="playSubtitleTimeline()" class="btn btn-success">▶️ 자막 재생</button>
+                            <button onclick="stopSubtitleTimeline()" class="btn btn-danger" style="display: none;" id="stopTimelineBtn">⏹️ 정지</button>
+                            <button onclick="downloadEditedSubtitles()" class="btn btn-primary">💾 수정된 자막 다운로드</button>
+                            <button onclick="renderVideo()" class="btn btn-success">✂️ 선택된 구간으로 렌더링</button>
+                        </div>
+                    </div>
+
+                    <div id="timeline" class="timeline">
+                        <!-- 자막 블록들이 여기에 동적으로 추가됩니다 -->
+                    </div>
+
+                    <div class="timeline-info">
+                        <span>총 자막: <span id="totalSubtitles">0</span>개</span>
+                        <span>선택됨: <span id="selectedCount">0</span>개</span>
+                        <span>예상 길이: <span id="estimatedDuration">00:00</span></span>
+                    </div>
+                </section>
 
                 <!-- 글자 가림 박스 설정 -->
                 <div class="subtitle-effects-panel" style="margin-bottom: 20px;">
@@ -424,6 +496,7 @@
 
                             <div class="effect-control">
                                 <button onclick="resetSubtitleEffects()" class="btn btn-secondary">효과 초기화</button>
+                                <button onclick="applySubtitleEffects()" class="btn btn-primary" style="margin-left: 10px;">✨ 선택한 자막에 적용</button>
                             </div>
                         </div>
 
@@ -618,13 +691,13 @@
 
                             <div class="effect-control">
                                 <label>너비 (%)</label>
-                                <input type="range" id="imageWidth" min="5" max="100" value="30" onchange="updateImageSettings()">
+                                <input type="range" id="imageWidth" min="5" max="150" value="30" onchange="updateImageSettings()">
                                 <span id="imageWidthValue">30%</span>
                             </div>
 
                             <div class="effect-control">
                                 <label>높이 (%)</label>
-                                <input type="range" id="imageHeight" min="5" max="100" value="30" onchange="updateImageSettings()">
+                                <input type="range" id="imageHeight" min="5" max="150" value="30" onchange="updateImageSettings()">
                                 <span id="imageHeightValue">30%</span>
                             </div>
 
@@ -789,31 +862,6 @@
                         </div>
                     </div>
                     </div>
-                </div>
-            </section>
-
-            <!-- 타임라인 -->
-            <section class="timeline-section" id="timelineSection" style="display: none;">
-                <div class="timeline-header">
-                    <h3>타임라인 (자막 기반)</h3>
-                    <div class="timeline-controls">
-                        <button onclick="selectAll()" class="btn btn-secondary">전체 선택</button>
-                        <button onclick="deselectAll()" class="btn btn-secondary">전체 해제</button>
-                        <button onclick="invertSelection()" class="btn btn-secondary">선택 반전</button>
-                        <button onclick="mergeSelectedSubtitles()" class="btn btn-secondary">🔗 행 합치기</button>
-                        <button onclick="downloadEditedSubtitles()" class="btn btn-primary">💾 수정된 자막 다운로드</button>
-                        <button onclick="renderVideo()" class="btn btn-success">✂️ 선택된 구간으로 렌더링</button>
-                    </div>
-                </div>
-
-                <div id="timeline" class="timeline">
-                    <!-- 자막 블록들이 여기에 동적으로 추가됩니다 -->
-                </div>
-
-                <div class="timeline-info">
-                    <span>총 자막: <span id="totalSubtitles">0</span>개</span>
-                    <span>선택됨: <span id="selectedCount">0</span>개</span>
-                    <span>예상 길이: <span id="estimatedDuration">00:00</span></span>
                 </div>
             </section>
 
