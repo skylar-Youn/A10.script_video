@@ -11,6 +11,10 @@ let currentVideoFilename = '';
 let currentAspectRatio = 'youtube'; // 기본값: 유튜브 비율
 let currentVideoSize = 50; // 기본값: 50%
 
+// 공백 블록 관리
+let gapBlocks = []; // 공백 구간 정보 {id, start, end, hasVideo, videoFilename, hasAudio, audioFilename}
+let currentGapId = 0; // 공백 블록 ID 카운터
+
 // 음악 상태
 let currentAudioPath = '';
 let currentAudioFilename = '';
@@ -2541,10 +2545,16 @@ function createTimelineBlocks() {
     const videoPlayer = document.getElementById('videoPlayer');
     const videoDuration = videoPlayer && videoPlayer.duration && !isNaN(videoPlayer.duration) ? videoPlayer.duration : 0;
 
+    // 공백 블록 배열 초기화
+    gapBlocks = [];
+    currentGapId = 0;
+
     if (subtitles.length === 0) {
         // 자막이 없으면 전체 영상 구간을 공백으로
         if (videoDuration > 0) {
-            const gapBlock = createGapBlock(0, videoDuration, currentVideoFilename);
+            const gapInfo = { id: ++currentGapId, start: 0, end: videoDuration, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
+            gapBlocks.push(gapInfo);
+            const gapBlock = createGapBlock(gapInfo);
             blocks.push({ startTime: 0, endTime: videoDuration, element: gapBlock, isGap: true });
         }
         return blocks;
@@ -2555,7 +2565,9 @@ function createTimelineBlocks() {
     subtitles.forEach((sub, index) => {
         // 이전 구간과 현재 자막 사이에 공백이 있으면 공백 블록 추가
         if (sub.start > currentTime + 0.01) { // 0.01초 이상 차이
-            const gapBlock = createGapBlock(currentTime, sub.start, currentVideoFilename);
+            const gapInfo = { id: ++currentGapId, start: currentTime, end: sub.start, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
+            gapBlocks.push(gapInfo);
+            const gapBlock = createGapBlock(gapInfo);
             blocks.push({ startTime: currentTime, endTime: sub.start, element: gapBlock, isGap: true });
         }
 
@@ -2568,7 +2580,9 @@ function createTimelineBlocks() {
 
     // 마지막 자막 이후 공백
     if (videoDuration > 0 && currentTime < videoDuration - 0.01) {
-        const gapBlock = createGapBlock(currentTime, videoDuration, currentVideoFilename);
+        const gapInfo = { id: ++currentGapId, start: currentTime, end: videoDuration, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
+        gapBlocks.push(gapInfo);
+        const gapBlock = createGapBlock(gapInfo);
         blocks.push({ startTime: currentTime, endTime: videoDuration, element: gapBlock, isGap: true });
     }
 
@@ -2634,20 +2648,34 @@ function createSubtitleBlock(sub) {
 }
 
 // 공백 블록 생성
-function createGapBlock(startTime, endTime, videoFilename) {
+function createGapBlock(gapInfo) {
     const block = document.createElement('div');
     block.className = 'subtitle-block gap-block';
     block.dataset.isGap = 'true';
-    block.dataset.start = startTime;
-    block.dataset.end = endTime;
-    block.dataset.videoFilename = videoFilename;
+    block.dataset.gapId = gapInfo.id;
+    block.dataset.start = gapInfo.start;
+    block.dataset.end = gapInfo.end;
+    block.dataset.videoFilename = currentVideoFilename;
 
-    const duration = endTime - startTime;
+    const duration = gapInfo.end - gapInfo.start;
+
+    // 영상 및 음악 적용 여부 표시
+    let indicators = '';
+    if (gapInfo.hasVideo) {
+        indicators += '<span class="video-indicator" title="영상 적용됨">🎬</span>';
+    }
+    if (gapInfo.hasAudio) {
+        indicators += '<span class="audio-indicator" title="음악 적용됨">🎵</span>';
+    }
+    if (!gapInfo.hasVideo && !gapInfo.hasAudio) {
+        indicators = '<span class="no-media-indicator" title="공백 구간">⬜</span>';
+    }
 
     block.innerHTML = `
-        <div style="opacity: 0.5; pointer-events: none;">⬜</div>
+        <input type="checkbox" class="subtitle-checkbox" ${selectedIds.has(`gap-${gapInfo.id}`) ? 'checked' : ''}>
+        ${indicators}
         <div class="subtitle-info" style="opacity: 0.7;">
-            <div class="subtitle-time">${formatTime(startTime)} - ${formatTime(endTime)}</div>
+            <div class="subtitle-time">${formatTime(gapInfo.start)} - ${formatTime(gapInfo.end)}</div>
             <div class="subtitle-text-container">
                 <div class="subtitle-text" style="font-style: italic; color: #888;">[영상 계속 재생]</div>
             </div>
@@ -2655,7 +2683,38 @@ function createGapBlock(startTime, endTime, videoFilename) {
         <div class="subtitle-duration" style="opacity: 0.7;">${duration.toFixed(1)}s</div>
     `;
 
+    // 클릭 이벤트 (체크박스 제외)
+    block.onclick = (e) => {
+        if (e.target.type !== 'checkbox') {
+            toggleGap(gapInfo.id);
+        }
+    };
+
+    // 체크박스 이벤트
+    const checkbox = block.querySelector('.subtitle-checkbox');
+    checkbox.onchange = () => {
+        toggleGap(gapInfo.id);
+    };
+
+    // 더블 클릭으로 해당 시간으로 이동
+    block.ondblclick = () => {
+        const player = document.getElementById('videoPlayer');
+        player.currentTime = gapInfo.start;
+        player.play();
+    };
+
     return block;
+}
+
+// 공백 블록 선택/해제 토글
+function toggleGap(gapId) {
+    const gapKey = `gap-${gapId}`;
+    if (selectedIds.has(gapKey)) {
+        selectedIds.delete(gapKey);
+    } else {
+        selectedIds.add(gapKey);
+    }
+    renderTimeline();
 }
 
 // ==================== 드래그 앤 드롭 기능 ====================
@@ -2708,12 +2767,24 @@ function setupDragAndDrop() {
             block.style.background = '';
 
             const mediaType = e.dataTransfer.getData('mediaType');
-            const subtitleId = parseInt(block.dataset.id);
+            const isGap = block.dataset.isGap === 'true';
 
-            if (mediaType === 'video') {
-                applyVideoToSubtitle(subtitleId);
-            } else if (mediaType === 'audio') {
-                applyAudioToSubtitle(subtitleId);
+            if (isGap) {
+                // 공백 블록
+                const gapId = parseInt(block.dataset.gapId);
+                if (mediaType === 'video') {
+                    applyVideoToGap(gapId);
+                } else if (mediaType === 'audio') {
+                    applyAudioToGap(gapId);
+                }
+            } else {
+                // 자막 블록
+                const subtitleId = parseInt(block.dataset.id);
+                if (mediaType === 'video') {
+                    applyVideoToSubtitle(subtitleId);
+                } else if (mediaType === 'audio') {
+                    applyAudioToSubtitle(subtitleId);
+                }
             }
         };
     });
@@ -2755,6 +2826,44 @@ function applyAudioToSubtitle(subtitleId) {
     saveState();
 
     showStatus(`"${subtitle.text.substring(0, 20)}..." 자막에 음악이 적용되었습니다.`, 'success');
+}
+
+// 단일 공백 블록에 영상 적용
+function applyVideoToGap(gapId) {
+    if (!currentVideoFilename) {
+        showStatus('먼저 비디오를 업로드해주세요.', 'error');
+        return;
+    }
+
+    const gap = gapBlocks.find(g => g.id === gapId);
+    if (!gap) return;
+
+    gap.hasVideo = true;
+    gap.videoFilename = currentVideoFilename;
+
+    renderTimeline();
+    saveState();
+
+    showStatus(`공백 구간 (${formatTime(gap.start)}-${formatTime(gap.end)})에 영상이 적용되었습니다.`, 'success');
+}
+
+// 단일 공백 블록에 음악 적용
+function applyAudioToGap(gapId) {
+    if (!currentAudioFilename) {
+        showStatus('먼저 음악을 업로드해주세요.', 'error');
+        return;
+    }
+
+    const gap = gapBlocks.find(g => g.id === gapId);
+    if (!gap) return;
+
+    gap.hasAudio = true;
+    gap.audioFilename = currentAudioFilename;
+
+    renderTimeline();
+    saveState();
+
+    showStatus(`공백 구간 (${formatTime(gap.start)}-${formatTime(gap.end)})에 음악이 적용되었습니다.`, 'success');
 }
 
 // 자막 텍스트 편집
@@ -3412,7 +3521,7 @@ function applyVideoToSubtitles() {
     }
 
     if (selectedIds.size === 0) {
-        showStatus('영상을 적용할 자막을 선택해주세요.', 'error');
+        showStatus('영상을 적용할 자막/공백을 선택해주세요.', 'error');
         return;
     }
 
@@ -3426,11 +3535,20 @@ function applyVideoToSubtitles() {
         }
     });
 
+    // 선택된 공백 블록에 영상 정보 추가
+    gapBlocks.forEach(gap => {
+        if (selectedIds.has(`gap-${gap.id}`)) {
+            gap.hasVideo = true;
+            gap.videoFilename = currentVideoFilename;
+            appliedCount++;
+        }
+    });
+
     // 타임라인 다시 렌더링
     renderTimeline();
     saveState();
 
-    showStatus(`${appliedCount}개의 자막에 영상이 적용되었습니다.`, 'success');
+    showStatus(`${appliedCount}개의 구간에 영상이 적용되었습니다.`, 'success');
 }
 
 // 선택된 자막에 음악 적용
@@ -3441,7 +3559,7 @@ function applyAudioToSubtitles() {
     }
 
     if (selectedIds.size === 0) {
-        showStatus('음악을 적용할 자막을 선택해주세요.', 'error');
+        showStatus('음악을 적용할 자막/공백을 선택해주세요.', 'error');
         return;
     }
 
@@ -3455,17 +3573,26 @@ function applyAudioToSubtitles() {
         }
     });
 
+    // 선택된 공백 블록에 음악 정보 추가
+    gapBlocks.forEach(gap => {
+        if (selectedIds.has(`gap-${gap.id}`)) {
+            gap.hasAudio = true;
+            gap.audioFilename = currentAudioFilename;
+            appliedCount++;
+        }
+    });
+
     // 타임라인 다시 렌더링
     renderTimeline();
     saveState();
 
-    showStatus(`${appliedCount}개의 자막에 음악이 적용되었습니다.`, 'success');
+    showStatus(`${appliedCount}개의 구간에 음악이 적용되었습니다.`, 'success');
 }
 
 // 선택된 자막에서 영상 제거
 function removeVideoFromSubtitles() {
     if (selectedIds.size === 0) {
-        showStatus('영상을 제거할 자막을 선택해주세요.', 'error');
+        showStatus('영상을 제거할 자막/공백을 선택해주세요.', 'error');
         return;
     }
 
@@ -3479,8 +3606,17 @@ function removeVideoFromSubtitles() {
         }
     });
 
+    // 선택된 공백 블록에서 영상 정보 제거
+    gapBlocks.forEach(gap => {
+        if (selectedIds.has(`gap-${gap.id}`) && gap.hasVideo) {
+            gap.hasVideo = false;
+            gap.videoFilename = '';
+            removedCount++;
+        }
+    });
+
     if (removedCount === 0) {
-        showStatus('선택한 자막에 적용된 영상이 없습니다.', 'info');
+        showStatus('선택한 구간에 적용된 영상이 없습니다.', 'info');
         return;
     }
 
@@ -3488,13 +3624,13 @@ function removeVideoFromSubtitles() {
     renderTimeline();
     saveState();
 
-    showStatus(`${removedCount}개의 자막에서 영상이 제거되었습니다.`, 'success');
+    showStatus(`${removedCount}개의 구간에서 영상이 제거되었습니다.`, 'success');
 }
 
 // 선택된 자막에서 음악 제거
 function removeAudioFromSubtitles() {
     if (selectedIds.size === 0) {
-        showStatus('음악을 제거할 자막을 선택해주세요.', 'error');
+        showStatus('음악을 제거할 자막/공백을 선택해주세요.', 'error');
         return;
     }
 
@@ -3508,8 +3644,17 @@ function removeAudioFromSubtitles() {
         }
     });
 
+    // 선택된 공백 블록에서 음악 정보 제거
+    gapBlocks.forEach(gap => {
+        if (selectedIds.has(`gap-${gap.id}`) && gap.hasAudio) {
+            gap.hasAudio = false;
+            gap.audioFilename = '';
+            removedCount++;
+        }
+    });
+
     if (removedCount === 0) {
-        showStatus('선택한 자막에 적용된 음악이 없습니다.', 'info');
+        showStatus('선택한 구간에 적용된 음악이 없습니다.', 'info');
         return;
     }
 
@@ -3517,7 +3662,7 @@ function removeAudioFromSubtitles() {
     renderTimeline();
     saveState();
 
-    showStatus(`${removedCount}개의 자막에서 음악이 제거되었습니다.`, 'success');
+    showStatus(`${removedCount}개의 구간에서 음악이 제거되었습니다.`, 'success');
 }
 
 // 자막 타임라인 재생
@@ -3606,12 +3751,19 @@ function playSubtitleBlock(subtitle) {
 
 // 공백 블록 재생 (영상만 계속 재생)
 function playGapBlock(block) {
-    const start = parseFloat(block.dataset.start);
-    const end = parseFloat(block.dataset.end);
-    const videoFilename = block.dataset.videoFilename;
-    const duration = (end - start) * 1000; // ms로 변환
+    const gapId = parseInt(block.dataset.gapId);
+    const gapInfo = gapBlocks.find(g => g.id === gapId);
 
-    console.log(`재생 중: 공백 구간 ${currentTimelineIndex + 1}/${timelineBlocks.length} - ${formatTime(start)} ~ ${formatTime(end)}`);
+    if (!gapInfo) {
+        // 공백 정보를 찾을 수 없으면 다음으로
+        currentTimelineIndex++;
+        playNextBlock();
+        return;
+    }
+
+    const duration = (gapInfo.end - gapInfo.start) * 1000; // ms로 변환
+
+    console.log(`재생 중: 공백 구간 ${currentTimelineIndex + 1}/${timelineBlocks.length} - ${formatTime(gapInfo.start)} ~ ${formatTime(gapInfo.end)}`);
 
     // 자막 숨기기
     const subtitleOverlay = document.getElementById('subtitleOverlay');
@@ -3619,17 +3771,34 @@ function playGapBlock(block) {
         subtitleOverlay.style.display = 'none';
     }
 
-    // 영상 재생
-    const videoPlayer = document.getElementById('videoPlayer');
-    if (videoPlayer && currentVideoFilename === videoFilename) {
-        if (videoPlayer.paused || Math.abs(videoPlayer.currentTime - start) > 0.5) {
-            videoPlayer.currentTime = start;
-        }
-        videoPlayer.play();
-        console.log(`🎬 공백 구간 영상 재생: ${videoFilename} (위치: ${videoPlayer.currentTime.toFixed(2)}s)`);
+    // 음악이 있으면 음악 재생
+    if (gapInfo.hasAudio && gapInfo.audioFilename) {
+        playSubtitleAudio({ audioFilename: gapInfo.audioFilename }, duration);
     }
 
-    showStatus(`▶️ 영상 재생 중 (${currentTimelineIndex + 1}/${timelineBlocks.length}) - 자막 없음`, 'info');
+    // 영상이 있으면 영상 재생
+    if (gapInfo.hasVideo && gapInfo.videoFilename) {
+        const videoPlayer = document.getElementById('videoPlayer');
+        if (videoPlayer && currentVideoFilename === gapInfo.videoFilename) {
+            if (videoPlayer.paused || Math.abs(videoPlayer.currentTime - gapInfo.start) > 0.5) {
+                videoPlayer.currentTime = gapInfo.start;
+            }
+            videoPlayer.play();
+            console.log(`🎬 공백 구간 영상 재생: ${gapInfo.videoFilename} (위치: ${videoPlayer.currentTime.toFixed(2)}s)`);
+        }
+    } else {
+        // 영상이 없으면 기본 영상 계속 재생
+        const videoPlayer = document.getElementById('videoPlayer');
+        if (videoPlayer && currentVideoFilename) {
+            if (videoPlayer.paused || Math.abs(videoPlayer.currentTime - gapInfo.start) > 0.5) {
+                videoPlayer.currentTime = gapInfo.start;
+            }
+            videoPlayer.play();
+            console.log(`🎬 공백 구간 기본 영상 재생 (위치: ${videoPlayer.currentTime.toFixed(2)}s)`);
+        }
+    }
+
+    showStatus(`▶️ 공백 구간 재생 중 (${currentTimelineIndex + 1}/${timelineBlocks.length})`, 'info');
 
     // 다음 블록으로 이동 (duration 후)
     timelinePlaybackTimer = setTimeout(() => {
