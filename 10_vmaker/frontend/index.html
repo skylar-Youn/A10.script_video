@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VMaker - 자막 기반 비디오 편집기</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
@@ -48,6 +48,7 @@
                         <button onclick="selectAll()" class="btn btn-secondary">전체 선택</button>
                         <button onclick="deselectAll()" class="btn btn-secondary">전체 해제</button>
                         <button onclick="invertSelection()" class="btn btn-secondary">선택 반전</button>
+                        <button onclick="downloadEditedSubtitles()" class="btn btn-primary">💾 수정된 자막 다운로드</button>
                         <button onclick="renderVideo()" class="btn btn-success">✂️ 선택된 구간으로 렌더링</button>
                     </div>
                 </div>
@@ -81,6 +82,6 @@
         </main>
     </div>
 
-    <script src="app.js"></script>
+    <script src="/static/app.js"></script>
 </body>
 </html>
