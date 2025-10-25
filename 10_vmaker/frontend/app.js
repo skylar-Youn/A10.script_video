@@ -3764,6 +3764,16 @@ function playNextBlock() {
     }
 
     const block = timelineBlocks[currentTimelineIndex];
+
+    // 체크박스가 체크되지 않은 블록은 건너뛰기
+    const checkbox = block.querySelector('.subtitle-checkbox');
+    if (checkbox && !checkbox.checked) {
+        console.log(`건너뛰기: 블록 ${currentTimelineIndex + 1} (체크되지 않음)`);
+        currentTimelineIndex++;
+        playNextBlock();
+        return;
+    }
+
     const isGap = block.dataset.isGap === 'true';
 
     if (isGap) {
