@@ -233,57 +233,87 @@ async def render_full_project(project: FullProjectData):
             clip_path = os.path.join(session_temp_dir, f"clip_{i:04d}.mp4")
 
             try:
-                # 기본 비디오 추출
-                stream = ffmpeg.input(project.currentVideoPath, ss=start_time, t=duration)
+                # subprocess로 FFmpeg 명령어 직접 실행
+                import subprocess
 
-                # 비디오 스트림
-                video = stream.video
+                # 비디오 필터 구성
+                video_filters = []
 
-                # 오디오 스트림 (원본 비디오 오디오 또는 배경 음악)
-                audio_streams = []
+                # 1. 자막 텍스트 추가 (자막 블록인 경우)
+                if block['type'] == 'subtitle' and block.get('text'):
+                    subtitle_text = block['text'].replace("'", "'\\''").replace(":", "\\:")
 
-                # 원본 비디오 오디오 추가
-                if block['type'] == 'subtitle':
-                    audio_streams.append(stream.audio)
+                    # 자막 효과 설정
+                    sub_effects = project.subtitleEffects or {}
+                    font_size = sub_effects.get('fontSize', '1.5em').replace('em', '')
+                    try:
+                        font_size_px = int(float(font_size) * 24)
+                    except:
+                        font_size_px = 36
 
-                # 배경 음악이 있고 설정이 활성화된 경우
-                if project.currentAudioPath and os.path.exists(project.currentAudioPath):
-                    audio_settings = project.audioSettings or {}
-                    if audio_settings.get('enabled', False):
-                        # 배경 음악 추출 (같은 시간 구간)
-                        bg_audio = ffmpeg.input(project.currentAudioPath, ss=start_time, t=duration)
+                    font_color = sub_effects.get('fontColor', '#ffffff').replace('#', '')
+                    bg_color = sub_effects.get('bgColor', '#000000').replace('#', '')
+                    bg_opacity = sub_effects.get('bgOpacity', 80) / 100.0
 
-                        # 볼륨 조정
-                        volume = audio_settings.get('volume', 50) / 100.0
-                        bg_audio = bg_audio.filter('volume', volume)
+                    drawtext_filter = f"drawtext=text='{subtitle_text}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize={font_size_px}:fontcolor={font_color}:x=(w-text_w)/2:y=h-th-20:box=1:boxcolor={bg_color}@{bg_opacity}:boxborderw=10"
+                    video_filters.append(drawtext_filter)
 
-                        audio_streams.append(bg_audio)
+                # 비디오 필터 문자열
+                vf_string = ','.join(video_filters) if video_filters else None
 
-                # 오디오 믹싱
-                if len(audio_streams) > 1:
-                    audio = ffmpeg.filter(audio_streams, 'amix', inputs=len(audio_streams), duration='shortest')
-                elif len(audio_streams) == 1:
-                    audio = audio_streams[0]
+                # 오디오 처리 - 원본 비디오에 오디오가 있는지 확인
+                try:
+                    probe = ffmpeg.probe(project.currentVideoPath)
+                    has_audio = any(s['codec_type'] == 'audio' for s in probe['streams'])
+                except:
+                    has_audio = False
+
+                # FFmpeg 명령어 구성
+                cmd = [
+                    'ffmpeg',
+                    '-ss', str(start_time),
+                    '-t', str(duration),
+                    '-i', project.currentVideoPath
+                ]
+
+                # 오디오가 없으면 무음 추가 (input으로)
+                if not has_audio or block['type'] != 'subtitle':
+                    cmd.extend(['-f', 'lavfi', '-i', f'anullsrc=duration={duration}'])
+
+                # 비디오 필터 추가
+                if vf_string:
+                    cmd.extend(['-vf', vf_string])
+
+                # 오디오 매핑 및 코덱
+                if has_audio and block['type'] == 'subtitle':
+                    # 원본 오디오 사용
+                    cmd.extend(['-map', '0:v', '-map', '0:a'])
                 else:
-                    # 오디오가 없으면 무음 생성
-                    audio = ffmpeg.input('anullsrc', f='lavfi', t=duration)
+                    # 무음 사용
+                    cmd.extend(['-map', '0:v', '-map', '1:a', '-shortest'])
 
-                # 출력
-                output = ffmpeg.output(
-                    video, audio, clip_path,
-                    vcodec='libx264',
-                    acodec='aac',
-                    preset='ultrafast',
-                    crf=23,
-                    video_bitrate='2M',
-                    audio_bitrate='128k'
-                )
+                # 출력 옵션
+                cmd.extend([
+                    '-c:v', 'libx264',
+                    '-c:a', 'aac',
+                    '-preset', 'ultrafast',
+                    '-crf', '23',
+                    '-b:v', '2M',
+                    '-b:a', '128k',
+                    '-y',  # 덮어쓰기
+                    clip_path
+                ])
 
-                output.overwrite_output().run(capture_stdout=True, capture_stderr=True, quiet=True)
+                # FFmpeg 실행
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"FFmpeg error for clip {i}: {result.stderr}")
+                    raise Exception(f"FFmpeg failed: {result.stderr}")
+
                 clip_paths.append(clip_path)
 
-            except ffmpeg.Error as e:
-                print(f"Error processing clip {i}: {e.stderr.decode() if e.stderr else str(e)}")
+            except Exception as e:
+                print(f"Error processing clip {i}: {str(e)}")
                 raise HTTPException(status_code=500, detail=f"Failed to process clip {i}: {str(e)}")
 
         if not clip_paths:
