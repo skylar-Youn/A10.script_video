@@ -24,6 +24,7 @@ let audioSettings = {
 let isPlayingTimeline = false;
 let currentTimelineIndex = 0;
 let timelinePlaybackTimer = null;
+let currentPlayingAudioFilename = ''; // 타임라인 재생 중 현재 오디오 파일 추적
 
 // 자막 효과 설정
 let subtitleEffects = {
@@ -3440,6 +3441,7 @@ function playSubtitleTimeline() {
 
     isPlayingTimeline = true;
     currentTimelineIndex = 0;
+    currentPlayingAudioFilename = ''; // 오디오 추적 리셋
 
     // 버튼 상태 변경
     const stopBtn = document.getElementById('stopTimelineBtn');
@@ -3495,23 +3497,22 @@ function playSubtitleWithVideo(subtitle, duration) {
     if (videoPlayer) {
         // 비디오가 이미 로드되어 있으면 재생
         if (currentVideoFilename === subtitle.videoFilename) {
-            videoPlayer.currentTime = subtitle.start;
+            // 같은 비디오면 현재 위치에서 계속 재생하거나, start 위치로 이동
+            // 연속된 자막이면 현재 위치에서 계속, 아니면 start 위치로
+            if (videoPlayer.paused || Math.abs(videoPlayer.currentTime - subtitle.start) > 0.5) {
+                videoPlayer.currentTime = subtitle.start;
+            }
             videoPlayer.play();
-
-            // duration 후 일시정지
-            setTimeout(() => {
-                videoPlayer.pause();
-            }, duration);
+            console.log(`🎬 영상 연속 재생: ${subtitle.videoFilename} (위치: ${videoPlayer.currentTime.toFixed(2)}s)`);
         } else {
             // 다른 비디오면 로드
             videoPlayer.src = `${API_BASE}/uploads/${subtitle.videoFilename}`;
             videoPlayer.currentTime = subtitle.start;
             videoPlayer.play();
-
-            setTimeout(() => {
-                videoPlayer.pause();
-            }, duration);
+            console.log(`🎬 새 영상 재생: ${subtitle.videoFilename} (시작: ${subtitle.start}s)`);
         }
+
+        // duration 후에도 영상을 멈추지 않음 - 자막 없는 구간도 영상 끝까지 재생
     }
 
     showStatus(`▶️ 영상 + 자막 재생 중 (${currentTimelineIndex + 1}/${subtitles.length})`, 'info');
@@ -3522,18 +3523,23 @@ function playSubtitleAudio(subtitle, duration) {
     const audioPlayer = document.getElementById('audioPlayer');
 
     if (audioPlayer) {
-        // 음악 로드 및 재생
-        audioPlayer.src = `${API_BASE}/uploads/${subtitle.audioFilename}`;
-        audioPlayer.currentTime = 0; // 음악은 처음부터 재생
-        audioPlayer.play();
-
-        // duration 후 일시정지
-        setTimeout(() => {
-            audioPlayer.pause();
+        // 이전 자막과 같은 음악이면 연속 재생, 다른 음악이면 새로 시작
+        if (currentPlayingAudioFilename !== subtitle.audioFilename) {
+            // 다른 음악 파일이면 새로 로드
+            audioPlayer.src = `${API_BASE}/uploads/${subtitle.audioFilename}`;
             audioPlayer.currentTime = 0;
-        }, duration);
+            currentPlayingAudioFilename = subtitle.audioFilename;
+            console.log(`🎵 새 음악 재생: ${subtitle.audioFilename}`);
+        } else {
+            console.log(`🎵 음악 연속 재생: ${subtitle.audioFilename} (현재 위치: ${audioPlayer.currentTime.toFixed(2)}s)`);
+        }
 
-        console.log(`🎵 음악 재생: ${subtitle.audioFilename}`);
+        // 음악 재생 (이미 재생 중이면 계속, 아니면 시작)
+        if (audioPlayer.paused) {
+            audioPlayer.play();
+        }
+
+        // duration 후에도 음악을 멈추지 않음 (다음 자막에서 처리)
     }
 }
 
@@ -3585,6 +3591,7 @@ function displayCurrentSubtitle(subtitle) {
 function stopSubtitleTimeline() {
     isPlayingTimeline = false;
     currentTimelineIndex = 0;
+    currentPlayingAudioFilename = ''; // 오디오 추적 리셋
 
     // 타이머 정리
     if (timelinePlaybackTimer) {
