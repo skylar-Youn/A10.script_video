@@ -2545,18 +2545,26 @@ function createTimelineBlocks() {
     const videoPlayer = document.getElementById('videoPlayer');
     const videoDuration = videoPlayer && videoPlayer.duration && !isNaN(videoPlayer.duration) ? videoPlayer.duration : 0;
 
-    // 공백 블록 배열 초기화
+    // 기존 gapBlocks 백업 (미디어 정보 유지용)
+    const oldGapBlocks = [...gapBlocks];
     gapBlocks = [];
-    currentGapId = 0;
+    let nextGapId = currentGapId;
+
+    // 기존 gap 찾기 헬퍼 함수 (시간 범위로 찾음)
+    const findExistingGap = (start, end) => {
+        return oldGapBlocks.find(g => Math.abs(g.start - start) < 0.01 && Math.abs(g.end - end) < 0.01);
+    };
 
     if (subtitles.length === 0) {
         // 자막이 없으면 전체 영상 구간을 공백으로
         if (videoDuration > 0) {
-            const gapInfo = { id: ++currentGapId, start: 0, end: videoDuration, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
+            const existingGap = findExistingGap(0, videoDuration);
+            const gapInfo = existingGap || { id: ++nextGapId, start: 0, end: videoDuration, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
             gapBlocks.push(gapInfo);
             const gapBlock = createGapBlock(gapInfo);
             blocks.push({ startTime: 0, endTime: videoDuration, element: gapBlock, isGap: true });
         }
+        currentGapId = nextGapId;
         return blocks;
     }
 
@@ -2565,7 +2573,8 @@ function createTimelineBlocks() {
     subtitles.forEach((sub, index) => {
         // 이전 구간과 현재 자막 사이에 공백이 있으면 공백 블록 추가
         if (sub.start > currentTime + 0.01) { // 0.01초 이상 차이
-            const gapInfo = { id: ++currentGapId, start: currentTime, end: sub.start, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
+            const existingGap = findExistingGap(currentTime, sub.start);
+            const gapInfo = existingGap || { id: ++nextGapId, start: currentTime, end: sub.start, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
             gapBlocks.push(gapInfo);
             const gapBlock = createGapBlock(gapInfo);
             blocks.push({ startTime: currentTime, endTime: sub.start, element: gapBlock, isGap: true });
@@ -2580,12 +2589,14 @@ function createTimelineBlocks() {
 
     // 마지막 자막 이후 공백
     if (videoDuration > 0 && currentTime < videoDuration - 0.01) {
-        const gapInfo = { id: ++currentGapId, start: currentTime, end: videoDuration, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
+        const existingGap = findExistingGap(currentTime, videoDuration);
+        const gapInfo = existingGap || { id: ++nextGapId, start: currentTime, end: videoDuration, hasVideo: false, videoFilename: '', hasAudio: false, audioFilename: '' };
         gapBlocks.push(gapInfo);
         const gapBlock = createGapBlock(gapInfo);
         blocks.push({ startTime: currentTime, endTime: videoDuration, element: gapBlock, isGap: true });
     }
 
+    currentGapId = nextGapId;
     return blocks;
 }
 
