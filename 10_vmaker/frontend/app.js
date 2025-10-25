@@ -25,6 +25,7 @@ let isPlayingTimeline = false;
 let currentTimelineIndex = 0;
 let timelinePlaybackTimer = null;
 let currentPlayingAudioFilename = ''; // 타임라인 재생 중 현재 오디오 파일 추적
+let timelineBlocks = []; // DOM 블록 배열 (자막 + 공백)
 
 // 자막 효과 설정
 let subtitleEffects = {
@@ -2564,10 +2565,64 @@ function renderTimeline() {
         timeline.appendChild(block);
     });
 
+    // 마지막 자막 이후 영상 종료까지 공백 블록 추가
+    addGapBlocksToTimeline(timeline);
+
     updateTimelineInfo();
 
     // 드래그 앤 드롭 이벤트 설정
     setupDragAndDrop();
+}
+
+// 타임라인에 공백 블록 추가 (마지막 자막 ~ 영상 종료)
+function addGapBlocksToTimeline(timeline) {
+    const videoPlayer = document.getElementById('videoPlayer');
+
+    // 영상이 로드되지 않았으면 건너뜀
+    if (!videoPlayer || !videoPlayer.duration || isNaN(videoPlayer.duration)) {
+        return;
+    }
+
+    const videoDuration = videoPlayer.duration;
+
+    if (subtitles.length === 0) {
+        // 자막이 없으면 전체 영상 구간을 공백으로 표시
+        const gapBlock = createGapBlock(0, videoDuration, currentVideoFilename);
+        timeline.appendChild(gapBlock);
+    } else {
+        // 마지막 자막 이후 공백 확인
+        const lastSubtitle = subtitles[subtitles.length - 1];
+
+        if (lastSubtitle.end < videoDuration - 0.1) { // 0.1초 이상 차이가 있을 때만
+            const gapBlock = createGapBlock(lastSubtitle.end, videoDuration, currentVideoFilename);
+            timeline.appendChild(gapBlock);
+        }
+    }
+}
+
+// 공백 블록 생성
+function createGapBlock(startTime, endTime, videoFilename) {
+    const block = document.createElement('div');
+    block.className = 'subtitle-block gap-block';
+    block.dataset.isGap = 'true';
+    block.dataset.start = startTime;
+    block.dataset.end = endTime;
+    block.dataset.videoFilename = videoFilename;
+
+    const duration = endTime - startTime;
+
+    block.innerHTML = `
+        <div style="opacity: 0.5; pointer-events: none;">⬜</div>
+        <div class="subtitle-info" style="opacity: 0.7;">
+            <div class="subtitle-time">${formatTime(startTime)} - ${formatTime(endTime)}</div>
+            <div class="subtitle-text-container">
+                <div class="subtitle-text" style="font-style: italic; color: #888;">[영상 계속 재생]</div>
+            </div>
+        </div>
+        <div class="subtitle-duration" style="opacity: 0.7;">${duration.toFixed(1)}s</div>
+    `;
+
+    return block;
 }
 
 // ==================== 드래그 앤 드롭 기능 ====================
@@ -3434,8 +3489,12 @@ function removeAudioFromSubtitles() {
 
 // 자막 타임라인 재생
 function playSubtitleTimeline() {
-    if (subtitles.length === 0) {
-        showStatus('재생할 자막이 없습니다.', 'error');
+    // DOM에서 모든 타임라인 블록 가져오기 (자막 + 공백)
+    const timeline = document.getElementById('timeline');
+    timelineBlocks = Array.from(timeline.querySelectorAll('.subtitle-block'));
+
+    if (timelineBlocks.length === 0) {
+        showStatus('재생할 항목이 없습니다.', 'error');
         return;
     }
 
@@ -3449,23 +3508,45 @@ function playSubtitleTimeline() {
         stopBtn.style.display = 'inline-block';
     }
 
-    showStatus('자막 타임라인 재생 시작...', 'info');
+    showStatus('타임라인 재생 시작...', 'info');
 
-    // 첫 번째 자막부터 재생
-    playNextSubtitle();
+    // 첫 번째 블록부터 재생
+    playNextBlock();
 }
 
-// 다음 자막 재생
-function playNextSubtitle() {
-    if (!isPlayingTimeline || currentTimelineIndex >= subtitles.length) {
+// 다음 블록 재생 (자막 또는 공백)
+function playNextBlock() {
+    if (!isPlayingTimeline || currentTimelineIndex >= timelineBlocks.length) {
         stopSubtitleTimeline();
         return;
     }
 
-    const subtitle = subtitles[currentTimelineIndex];
+    const block = timelineBlocks[currentTimelineIndex];
+    const isGap = block.dataset.isGap === 'true';
+
+    if (isGap) {
+        // 공백 블록 재생
+        playGapBlock(block);
+    } else {
+        // 자막 블록 재생
+        const subtitleId = parseInt(block.dataset.id);
+        const subtitle = subtitles.find(sub => sub.id === subtitleId);
+
+        if (subtitle) {
+            playSubtitleBlock(subtitle);
+        } else {
+            // 자막을 찾을 수 없으면 다음으로
+            currentTimelineIndex++;
+            playNextBlock();
+        }
+    }
+}
+
+// 자막 블록 재생
+function playSubtitleBlock(subtitle) {
     const duration = (subtitle.end - subtitle.start) * 1000; // ms로 변환
 
-    console.log(`재생 중: 자막 ${currentTimelineIndex + 1}/${subtitles.length} - "${subtitle.text}"`);
+    console.log(`재생 중: 자막 ${currentTimelineIndex + 1}/${timelineBlocks.length} - "${subtitle.text}"`);
 
     // 자막 표시
     displayCurrentSubtitle(subtitle);
@@ -3483,10 +3564,44 @@ function playNextSubtitle() {
         playSubtitleTextOnly(subtitle, duration);
     }
 
-    // 다음 자막으로 이동 (duration 후)
+    // 다음 블록으로 이동 (duration 후)
     timelinePlaybackTimer = setTimeout(() => {
         currentTimelineIndex++;
-        playNextSubtitle();
+        playNextBlock();
+    }, duration);
+}
+
+// 공백 블록 재생 (영상만 계속 재생)
+function playGapBlock(block) {
+    const start = parseFloat(block.dataset.start);
+    const end = parseFloat(block.dataset.end);
+    const videoFilename = block.dataset.videoFilename;
+    const duration = (end - start) * 1000; // ms로 변환
+
+    console.log(`재생 중: 공백 구간 ${currentTimelineIndex + 1}/${timelineBlocks.length} - ${formatTime(start)} ~ ${formatTime(end)}`);
+
+    // 자막 숨기기
+    const subtitleOverlay = document.getElementById('subtitleOverlay');
+    if (subtitleOverlay) {
+        subtitleOverlay.style.display = 'none';
+    }
+
+    // 영상 재생
+    const videoPlayer = document.getElementById('videoPlayer');
+    if (videoPlayer && currentVideoFilename === videoFilename) {
+        if (videoPlayer.paused || Math.abs(videoPlayer.currentTime - start) > 0.5) {
+            videoPlayer.currentTime = start;
+        }
+        videoPlayer.play();
+        console.log(`🎬 공백 구간 영상 재생: ${videoFilename} (위치: ${videoPlayer.currentTime.toFixed(2)}s)`);
+    }
+
+    showStatus(`▶️ 영상 재생 중 (${currentTimelineIndex + 1}/${timelineBlocks.length}) - 자막 없음`, 'info');
+
+    // 다음 블록으로 이동 (duration 후)
+    timelinePlaybackTimer = setTimeout(() => {
+        currentTimelineIndex++;
+        playNextBlock();
     }, duration);
 }
 
