@@ -288,7 +288,7 @@ function updateSubtitleStyle() {
         updateSubtitleOverlay(player.currentTime);
     }
 
-    showStatus('자막 효과가 적용되었습니다.', 'success');
+    showStatus('전역 효과가 변경되었습니다. 선택한 자막에 적용하려면 "✨ 선택한 자막에 적용" 버튼을 클릭하세요.', 'info');
 }
 
 // 자막 효과 초기화
@@ -1973,6 +1973,12 @@ function loadState() {
             player.src = `${API_BASE}/uploads/${currentVideoFilename}`;
             document.getElementById('playerSection').style.display = 'block';
 
+            // 비디오 드래그 아이콘 표시
+            const videoDragIcon = document.getElementById('videoDragIcon');
+            if (videoDragIcon) {
+                videoDragIcon.style.display = 'inline-block';
+            }
+
             // 비디오 메타데이터 업데이트
             player.onloadedmetadata = () => {
                 document.getElementById('duration').textContent = formatTime(player.duration);
@@ -2414,6 +2420,12 @@ async function uploadVideo() {
             player.src = `${API_BASE}/uploads/${data.filename}`;
             document.getElementById('playerSection').style.display = 'block';
 
+            // 비디오 드래그 아이콘 표시
+            const videoDragIcon = document.getElementById('videoDragIcon');
+            if (videoDragIcon) {
+                videoDragIcon.style.display = 'inline-block';
+            }
+
             // 비디오 메타데이터 업데이트
             player.onloadedmetadata = () => {
                 document.getElementById('duration').textContent = formatTime(player.duration);
@@ -2552,6 +2564,108 @@ function renderTimeline() {
     });
 
     updateTimelineInfo();
+
+    // 드래그 앤 드롭 이벤트 설정
+    setupDragAndDrop();
+}
+
+// ==================== 드래그 앤 드롭 기능 ====================
+
+// 드래그 앤 드롭 초기화
+function setupDragAndDrop() {
+    // 비디오 드래그 아이콘
+    const videoDragIcon = document.getElementById('videoDragIcon');
+    if (videoDragIcon) {
+        videoDragIcon.ondragstart = (e) => {
+            e.dataTransfer.setData('mediaType', 'video');
+            e.dataTransfer.effectAllowed = 'copy';
+            videoDragIcon.style.opacity = '0.5';
+        };
+
+        videoDragIcon.ondragend = (e) => {
+            videoDragIcon.style.opacity = '1';
+        };
+    }
+
+    // 음악 드래그 아이콘
+    const audioDragIcon = document.getElementById('audioDragIcon');
+    if (audioDragIcon) {
+        audioDragIcon.ondragstart = (e) => {
+            e.dataTransfer.setData('mediaType', 'audio');
+            e.dataTransfer.effectAllowed = 'copy';
+            audioDragIcon.style.opacity = '0.5';
+        };
+
+        audioDragIcon.ondragend = (e) => {
+            audioDragIcon.style.opacity = '1';
+        };
+    }
+
+    // 모든 자막 블록에 드롭 이벤트 설정
+    const subtitleBlocks = document.querySelectorAll('.subtitle-block');
+    subtitleBlocks.forEach(block => {
+        block.ondragover = (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            block.style.background = 'rgba(76, 175, 80, 0.2)'; // 드롭 가능 영역 표시
+        };
+
+        block.ondragleave = (e) => {
+            block.style.background = '';
+        };
+
+        block.ondrop = (e) => {
+            e.preventDefault();
+            block.style.background = '';
+
+            const mediaType = e.dataTransfer.getData('mediaType');
+            const subtitleId = parseInt(block.dataset.id);
+
+            if (mediaType === 'video') {
+                applyVideoToSubtitle(subtitleId);
+            } else if (mediaType === 'audio') {
+                applyAudioToSubtitle(subtitleId);
+            }
+        };
+    });
+}
+
+// 단일 자막에 영상 적용
+function applyVideoToSubtitle(subtitleId) {
+    if (!currentVideoFilename) {
+        showStatus('먼저 비디오를 업로드해주세요.', 'error');
+        return;
+    }
+
+    const subtitle = subtitles.find(sub => sub.id === subtitleId);
+    if (!subtitle) return;
+
+    subtitle.hasVideo = true;
+    subtitle.videoFilename = currentVideoFilename;
+
+    renderTimeline();
+    saveState();
+
+    showStatus(`"${subtitle.text.substring(0, 20)}..." 자막에 영상이 적용되었습니다.`, 'success');
+}
+
+// 단일 자막에 음악 적용
+function applyAudioToSubtitle(subtitleId) {
+    if (!currentAudioFilename) {
+        showStatus('먼저 음악을 업로드해주세요.', 'error');
+        return;
+    }
+
+    const subtitle = subtitles.find(sub => sub.id === subtitleId);
+    if (!subtitle) return;
+
+    subtitle.hasAudio = true;
+    subtitle.audioFilename = currentAudioFilename;
+
+    renderTimeline();
+    saveState();
+
+    showStatus(`"${subtitle.text.substring(0, 20)}..." 자막에 음악이 적용되었습니다.`, 'success');
 }
 
 // 자막 텍스트 편집

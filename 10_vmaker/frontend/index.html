@@ -44,7 +44,14 @@
             <!-- 비디오 플레이어 -->
             <section class="player-section" id="playerSection" style="display: none;">
                 <div class="player-header">
-                    <h3>비디오 미리보기</h3>
+                    <h3>
+                        비디오 미리보기
+                        <span id="videoDragIcon" draggable="true"
+                              style="cursor: move; margin-left: 10px; padding: 5px 10px; background: #4CAF50; color: white; border-radius: 4px; font-size: 0.9em; display: none;"
+                              title="자막으로 드래그하여 영상 적용">
+                            🎬 드래그
+                        </span>
+                    </h3>
                     <div class="player-controls-group">
                         <div class="aspect-ratio-controls">
                             <button onclick="setAspectRatio('youtube')" class="btn btn-secondary aspect-btn active" id="btnYoutube">
@@ -86,7 +93,14 @@
                 <!-- 음악 플레이어 섹션 -->
                 <div id="audioPlayerSection" class="audio-player-section" style="display: none; margin-top: 15px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                        <h4 style="margin: 0;">🎵 배경 음악</h4>
+                        <h4 style="margin: 0;">
+                            🎵 배경 음악
+                            <span id="audioDragIcon" draggable="true"
+                                  style="cursor: move; margin-left: 10px; padding: 5px 10px; background: #FF9800; color: white; border-radius: 4px; font-size: 0.8em;"
+                                  title="자막으로 드래그하여 음악 적용">
+                                🎵 드래그
+                            </span>
+                        </h4>
                         <button onclick="removeAudio()" class="btn btn-danger" style="padding: 4px 12px; font-size: 0.85em;">
                             🗑️ 제거
                         </button>
